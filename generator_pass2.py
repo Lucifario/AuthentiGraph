@@ -7,7 +7,7 @@ import copy
 import ollama
 
 INPUT_DIR = "data/processed_graphs/"
-OLLAMA_MODEL = "llama3"  # Your local ollama model
+OLLAMA_MODEL = "llama3"
 
 
 def naive_sentence_split(text):
@@ -45,17 +45,14 @@ def process_pass_2():
             print("  -> No adversarial_reviews field. Run Pass 1 first.")
             continue
 
-        # FIX 1: Correct key is 'human_ground_truth', not 'human_reviews'
         human_reviews = data.get("human_ground_truth", [])
         if not human_reviews:
             print("  -> No human reviews found. Skipping.")
             continue
 
-        # FIX 2: Check each mode independently for safe resume
         existing_modes = {r.get("mode") for r in data["adversarial_reviews"]}
         changed = False
 
-        # Use the first human review as the base for Modes 3, 4, 5
         base_human = human_reviews[0]
         human_text = " ".join(
             s["text"] for s in base_human.get("review_sentences", [])
@@ -66,13 +63,9 @@ def process_pass_2():
             continue
 
         try:
-            # ── MODE 3: Style-Assisted ────────────────────────────────────────
-            # FIX 3: Two-step process — extract claims as bullets first,
-            # then expand to prose. Logic is human, language is AI.
             if "Style-Assisted" not in existing_modes:
                 print("  -> Generating Mode 3: Style-Assisted...")
 
-                # Step 1: Extract core claims as bullet points
                 extract_prompt = (
                     f"Extract the key technical points from this peer review as a "
                     f"numbered list. Each point should be one sentence only. "
@@ -84,7 +77,6 @@ def process_pass_2():
                     "You return only a numbered list of technical points."
                 )
 
-                # Step 2: Expand bullets into fluent academic prose
                 expand_prompt = (
                     f"You are writing a peer review for an AI conference paper. "
                     f"Convert these rough reviewer notes into a complete, formal, "
@@ -111,7 +103,6 @@ def process_pass_2():
             else:
                 print("  -> Mode 3 already exists. Skipping.")
 
-            # ── MODE 4: Spliced (Hybrid Ground Truth) ─────────────────────────
             if "Spliced" not in existing_modes:
                 print("  -> Generating Mode 4: Spliced...")
 
@@ -127,31 +118,27 @@ def process_pass_2():
                 )
                 ai_sentences = naive_sentence_split(m4_text)[:3]
 
-                # FIX 5: Deep copy to avoid mutating the original human review
                 spliced_sentences = copy.deepcopy(base_human["review_sentences"])
 
-                # FIX 4: Randomize insertion point to prevent position as a
-                # spurious feature the classifier could exploit
                 insert_idx = random.randint(1, max(1, len(spliced_sentences) - 2))
                 for i, ai_s in enumerate(ai_sentences):
                     spliced_sentences.insert(insert_idx + i, {
                         "sentence_id":  f"spliced_ai_{i}",
                         "text":         ai_s,
-                        "author_label": "AI_INSERTED"  # Hybrid ground truth
+                        "author_label": "AI_INSERTED"
                     })
 
                 data["adversarial_reviews"].append({
                     "mode":             "Spliced",
                     "generation_model": "Hybrid",
                     "generation_role":  "splicer",
-                    "splice_insert_idx": insert_idx,  # Record for analysis
+                    "splice_insert_idx": insert_idx,
                     "review_sentences": spliced_sentences
                 })
                 changed = True
             else:
                 print("  -> Mode 4 already exists. Skipping.")
 
-            # ── MODE 5: Polarity-Flipped ──────────────────────────────────────
             if "Polarity-Flipped" not in existing_modes:
                 print("  -> Generating Mode 5: Polarity-Flipped...")
 

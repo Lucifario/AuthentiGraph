@@ -1,15 +1,3 @@
-"""
-semantic_scholar_pass.py — Stage 3: Bibliography Verification
-Reads all base_graph JSONs, checks each citation against Semantic Scholar,
-writes semantic_scholar_verified: true/false back in place.
-Also computes per-paper phantom_rate and stores it in paper_metadata.
-
-Run once after dataset_builder.py, before embed_v2.py.
-Output: updates existing JSONs in-place + writes results/phantom_analysis.json
-
-No prereqs beyond: pip install requests
-"""
-
 import os
 import json
 import glob
@@ -22,8 +10,6 @@ INPUT_DIR   = "data/processed_graphs/"
 RESULTS_DIR = "results/"
 RESULTS_OUT = "results/phantom_analysis.json"
 
-# 3 seconds between calls — safely under the SS public API limit of 100/5min.
-# Do not reduce this without an API key.
 RATE_LIMIT_SLEEP = 3
 
 
@@ -32,26 +18,22 @@ def check_semantic_scholar(raw_text):
     Pings Semantic Scholar API.
     Returns True if found, False if phantom, None if API error (treat as unknown).
     """
-    # Take first 100 chars, strip noise, URL-encode properly (from your code)
     clean_query = urllib.parse.quote(raw_text[:100].strip())
     url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={clean_query}&limit=1"
 
     try:
-        # User-Agent header — polite to the API (from your code)
         headers = {"User-Agent": "AuthentiGraph-Research-Script/1.0"}
         resp = requests.get(url, headers=headers, timeout=5)
 
         if resp.status_code == 429:
             print("    [!] Rate limited. Sleeping 30s...")
             time.sleep(30)
-            return check_semantic_scholar(raw_text)  # Retry once
+            return check_semantic_scholar(raw_text)
 
         if resp.status_code != 200:
             return None
 
         data = resp.json()
-        # Check the 'data' array directly — more reliable than checking 'total'
-        # since total can be non-zero with an empty data array in edge cases
         return len(data.get("data", [])) > 0
 
     except Exception as e:
@@ -86,7 +68,6 @@ def process_file(filepath):
     for citation in bibliography:
         current = citation.get("semantic_scholar_verified")
 
-        # Safe resume — skip already verified entries
         if current is not None:
             if current is False:
                 phantoms += 1
@@ -107,7 +88,6 @@ def process_file(filepath):
 
         time.sleep(RATE_LIMIT_SLEEP)
 
-    # Compute and store phantom_rate in paper_metadata for easy access at training time
     verified_total = sum(
         1 for c in bibliography if c.get("semantic_scholar_verified") is not None
     )

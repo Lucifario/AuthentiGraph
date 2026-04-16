@@ -1,27 +1,3 @@
-"""
-spectral_baseline.py — Stage 5: Hand-Crafted Feature Baseline
-Run BEFORE HGT training to establish what structural features alone can achieve.
-
-Input:  data/processed_graphs/*.json
-        (adversarial_reviews needed for AI class; human-only stats saved if absent)
-Output: results/spectral_baseline.json + console table
-
-Features:
-  1. spread_ratio      — unique paper blocks referenced / review sentence count
-  2. phantom_rate      — phantom citations / total citations (paper-level)
-  3. hub_focus         — max references to one block / review sentence count
-  4. relation_entropy  — Shannon entropy over sentence length distribution
-  5. review_length     — number of sentences
-  6. liang_alpha       — mean burstiness score (human reviews only; AI defaults 1.0)
-  7. spectral_gap      — Fiedler value of review-paper bipartite graph
-  8. clustering_coeff  — average clustering coefficient
-
-Baseline classifier: RandomForestClassifier with feature importances + ROC-AUC.
-Separation metric: Cohen's d between human and AI per feature.
-
-No prereqs beyond: pip install numpy networkx scikit-learn
-"""
-
 import os
 import json
 import glob
@@ -42,9 +18,6 @@ FEATURE_NAMES = [
     "review_length", "liang_alpha", "spectral_gap", "clustering_coeff",
 ]
 
-
-# ── Utilities ─────────────────────────────────────────────────────────────────
-
 def spectral_gap(G):
     """Fiedler value of the largest connected component. Returns 0.0 if < 4 nodes."""
     if G.number_of_nodes() < 4:
@@ -57,7 +30,6 @@ def spectral_gap(G):
     eigvals = np.sort(np.real(np.linalg.eigvals(L)))
     return round(float(eigvals[1]), 5)
 
-
 def shannon_entropy(values):
     """Shannon entropy over a list of numeric values via histogram."""
     if not values:
@@ -66,7 +38,6 @@ def shannon_entropy(values):
     total  = sum(counts.values())
     probs  = [v / total for v in counts.values()]
     return round(-sum(p * math.log2(p) for p in probs if p > 0), 4)
-
 
 def cohens_d(a, b):
     """Cohen's d effect size between two arrays."""
@@ -88,9 +59,6 @@ def build_block_text_map(paper_dom):
                 block_map[bid] = txt
     return block_map
 
-
-# ── Feature extraction ────────────────────────────────────────────────────────
-
 def extract_features(review, paper_data):
     """
     Extracts structural features for one review.
@@ -104,11 +72,6 @@ def extract_features(review, paper_data):
     paper_dom  = paper_data.get("paper_DOM", {})
     paper_meta = paper_data.get("paper_metadata", {})
     block_map  = build_block_text_map(paper_dom)
-
-    # ── Build bipartite review-paper graph ────────────────────────────────────
-    # Heuristic: sentence connects to a paper block if they share >= 3 words of
-    # length > 5 characters. Real edges added via cosine similarity in embed_v2.py;
-    # this gives a fast structural approximation for baseline analysis.
     G = nx.Graph()
     target_hits = Counter()
     tgt_nodes   = set()
@@ -128,26 +91,12 @@ def extract_features(review, paper_data):
 
     unique_targets = len(tgt_nodes)
     max_hits       = max(target_hits.values(), default=0)
-
-    # 1. Spread ratio — graph breadth
     spread_ratio = round(unique_targets / n_sentences, 4)
-
-    # 2. Phantom rate — paper-level, from Stage 3
     phantom_rate = paper_meta.get("phantom_rate", 0.0) or 0.0
-
-    # 3. Hub focus — concentration on single target
     hub_focus = round(max_hits / n_sentences, 4)
-
-    # 4. Relation entropy — sentence length distribution entropy
-    #    (captures uniformity: low entropy = suspicious uniformity = AI signal)
     lengths          = [len(s.get("text", "").split()) for s in sentences]
     relation_entropy = shannon_entropy(lengths)
-
-    # 5. Review length — raw sentence count
     review_length = n_sentences
-
-    # 6. Liang alpha — mean burstiness (human reviews have stored scores;
-    #    AI reviews default to 1.0 as they are expected to score high)
     alphas = [
         s.get("liang_alpha_score") for s in sentences
         if s.get("liang_alpha_score") is not None
@@ -155,43 +104,28 @@ def extract_features(review, paper_data):
     liang_alpha = round(np.mean(alphas), 4) if alphas else (
         0.05 if review.get("type") == "Human" else 1.0
     )
-
-    # 7. Spectral gap
     gap = spectral_gap(G)
-
-    # 8. Clustering coefficient
     clust = round(nx.average_clustering(G), 5)
-
     return [
         spread_ratio, phantom_rate, hub_focus, relation_entropy,
         review_length, liang_alpha, gap, clust,
     ]
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-
 def main():
     Path("results").mkdir(exist_ok=True)
-
     json_files = sorted(glob.glob(os.path.join(INPUT_DIR, "*.json")))
     print(f"Found {len(json_files)} graphs.\n")
-
     X, y, modes = [], [], []
-
     print("Extracting features...")
     for filepath in json_files:
         with open(filepath, 'r') as f:
             data = json.load(f)
-
-        # Human reviews — Class 0
         for rev in data.get("human_ground_truth", []):
             feats = extract_features(rev, data)
             if feats is not None:
                 X.append(feats)
                 y.append(0)
                 modes.append("Human")
-
-        # Adversarial reviews — Class 1
         for rev in data.get("adversarial_reviews", []):
             feats = extract_features(rev, data)
             if feats is not None:
@@ -210,8 +144,6 @@ def main():
     print(f"Dataset: {len(y)} reviews total")
     print(f"  Human : {sum(y==0)}")
     print(f"  AI    : {sum(y==1)}")
-
-    # ── Cohen's d separation table ────────────────────────────────────────────
     human_X = X[y == 0]
     ai_X    = X[y == 1]
 
@@ -238,8 +170,6 @@ def main():
                 "cohens_d":   d,
                 "effect":     effect,
             }
-
-        # ── Per-mode Cohen's d breakdown ──────────────────────────────────────
         print(f"\n{'─'*70}")
         print("Per-mode Cohen's d vs Human:")
         print(f"\n{'MODE':<22}", end="")
@@ -263,8 +193,6 @@ def main():
             print()
 
         print("\nCohen's d: >0.8 large | >0.5 medium | <0.2 small")
-
-        # ── Random Forest baseline ────────────────────────────────────────────
         print(f"\n{'='*50}")
         print("Random Forest Baseline Classifier")
         print(f"{'='*50}")
@@ -275,7 +203,7 @@ def main():
 
         clf = RandomForestClassifier(
             n_estimators=100,
-            class_weight="balanced",  # Handles class imbalance properly
+            class_weight="balanced",
             random_state=42
         )
         clf.fit(X_train, y_train)
@@ -300,8 +228,6 @@ def main():
         print("Run generator_pass1.py and generator_pass2.py first for AI class.")
         separation_stats = {}
         mode_stats = {}
-
-    # ── Save ──────────────────────────────────────────────────────────────────
     results = {
         "n_human":          int(sum(y == 0)),
         "n_ai":             int(sum(y == 1)),
@@ -312,7 +238,6 @@ def main():
     with open(RESULTS_OUT, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"\nResults saved to {RESULTS_OUT}")
-
 
 if __name__ == "__main__":
     main()

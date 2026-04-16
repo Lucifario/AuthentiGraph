@@ -12,14 +12,12 @@ DEVICE    = "mps" if torch.backends.mps.is_available() else "cpu"
 print(f"Loading {MODEL_ID} on {DEVICE}...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 
-# FIX 5: Don't use device_map= for MPS — load then move.
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID,
     dtype=torch.bfloat16,
 ).to(DEVICE)
 model.eval()
 
-# FIX 2: Use the actual OpenReviewer system prompt from the model card.
 REVIEW_FIELDS = """## Summary
 Briefly summarize the paper and its contributions.
 
@@ -74,7 +72,6 @@ def extract_paper_text(dom_data):
     """
     text_blocks = []
     for section in dom_data.get("sections", []):
-        # FIX 1: correct field name is 'title'
         header = section.get("title", "").lower()
         if any(kw in header for kw in ["abstract", "introduction", "background"]):
             for block in section.get("blocks", []):
@@ -82,7 +79,6 @@ def extract_paper_text(dom_data):
                 if text:
                     text_blocks.append(text)
 
-    # Fallback: if no abstract/intro found, take first 3 sections
     if not text_blocks:
         for section in dom_data.get("sections", [])[:3]:
             for block in section.get("blocks", []):
@@ -141,12 +137,10 @@ def process_pass_1():
         if "adversarial_reviews" not in data:
             data["adversarial_reviews"] = []
 
-        # FIX 3: Check each mode independently for safe resume.
         existing_modes = {r.get("mode") for r in data["adversarial_reviews"]}
         changed = False
 
         try:
-            # ── MODE 1: Zero-Shot ─────────────────────────────────────────────
             if "Zero-Shot" not in existing_modes:
                 print("  -> Generating Mode 1: Zero-Shot...")
                 zero_shot_text = generate_text([
@@ -170,14 +164,12 @@ def process_pass_1():
                 changed = True
             else:
                 print("  -> Mode 1 already exists. Skipping.")
-                # Retrieve the existing zero-shot text for Mode 2
                 zero_shot_text = " ".join(
                     s["text"] for r in data["adversarial_reviews"]
                     if r.get("mode") == "Zero-Shot"
                     for s in r.get("review_sentences", [])
                 )
 
-            # ── MODE 2: Paraphrased ───────────────────────────────────────────
             if "Paraphrased" not in existing_modes:
                 print("  -> Generating Mode 2: Paraphrased...")
                 paraphrased_text = generate_text([

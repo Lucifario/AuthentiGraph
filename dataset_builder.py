@@ -11,7 +11,6 @@ from dom_parser_v2 import process_pdf_with_grobid, parse_tei_xml
 from dotenv import load_dotenv
 load_dotenv()
 
-# --- CONFIGURATION ---
 PEERREAD_DIR          = "data/PeerRead/data/"
 OPENREVIEW_DIR        = "data/openreview_pdfs/"
 OUTPUT_DIR            = "data/processed_graphs/"
@@ -21,8 +20,6 @@ MIN_SENTENCES_PER_REVIEW = 3
 MIN_REVIEWS_PER_PAPER    = 2
 LIANG_ALPHA_THRESHOLD    = 0.95
 
-# openreview-py handles guest auth automatically.
-# v1 client for 2018-2020, v2 client for 2021.
 OPENREVIEW_SEARCH_QUERIES = [
     {"year": "2018", "venue_tag": "ICLR 2018 Poster",    "api": "v1"},
     {"year": "2018", "venue_tag": "ICLR 2018 Oral",      "api": "v1"},
@@ -36,9 +33,6 @@ OPENREVIEW_SEARCH_QUERIES = [
     {"year": "2021", "venue_tag": "ICLR 2021 Oral",      "api": "v2"},
 ]
 
-
-# ── Liang et al. (2024) Filter — Burstiness Proxy ────────────────────────────
-
 def compute_liang_alpha(text):
     """
     Fast statistical proxy for LLM influence via sentence length variance.
@@ -50,7 +44,7 @@ def compute_liang_alpha(text):
     sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text)
                  if len(s.strip()) > 5]
     if len(sentences) < 5:
-        return 0.0  # Too short to evaluate reliably — assume clean
+        return 0.0
 
     lengths = [len(s.split()) for s in sentences]
     mean_len = sum(lengths) / len(lengths)
@@ -60,12 +54,8 @@ def compute_liang_alpha(text):
     variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
     burstiness = (variance ** 0.5) / mean_len
 
-    # CoV < 0.4 = suspiciously uniform; > 0.9 = clearly bursty human
     alpha = max(0.0, min(1.0, (0.65 - burstiness) / 0.35))
     return round(alpha, 4)
-
-
-# ── Shared Utilities ──────────────────────────────────────────────────────────
 
 def naive_sentence_split(text):
     """
@@ -123,7 +113,7 @@ def build_and_save(paper_id, source, year, decision,
             "bibliography": bibliography,
         },
         "human_ground_truth": human_reviews,
-        "adversarial_reviews": [],  # Filled later by synthetic_generator.py
+        "adversarial_reviews": [],
         "heterogeneous_edges": hetero_edges,
     }
 
@@ -131,8 +121,6 @@ def build_and_save(paper_id, source, year, decision,
     with open(out_file, 'w') as f:
         json.dump(master_graph, f, indent=4)
 
-    # Delete downloaded PDFs after parsing to save disk space.
-    # PeerRead PDFs are part of the cloned repo — do not delete those.
     if source.startswith("OpenReview") and os.path.exists(pdf_path):
         os.remove(pdf_path)
         print(f"  -> PDF deleted after parsing.")
@@ -140,9 +128,6 @@ def build_and_save(paper_id, source, year, decision,
     print(f"  -> Saved. {len(sections)} sections | "
           f"{len(bibliography)} citations | {len(hetero_edges)} edges.")
     return True
-
-
-# ── PeerRead Ingestion ────────────────────────────────────────────────────────
 
 def load_peerread_human_reviews(json_path):
     with open(json_path, 'r') as f:
@@ -240,9 +225,6 @@ def ingest_peerread(counter, target):
         if ok:
             counter[0] += 1
 
-
-# ── OpenReview Ingestion ──────────────────────────────────────────────────────
-
 def get_or_client(api_version):
     """Returns an openreview-py guest client for the correct API version."""
     if api_version == "v1":
@@ -255,13 +237,10 @@ def fetch_openreview_submissions(query_config, max_papers=600):
     venue_tag = query_config['venue_tag']
     
     try:
-        # Initialize the correct client based on the 'api' flag in your config
         if query_config['api'] == 'v2':
             client = openreview.api.OpenReviewClient(baseurl='https://api2.openreview.net')
         else:
             client = openreview.Client(baseurl='https://api.openreview.net')
-            
-        # Fetch using the official python package (handles pagination automatically)
         notes = client.get_all_notes(content={"venue": venue_tag})
         return notes[:max_papers]
         
@@ -360,16 +339,9 @@ def download_pdf(url, dest_path):
     except Exception:
         return False
 
-
-# ── OpenReview Ingestion (V1 DirectReplies Bypass) ────────────────────────────
-
-# ── OpenReview Ingestion (V1 DirectReplies & Auth Bypass) ─────────────────────
-
 def ingest_openreview(counter, target):
     os.makedirs(OPENREVIEW_DIR, exist_ok=True)
     print("\nInitializing OpenReview V1 Client...")
-    
-    # Use your authenticated client here (Credentials Scrubbed for Security)
     client = openreview.Client(
         baseurl='https://api.openreview.net', 
         username=os.getenv('OPENREVIEW_USERNAME'),
@@ -385,29 +357,21 @@ def ingest_openreview(counter, target):
 
     for year, venue_id in venues:
         if counter[0] >= target: break
-
         print(f"\n=== OpenReview: {venue_id} ===")
         invitation = f'{venue_id}/-/Blind_Submission'
-        
         try:
-            # Your massive optimization: fetching papers and reviews in one shot
             submissions = client.get_all_notes(invitation=invitation, details='directReplies')
             print(f"  Successfully fetched {len(submissions)} submissions.")
         except Exception as e:
             print(f"  [Submission fetch error]: {e}")
             continue
-
         for sub in submissions:
             if counter[0] >= target: break
-            
             paper_id = sub.id
             if already_processed(paper_id):
                 counter[0] += 1
                 continue
-
             print(f"\n[{counter[0]+1}/{target}] OpenReview | {paper_id}")
-            
-            # 1. Extract Reviews from DirectReplies
             direct_replies = sub.details.get('directReplies', [])
             raw_reviews = [reply for reply in direct_replies if 'Official_Review' in reply['invitation']]
             
@@ -415,21 +379,15 @@ def ingest_openreview(counter, target):
                 print("    -> Skipped: 0 Official_Reviews found in payload.")
                 log_failure(paper_id, "No Official_Reviews found in directReplies")
                 continue
-
-            # 2. Extract Decision from DirectReplies
             decision = "Unknown"
             for reply in direct_replies:
                 if 'Decision' in reply['invitation']:
                     dec_val = reply.get('content', {}).get('decision', '')
                     decision = "Accepted" if "Accept" in str(dec_val) else "Rejected"
                     break
-
-            # 3. Parse Reviews into our Schema (with Burstiness Filter)
             human_reviews = []
             for idx, rev in enumerate(raw_reviews):
                 content = rev.get('content', {})
-                
-                # OpenReview field mapping
                 def get_val(field):
                     v = content.get(field, {})
                     return v.get("value", v) if isinstance(v, dict) else v
@@ -442,14 +400,11 @@ def ingest_openreview(counter, target):
 
                 full_text = "\n\n".join(text_parts)
                 if not full_text.strip(): continue
-                
-                # Split and apply sentence floor
                 sentences = naive_sentence_split(full_text)
                 if len(sentences) < MIN_SENTENCES_PER_REVIEW:
                     print(f"    -> Review {idx} dropped (Too short: {len(sentences)} sentences)")
                     continue
 
-                # Apply Burstiness proxy
                 alpha = compute_liang_alpha(full_text)
                 if alpha > LIANG_ALPHA_THRESHOLD:
                     print(f"    -> Review {idx} dropped (Burstiness: {alpha:.2f} > {LIANG_ALPHA_THRESHOLD})")
@@ -476,14 +431,10 @@ def ingest_openreview(counter, target):
                     })
 
                 human_reviews.append(review_obj)
-
-            # Ensure we meet the review floor after filtering
             if len(human_reviews) < MIN_REVIEWS_PER_PAPER:
                 print(f"    -> Skipped: Only {len(human_reviews)} valid reviews left (Need {MIN_REVIEWS_PER_PAPER}).")
                 log_failure(paper_id, f"Not enough reviews ({len(human_reviews)} < {MIN_REVIEWS_PER_PAPER})")
                 continue
-
-            # 4. Download PDF using the Authenticated Client
             print("    -> Downloading PDF via OpenReview V1 Client...")
             pdf_path = os.path.join(OPENREVIEW_DIR, f"{paper_id}.pdf")
             
@@ -492,13 +443,11 @@ def ingest_openreview(counter, target):
                     pdf_binary = client.get_pdf(id=paper_id)
                     with open(pdf_path, 'wb') as f:
                         f.write(pdf_binary)
-                    time.sleep(2.5) # Critical: Throttles to keep the S3 firewall happy
+                    time.sleep(2.5)
                 except Exception as e:
                     print(f"    -> Skipped: PDF Download Failed via Client API ({e})")
                     log_failure(paper_id, f"PDF download failed: {e}")
                     continue
-
-            # 5. Build and Save Graph
             print("    -> Running GROBID and Saving Graph...")
             ok = build_and_save(
                 paper_id                = paper_id,
@@ -512,8 +461,6 @@ def ingest_openreview(counter, target):
             
             if ok: 
                 counter[0] += 1
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def build_dataset_loop():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
