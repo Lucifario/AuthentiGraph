@@ -1,0 +1,2365 @@
+{
+    "paper_metadata": {
+        "paper_id": "390",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Accepted",
+        "total_reviews_available": 10
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_198e2209",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_8378a4ab",
+                        "type": "paragraph",
+                        "text": "While there have been significant recent advances in deep reinforcement learning (Mnih et al., 2015; Silver et al., 2016) and control (Lillicrap et al., 2015; Levine et al., 2016) , most efforts train a network that performs a fixed sequence of computations. Here we introduce an alternative in which an agent uses a metacontroller to choose which, and how many, computations to perform. It \"imagines\" the consequences of potential actions proposed by an actor module, and refines them internally, before executing them in the world. The metacontroller adaptively decides which expert models to use to evaluate candidate actions, and when it is time to stop imagining and act. The learned experts may be state transition models, action-value functions, or any other function that is relevant to the task, and can vary in their accuracy and computational costs. Our metacontroller's learned policy can exploit the diversity of its pool of experts by trading off between their costs and reliability, allowing it to automatically identify which expert is most worthwhile.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b27",
+                            "Citation_b21",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f0971a7e",
+                        "type": "paragraph",
+                        "text": "We draw inspiration from research in cognitive science and neuroscience which has studied how people use a meta-level of reasoning in order to control the use of their internal models and allocation of their computational resources. Evidence suggests that humans rely on rich generative models of the world for planning (Gl\u00e4scher et al., 2010) , control (Wolpert & Kawato, 1998) , and reasoning (Hegarty, 2004; Johnson-Laird, 2010; Battaglia et al., 2013) , that they adapt the amount of computation they perform with their model to the demands of the task (Hamrick et al., 2015) , and that they trade off between multiple strategies of varying quality (Lee et al., 2014; Lieder et al., 2014; Lieder & Griffiths, in revision; Kool et al., in press ).",
+                        "extracted_citations": [
+                            "Citation_b6",
+                            "Citation_b30",
+                            "Citation_b11",
+                            "Citation_b14",
+                            "Citation_b2",
+                            "Citation_b8",
+                            "Citation_b17",
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c99f74c9",
+                        "type": "paragraph",
+                        "text": "Our imagination-based optimization approach is related to classic artificial intelligence research on bounded-rational metareasoning (Horvitz, 1988; Russell & Wefald, 1991; Hay et al., 2012) , which formulates a meta-level MDP for selecting computations to perform, where the computations have a known cost. We also build on classic work by Schmidhuber (1990a; b) , which used an RL controller with a recurrent neural network (RNN) world model to evaluate and improve upon candidate controls online.",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_568cfe42",
+                        "type": "paragraph",
+                        "text": "Recently Andrychowicz et al. (2016) used a fully differentiable deep network to learn to perform gradient descent optimization, and Tamar et al. (2016) used a convolutional neural network for performing value iteration online in a deep learning setting. In other similar work, Fragkiadaki et al. (2015) made use of \"visual imaginations\" for action planning. Our work is also related to recent notions of \"conditional computation\" (Bengio, 2013; Bengio et al., 2015) , which adaptively modifies network structure online, and \"adaptive computation time\" (Graves, 2016) which allows for variable numbers of internal \"pondering\" iterations to optimize computational cost. Our work's key contribution is a framework for learning to optimize via a metacontroller which manages an adaptive, imagination-based optimization loop. This represents a hybrid RL system where a model-free metacontroller constructs its decisions using an actor policy to manage model-free and model-based experts. Our experimental results demonstrate that a metacontroller can flexibly allocate its computational resources on a case-by-case basis to achieve greater performance than more rigid fixed policy approaches, using more computation when it is required by a more difficult task.",
+                        "extracted_citations": [
+                            "Citation_b0",
+                            "Citation_b28",
+                            "Citation_b5",
+                            "Citation_b4",
+                            "Citation_b3"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_79c97833",
+                "title": "MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_e2a02f17",
+                        "type": "paragraph",
+                        "text": "We consider a class of fully observed, one-shot decision-making tasks (i.e., continuous, contextual bandits). The performance objective is to find a control c \u2208 C which, given an initial state x \u2208 X , minimizes some loss function L between a known future goal state x * and the result of a forward process, f (x, c). The performance loss L P is the (negative) utility of executing the control in the world, and is related to the optimal solution c * \u2208 C as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_62e05581",
+                        "type": "paragraph",
+                        "text": "(1) c * = arg min c L P (x * , x, c).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7c9fa4df",
+                        "type": "paragraph",
+                        "text": "However, (2) defines only the optimal solution-not how to achieve it.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4fea40b9",
+                "title": "OPTIMIZING PERFORMANCE",
+                "blocks": [
+                    {
+                        "block_id": "b_5a94758b",
+                        "type": "paragraph",
+                        "text": "We consider an iterative optimization procedure that takes x * and x as input and returns an approximation of c * in order to minimize (1). The optimization procedure consists of a controller, which iteratively proposes controls, and an expert, which evaluates how good those controls are. On the n th iteration, the controller \u03c0 C : X \u00d7 X \u00d7 H \u2192 C takes as input, x * , x, and information about the history of previously proposed controls and evaluations h n-1 \u2208 H, and returns a proposed control c n that aims to improve on previously proposed controls. An expert E : X \u00d7 X \u00d7 C \u2192 E takes the proposed control and provides some information e n \u2208 E about the quality of the control, which we call an opinion. This opinion is added to the history, which is passed back to the controller, and the loop continues for N steps, after which a final control c N is proposed.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_16d68793",
+                        "type": "paragraph",
+                        "text": "Standard optimization methods use principled heuristics for proposing controls. In gradient descent, for example, controls are proposed by adjusting c n in the direction of the gradient of the reward with respect to the control. In Bayesian optimization, controls are proposed based on selection criteria such as \"probability of improvement\", or a meta-selection criterion for choosing among Figure 1 : Metacontroller architecture and task. A: All components are part of the metacontroller agent (box) except the scene and the world, which are part of the agent's environment. The manager takes the scene and history and determines which action to take (i.e., whether to execute or ponder, and with what expert to ponder with), denoted by the orange lines. The controller takes the scene and history and computes a control (e.g., the force to apply to a spaceship), denoted by the blue lines. The orange line ending with a circle at the switch reflects the fact that the manager's action affects the behavior of the switch, which routes the controller's control to either an expert (e.g., a simulation model of the spaceship's trajectory, an action-value function, etc.) or the world. The outcome and reward from the expert, along with the history, action, and control, are fed into the memory, which produces the next history. The history is fed back to the controller on the next iteration in order to allow it to propose controls based on what it has already tried. B-C: Scenes consisted of a number of planets (depicted here by colored circles) of different masses as well as a spaceship (also with a variable mass). The task was to apply a force to the spaceship for one time step of simulation (depicted here as a solid red arrow) such that the resulting trajectory (dotted red arrow) would put the spaceship at a target (bullseye) after 11 steps of simulation. The white ring of the bullseye corresponds to a performance loss of 0.12-0.15, the black ring to a loss of 0.09-0.12, the blue ring to a loss of 0.06-0.09, the red ring to a loss of 0.03-0.06, and the yellow center to a loss of 0.03 or less. B depicts an easy, 1-planet scene, while C depicts a very difficult 5-planet scene.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bdb6ce03",
+                        "type": "paragraph",
+                        "text": "several basic selection criteria Hoffman et al. (2011); Shahriari et al. (2014) . Rather than choosing one of several controllers, our work learns a single controller and instead focuses on selecting from multiple experts (see Sec. 2.2). In some cases f is known and inexpensive to compute, and thus the optimization procedure sets E \u2261 f . However, in many real-world settings, f is expensive or non-stationary and so it can be advantageous to use an approximation of f (e.g., a state transition model), L P (e.g., an action-value function), or any other quantity that gives some information about f or L P .",
+                        "extracted_citations": [
+                            "Citation_b12",
+                            "Citation_b25"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6e3bb1b9",
+                "title": "OPTIMIZING COMPUTATIONAL COST",
+                "blocks": [
+                    {
+                        "block_id": "b_cd65e892",
+                        "type": "paragraph",
+                        "text": "Given a controller and one or more experts, there are two important decisions to be made. First, how many optimization iterations should be performed? The approximate solution usually improves with more iterations, but each iteration costs computational resources. However, most traditional optimizers either ignore the cost of computation or select the number of iterations using simple heuristics. Because they do not balance the cost of computation against the performance loss, the overall effectiveness of these approaches is subject to the skill and preferences of the practitioners who use them. Second, which expert should be used on each step of the optimization? Some experts may be accurate but expensive to compute in terms of time, energy and/or money, while others may be crude, yet cheap. Moreover, the reliability of the experts may not be known a priori, further limiting the effectiveness of the optimization procedure. Our use of a metacontroller address these issues by jointly optimizing over the choices of how many steps to take and which experts to use.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3af99d94",
+                        "type": "paragraph",
+                        "text": "We consider a family of optimizers which use the same controller, \u03c0 C , but vary in their expert evaluators, {E 1 , . . . , E K }. Assuming that the controller and experts are deterministic functions, the number of iterations N and the sequences of experts k = (k 1 , . . . , k N -1 ) exactly determine the final control and performance loss L P . This means we have transformed the performance optimization over c into an optimization over N and k: (N, k) * = arg min k,n L P (x * , x, c(N, k, x, x * )), where the notation c(N, k, x, x * ) is used to emphasize that the control is a function N , k, x, and x * .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b557a8fc",
+                        "type": "paragraph",
+                        "text": "If each optimizer has an associated computational cost \u03c4 k , then N and k also exactly determine the computational resource loss of the optimization run, L R (N, k) =",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a663cba4",
+                        "type": "paragraph",
+                        "text": "N -1 n=1 \u03c4 kn . The total loss is then the sum of L P and L R , each of which are functions of N and k,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2ca48622",
+                        "type": "paragraph",
+                        "text": "and the optimal solution is defined as (N, k) * = arg min N,k L T (x * , x, N, k). Optimizing L T is difficult because of the recursive dependency on the history, h N -1 , and because the discrete choices of N and k mean L T is not differentiable.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7a8e8674",
+                        "type": "paragraph",
+                        "text": "To optimize L T we recast it as an RL problem where the objective is to jointly optimize task performance and computational cost. As shown in Figure 1a , the metacontroller agent a M is comprised of a controller \u03c0 C , a pool of experts {E 1 , . . . , E K }, a manager \u03c0 M , and a memory \u00b5. The manager is a meta-level policy (Russell & Wefald, 1991; Hay et al., 2012) over actions indexed by k, which determine whether to terminate the optimization procedure (k = 0) or to perform another iteration of the optimization procedure with the k th expert. Specifically, on the n th iteration the controller produces a new control c n based on the history of controls, experts, and evaluations. The manager, also relying on this history, independently decides whether to end the optimization procedure (i.e., to execute the control in the world) or to perform another iteration and evaluate the proposed control with the k th n expert (i.e., to ponder, after Graves (2016) ). The memory then updates the history h n by concatenating k, c n , and e n with the previous history h n-1 . Coming back to the notion of imagination-based optimization, we suggest that this iterative optimization process is analogous to imagining what will happen (using one or more approximate world models) before actually executing that action in the world. For further details, see Appendix A, and for an algorithmic illustration of the metacontroller agent, see Algorithm 1 in the appendix.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_696b1d19",
+                        "type": "paragraph",
+                        "text": "We also define two special cases of the metacontroller for baseline comparisons. The iterative agent a I does not have a manager and uses only a single expert. Its number of iterations are pre-set to a single N . The reactive agent, a 0 , is a special case of the iterative agent, where the number of iterations is fixed to N = 0. This implies that proposed controls are executed immediately in the world, and are not evaluated by an expert. For algorithmic illustrations of the iterative and reactive agents, see Algorithms 2 and 3 in the appendix.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d66d38d0",
+                "title": "NEURAL NETWORK IMPLEMENTATION",
+                "blocks": [
+                    {
+                        "block_id": "b_8e5b6a3a",
+                        "type": "paragraph",
+                        "text": "We use standard deep learning building blocks, e.g., multi-layer perceptrons (MLPs), RNNs, etc., to implement the controller, experts, manager, and memory, because they are effective at approximating complex functions via gradient-based and reinforcement learning, but other approaches could be used as well. In particular, we constructed our implementation to be able to make control decisions in complex dynamical systems, such as controlling the movement of a spaceship (Figure 1b-c ), though we note that our approach is not limited to such physical reasoning tasks. Here we used mean-squared error (MSE) for our L and Adam (Kingma & Ba, 2014) as the training optimizer.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_249cf5ff",
+                        "type": "paragraph",
+                        "text": "Experts We implemented the experts as MLPs and \"interaction networks\" (INs) (Battaglia et al., 2016) , which are well-suited to predicting complex dynamical systems like those in our experiments below. Each expert has parameters \u03b8 E k , i.e. e n = E k (x * , x, c n ; \u03b8 E k ), and may be trained either on-policy using the outputs of the controller (as is the case in this paper), or off-policy by any data that pairs states and controls with future states or reward outcomes. The objective L E k for each expert may be different depending on what the expert outputs. For example, the objective could be the loss between the goal and future states,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e0d5cf02",
+                        "type": "paragraph",
+                        "text": "which is what we use in our experiments. Or, it could be the loss between L P and an action-value function that predicts L P directly, L E k = L L P (x * , x, c), E k (x * , x, c; \u03b8 E k ) . See Appendix B.1 for details.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_aaae4de8",
+                "title": "Controller and Memory",
+                "blocks": [
+                    {
+                        "block_id": "b_1ff1b4cc",
+                        "type": "paragraph",
+                        "text": "We implemented the controller as an MLP with parameters \u03b8 C , i.e. c n = \u03c0 C (x * , x, h n-1 ; \u03b8 C ), and we implemented the memory as a Long Short-Term Memory (LSTM) (Hochreiter & Schmidhuber, 1997) with parameters \u03b8 \u00b5 . The memory embeds the history as a fixedlength vector, i.e.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_53d25f8a",
+                        "type": "paragraph",
+                        "text": "The controller and memory were trained jointly to optimize (1). However, this objective includes f , which is often unknown or not differentiable. We overcame this by approximating L P with a differentiable critic analogous to those used in policy gradient methods (e.g. Silver et al., 2014; Lillicrap et al., 2015; Heess et al., 2015) . See Appendices B.2 and B.3 for details.",
+                        "extracted_citations": [
+                            "Citation_b26",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_72b39ec9",
+                        "type": "paragraph",
+                        "text": "Manager We implemented the manager as a stochastic policy that samples from a categorical distribution whose weights are produced by an MLP with parameters \u03b8 M , i.e. k n \u223c Categorical(k; \u03c0 M (x * , x, h n-1 ; \u03b8 M )). We trained the manager to minimize (3) using REINFORCE (Williams, 1992) , but other deep RL algorithms could be used instead. See Appendix B.4 for details.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_86d8498d",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_510c1f74",
+                        "type": "paragraph",
+                        "text": "To evaluate our metacontroller agent, we measured its ability to learn to solve a class of physicsbased tasks that are surprisingly challenging. Each episode consisted of a scene which contained a spaceship and multiple planets (Figure 1b-c ). The spaceship's goal was to rendezvous with its mothership near the center of the system in exactly 11 time steps, but it only had enough fuel to fire its thrusters once. The planets were static but the gravitational force they exerted on the spacecraft induced complex non-linear dynamics on the motion over the 11 steps. The spacecraft's action space was continuous, up to some maximum magnitude, and represented the instantaneous Cartesian velocity vector imparted by its thrusters. Further details are in Appendix C.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bcdfb019",
+                        "type": "paragraph",
+                        "text": "We trained the reactive, iterative, and metacontroller agents on five versions of the spaceship task involving different numbers of planets. 1 The iterative agent was trained to take anywhere from zero (i.e., the reactive agent) to ten ponder steps. The metacontroller was allowed to take a maximum of ten ponder steps. We considered three different experts which were all differentiable: an MLP expert which used an MLP to predict the final location of the spaceship, an IN expert which used an interaction network (Battaglia et al., 2016) to predict the full trajectory of the spaceship, and a true simulation expert which was the same as the world model. In some conditions the metacontroller could use exactly one expert and in others it was allowed to select between the MLP and IN experts. For experiments with the true simulation expert, we used it to backpropagate gradients to the controller and memory. For experiments with an MLP as the only expert, we used a learned IN as the critic. For experiments with an IN as one of its experts, the critic was an IN with shared parameters. We trained the metacontroller on a range of different ponder costs, \u03c4 k , for the different experts. Further details of the training procedure are available in Appendix D.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_53279fc3",
+                "title": "REACTIVE AND ITERATIVE AGENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_d9bdd230",
+                        "type": "paragraph",
+                        "text": "Figure 2 shows the performance on the test set of the reactive and iterative agents for different numbers of ponder steps. The reactive agent performed poorly on the task, especially when the task was more difficult. With the five planets dataset, it was only able to achieve a performance loss of 0.583 on average (see Figure 1 for a depiction of the magnitude of the loss). In contrast, the iterative agent with the true simulation expert performed much better, reaching ceiling performance on the Each line corresponds to the performance of an iterative agent (either the true simulation expert, the MLP expert, or the interaction net expert) trained for a fixed number of ponder steps on one of the five datasets; the line color indicates which dataset the controller was trained on. In all cases, performance refers to the performance loss, L P . Left: the MLP expert struggles with the task due to its limited expressivity, but still benefits from pondering. Middle: the IN expert performs almost as well as the true simulation expert, even though it is not a perfect model. Right: The true simulation expert does quite well on the task, especially with multiple ponder steps.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_32faaf62",
+                        "type": "paragraph",
+                        "text": "datasets with one and two planets, and achieving a performance loss of 0.0683 on the five planets dataset. The IN and MLP experts also improve over the reactive agent, with a minimum performance loss of 0.117 and 0.375 on the five planets dataset, respectively.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_caec599f",
+                        "type": "paragraph",
+                        "text": "Figure 2 also highlights how important the choice of expert is. When using the true simulation and IN experts, the iterative agent performs well. With the MLP expert, however, performance is substantially diminished. But despite the poor performance of the MLP expert, there is still some benefit of pondering with it. With even just a few steps, the MLP iterative agent outperforms its reactive counterpart. However comparing the reactive agent with the N = 1 iterative agent is somewhat unfair because the iterative agent has more parameters due to the expert and the memory. However, given that there tends to also be an increase in performance between one and two ponder steps (and beyond), it is clear that pondering-even with a highly inaccurate model-can still lead to better performance than a model-free reactive approach.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9bf89150",
+                "title": "METACONTROLLER WITH ONE EXPERT",
+                "blocks": [
+                    {
+                        "block_id": "b_095862eb",
+                        "type": "paragraph",
+                        "text": "Though the iterative agents achieve impressive results, they expend more computation than necessary. For example, in the one and two planet conditions, the performances of the IN and true simulation iterative agents received little performance benefit from pondering more than two or three steps, while for the four and five planet conditions they required at least five to eight steps before their performance converged. When computational resources have no cost, the number of steps are of no concern, but when they have some cost it is important to be economical.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9aede208",
+                        "type": "paragraph",
+                        "text": "Because the metacontroller learns to choose its number of pondering steps, it can balance its performance loss against the cost of computation. Figure 3 (top row, middle and right subplots) shows that the IN and true simulation expert metacontroller take fewer ponder steps as \u03c4 increases, tracking closely the minimum of the iterative agent's cost curve (i.e., the metacontroller points are always near the iterative agent curves' minima). This adaptive behavior emerges automatically from the manager's learned policy, and avoids the need to perform a hyperparameter search to find the best number of iterations for a given \u03c4 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5a010c03",
+                        "type": "paragraph",
+                        "text": "The metacontroller does not simply choose an average number of ponder steps to take per episode: it actually tailors this choice to the difficulty of each episode. Figure 4 shows how the number of ponder steps the IN metacontroller chooses in each episode depends on that episode's difficulty, as measured by the episode's loss under the reactive agent. For more difficult episodes, the metacontroller tends to take more ponder steps, as indicated by the positive slopes of the best fit lines, and this proportionality persists across the different levels of \u03c4 in each subplot. 2.5% and 97.5% confidence intervals. When the point is below its corresponding curve, it means that the metacontroller was able to achieve a better speed-accuracy trade-off than that achievable by the iterative agent. Line colors of increasing brightness correspond to increasing \u03c4 , with \u03c4 values taken from [0, 0.0134, 0.0354, 0.0576, 0.0934, 0.152, 0.246]. Bottom row: Here we show just the performance loss (i.e., without computational cost). Each point corresponds to a different value of \u03c4 . The fact that the points are below the curve means the metacontroller agent learns to perform better than the iterative agent with the equivalent number of ponder steps.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_99494948",
+                        "type": "paragraph",
+                        "text": "The ability to adapt its choice of number of ponder steps on a per-episode basis is very valuable because it allows the metacontroller to spend additional computation only on those episodes which require it. The total costs of the IN and true simulation metacontrollers' are 11% and 15% lower (median) than the best achievable costs of their corresponding iterative agents, respectively, across the range of \u03c4 values we tested (see Figure 7 in the Appendix for details).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3d652d4b",
+                        "type": "paragraph",
+                        "text": "There can even be a benefit to using a metacontroller when there are no computational resource costs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d815bd4b",
+                        "type": "paragraph",
+                        "text": "Consider the rightmost points in Figure 3 (bottom row, middle and right subplots), which show the performance loss for the IN and true simulation metacontrollers when \u03c4 is low. Remarkably, these points still outperform the best achievable iterative agents. This suggests that there can be an advantage to stopping pondering once a good solution is found, and more generally demonstrates that the metacontroller's learning process can lead to strategies that are superior to those available to less flexible agents.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1c2276fa",
+                        "type": "paragraph",
+                        "text": "The metacontroller with the MLP expert had very poor average performance and high variance on the five planet condition (Figure 3 , top left subplot), which is why we restricted our focus in this section to how the metacontrollers with IN and true simulation experts behaved. The MLP's poor performance is crucial, however, for the following section (3.3) which analyzes how a multipleexpert metacontroller manages experts which vary greater in their reliability.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6ecf2eea",
+                "title": "METACONTROLLER WITH TWO EXPERTS",
+                "blocks": [
+                    {
+                        "block_id": "b_7864f7df",
+                        "type": "paragraph",
+                        "text": "When we allow the manager to additionally choose between two experts, rather than only relying on a single expert, we find a similar pattern of results in terms of the number of ponder steps (Figure 5, left) . Additionally, the metacontroller is successfully able to identify the more reliable IN network and consequently uses it a majority of the time, except in a few cases where the cost of the IN network is extremely high relative to the cost of the MLP network (Figure 5 , right). This pattern of results makes sense given the good performance (described in the previous section) of the metacontroller with the IN expert compared to the poor performance of the metacontroller with the MLP expert. The manager should not generally rely on the MLP expert because it is simply not a reliable source of information.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e4754057",
+                        "type": "paragraph",
+                        "text": "However, the metacontroller has more difficulty finding an optimal balance between the two experts on a step-by-step basis: the addition of a second expert did not yield much of an improvement over the single-expert metacontroller, with only 9% of the different versions (trained with different \u03c4 values for the two experts) achieving a lower loss than the best iterative controller. We believe the mixed performance of the metacontroller with multiple experts is partially due to an entropy term which we used to encourage the manager's policy to be non-deterministic (see Appendix B.4). In particular, for high values of \u03c4 , the optimal thing to do is to always execute immediately without pondering. However, because of the entropy term, the manager is encourage to have a non-deterministic policy and therefore is likely to ponder more than it should-and to use experts that are more unreliableeven when this is suboptimal in terms of the total loss (3).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_badb682e",
+                        "type": "paragraph",
+                        "text": "Despite the fact that the metacontroller with multiple experts does not result in a substantial improvement over that which uses a single expert, we emphasize that the manager is able to identify and use the more reliable expert the majority of the time. And, it is still able to choose a variable number of steps according to how difficult the task is (Figure 5 , left). This, in and of itself, is an improvement over more traditional optimization methods which would require that the expert is hand-picked ahead of time and that the number of steps are determined heuristically.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ac43aabc",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_ce0ccf4f",
+                        "type": "paragraph",
+                        "text": "In this paper, we have presented an approach to adaptive, imagination-based optimization in neural networks. Our approach is able to flexibly choose which computations to perform as well as how many computations need to be performed, approximately solving a speed-accuracy trade-off that depends on the difficulty of the task. In this way, our approach learns to rely on whatever source of information is most useful and most efficient. Additionally, by consulting the experts on-the-fly, our approach allows agents to test out actions to ensure that their consequences are not disastrous before actually executing them.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_51d35b3f",
+                        "type": "paragraph",
+                        "text": "While the experiments in this paper involve a one-shot decision task, our approach lays a foundation that can be built upon to support more complex situations. For example, rather than applying a force only on the first time step, we could turn the problem into one of trajectory optimization for continuous control by asking the controller to produce a sequence of forces. In the case of planning, our approach could potentially be combined with methods like Monte Carlo Tree-Search (MCTS) (Coulom, 2006) , where our experts would be akin to having several different rollout policies to choose from, and our controller would be akin to the tree policy. While most MCTS implementations will run rollouts until a fixed amount of time has passed, our approach would allow the manager to adaptively choose the number of rollouts to perform and which policies to perform the rollouts with. Our method could also be used to naturally augment existing model-free approaches such as DQN (Mnih et al., 2015) with online model-based optimization by using the model-free policy as a controller and adding additional experts in the form of state-transition models. An interesting extension would be to compare our metacontroller architecture with a na\u00efve model-based controller that performs gradient-based optimization to produce the final control. We expect our metacontroller architecture might require fewer model evaluations and to be more robust to model inaccuracies compared to the gradient-based method, because our method has access to the full history of proposed controls and evaluations whereas traditional gradient-based methods do not.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_122c7d5b",
+                        "type": "paragraph",
+                        "text": "Although we rely on differentiable experts in our metacontroller architecture, we do not utilize the gradient information from these experts. An interesting extension to our work would be to pass this gradient information through to the manager and controller (as in Andrychowicz et al. (2016) ), which would likely improve performance further, especially in the more complex situations discussed here. Another possibility is to train some or all of the experts inline with the controller and metacontroller, rather than independently, which could allow their learned functionality to be more tightly integrated with the rest of the optimization loop, at the expense of their generality and ability to be repurposed for other uses.",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_07058b75",
+                        "type": "paragraph",
+                        "text": "To conclude, we have demonstrated how neural network-based agents can use metareasoning to adaptively choose what to think about, how to think about it, and for how long to think for. Our method is directly inspired by human cognition and suggests a way to make agents much more flexible and adaptive than they currently are, both in decision making tasks such as the one described here, as well as in planning and control settings more broadly.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f5a7cec6",
+                        "type": "paragraph",
+                        "text": "Algorithm 1 Metacontroller agent. x is the scene and x * is the target.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dc1dc5c4",
+                        "type": "paragraph",
+                        "text": "1: function a M (x, x * ) 2:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_05bb9cf0",
+                        "type": "paragraph",
+                        "text": "h 0 \u2190 () Initial empty history 3:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_248bd367",
+                        "type": "paragraph",
+                        "text": "Get an action from the manager 4:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c1f7bdf2",
+                        "type": "paragraph",
+                        "text": "Propose a control with the controller 5:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_759fbfb6",
+                        "type": "paragraph",
+                        "text": "while k n = 0 do When k = 0, ponder with an expert 7:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ce4fefd5",
+                        "type": "paragraph",
+                        "text": "e n \u2190 E kn (x, x * , c n ) Get an expert's opinion 8:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fc9acda7",
+                        "type": "paragraph",
+                        "text": "Update the history 9:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dea79a18",
+                        "type": "paragraph",
+                        "text": "Choose the next action 11:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_27567bcb",
+                        "type": "paragraph",
+                        "text": "return c n 14: end function Algorithm 2 Iterative agent. x is the scene, x * is the target, and N is the number of ponder steps.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f0889a5f",
+                        "type": "paragraph",
+                        "text": "Initial empty history 3:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8cbd66c5",
+                        "type": "paragraph",
+                        "text": "Propose a control with the controller 4:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_46379ab3",
+                        "type": "paragraph",
+                        "text": "while n < N do Ponder with an expert for N steps 6:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d3a677a9",
+                        "type": "paragraph",
+                        "text": "Get the expert's opinion 7:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_48e9be5d",
+                        "type": "paragraph",
+                        "text": "Update the history 8:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d8c9fcff",
+                        "type": "paragraph",
+                        "text": "Propose a control with the controller 3:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ac0177e5",
+                        "type": "paragraph",
+                        "text": "return c 0 4: end function",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f78cda4d",
+                        "type": "paragraph",
+                        "text": "\u2022 The (deterministic) reward function R : S \u00d7 A \u00d7 S \u2192 R maps the current state, current action, and next state to real-valued loss:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c64c47d1",
+                        "type": "paragraph",
+                        "text": "where x = f x, \u03c0 C (x * , x, h n-1 ) .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c3080f70",
+                        "type": "paragraph",
+                        "text": "We approximate the solution to this MDP with a stochastic manager policy \u03c0 M . The manager chooses actions proportional to the immediate reward for taking action k in state s n plus the expected sum of future rewards. This construction imposes a trade-off between accuracy and resources, incentivizing the agent to ponder longer and with more accurate (and potentially expensive) experts when the problem is harder. All backpropagation occurs at the very end of a full forward pass (i.e., after the control has been executed in the world). A: Training the controller and memory with backpropagation-through-time (BPTT), beginning with the critic, and flowing to the controller, through the memory, through the relevant expert, through the controller again, and so on. B: Training the manager using REINFORCE (Williams, 1992) . C: Training the experts (note that each expert may have a different loss with respect to the outcome from the world). D: Training the critic.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0a8eaec5",
+                "title": "B GRADIENTS B.1 EXPERTS",
+                "blocks": [
+                    {
+                        "block_id": "b_2fa91148",
+                        "type": "paragraph",
+                        "text": "Training the experts is a straightforward supervised learning problem (Figure 6c ). The gradient is:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_137e66b3",
+                        "type": "paragraph",
+                        "text": "where E k is the k th expert and L E k is the loss function for the k th expert. For example, in the case of an action-value function expert, this loss function might be",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_973778dc",
+                        "type": "paragraph",
+                        "text": "In the case of an expert that predicts the final state using a model of the system dynamics, it might be L",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6cfbff3c",
+                "title": "B.2 CRITIC",
+                "blocks": [
+                    {
+                        "block_id": "b_08e14311",
+                        "type": "paragraph",
+                        "text": "The critic, LP , is an approximate model of the performance loss, L P , (1), which is used to backpropagate gradients to the controller and memory. This means the critic can either be an action-value function, which approximates LP = E 0 \u2248 L P directly, or a model of the system dynamics composed with a known loss function between the goal and future states, LP = L\u2022E 0 \u2248 L\u2022f . We train the critic, E 0 : X \u00d7 X \u00d7 C \u2192 R, using the same procedure as the experts are trained (Figure 6d ). A good expert may even be used as the critic.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d6aa0ede",
+                "title": "B.3 CONTROLLER AND MEMORY",
+                "blocks": [
+                    {
+                        "block_id": "b_7ec1b05c",
+                        "type": "paragraph",
+                        "text": "As shown in Figure 6a , we trained the controller and memory using backpropagation through time (BPTT) with an actor-critic architecture. Specifically, rather than assuming f is known and differentiable, we use a critic and backpropagate through it (Heess et al., 2015) :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e47c3440",
+                        "type": "paragraph",
+                        "text": "where E * is the critic, n is the maximum number of iterations the controller can use, and:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f2c511d4",
+                        "type": "paragraph",
+                        "text": "where we are using the \u2202 + notation to indicate summed gradients, following Pascanu et al. (2013) .",
+                        "extracted_citations": [
+                            "Citation_b38"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8e6a64ee",
+                        "type": "paragraph",
+                        "text": "Since k n has already been produced by the manager it can be treated as a constant and will produce an unbiased estimate of the gradient. This is convenient because it allows for training the controller and manager separately, or testing the controller's behavior with arbitrary actions post-training.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_52ac1bf5",
+                "title": "B.4 MANAGER",
+                "blocks": [
+                    {
+                        "block_id": "b_bac6a649",
+                        "type": "paragraph",
+                        "text": "As discussed in the main text, we used the REINFORCE algorithm Williams (1992) to train the manager (Figure 6b ). One potential issue, however, is that when training the controller and manager simultaneously, the controller will result in high cost early on in training and thus the manager will learn to always choose the execute action. To discourage the manager from learning what is an essentially deterministic policy, we included a regularization term based on the entropy, L H (Williams & Peng, 1991; Mnih et al., 2016) :",
+                        "extracted_citations": [
+                            "Citation_b41",
+                            "Citation_b37"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f7738f46",
+                        "type": "paragraph",
+                        "text": "r is the full return given by (3) and \u03bb is the strength of the regularization term.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6f5c3ab8",
+                "title": "C SPACESHIP TASK C.1 DATASETS",
+                "blocks": [
+                    {
+                        "block_id": "b_fcd61809",
+                        "type": "paragraph",
+                        "text": "We generated five datasets, each containing scenes with a different number of planets (ranging from a single planet to five planets). Each dataset consisted of 100,000 training scenes and 1,000 testing scenes. The target in each scene was always located at the origin, and each scene always had a sun with a mass of 100 units. The sun was located between 100 and 200 distance units away from the target, with this distance sampled uniformly at random. The other planets had a mass between 20 and 50 units, and were located 100 to 250 distance units away from the target, sampled uniformly at random. The spaceship had a mass between 1 and 9 units, and was located 150 to 250 distance units away from the target. The planets were always fixed (i.e., they could not move), and the spaceship always started at the beginning of each episode with zero velocity.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b173b1ed",
+                "title": "C.2 ENVIRONMENT",
+                "blocks": [
+                    {
+                        "block_id": "b_4dcd4ffb",
+                        "type": "paragraph",
+                        "text": "We simulated our scenes using a physical simulation of gravitational dynamics. The planets were always stationary (i.e., they were not acted upon by any of the objects in the scene) but acted upon the spaceship with a force of:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e74ce87d",
+                        "type": "paragraph",
+                        "text": "where F p is the force vector of the planet on the spaceship, G = 1000000 is a gravitational constant, m p is the mass of the planet, m s is the mass of the spaceship, r is the distance between the centers of masses of the planet and the spaceship, x p is the location of the planet, and x s is the location of the spaceship. We simulated this environment using the Euler method, i.e.:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e201e9c5",
+                        "type": "paragraph",
+                        "text": "where a s , v s , and x s are the acceleration, velocity, and position of the spaceship, respectively; d = 0.1 is a damping constant; c is the control force applied to the spaceship; and is the step size.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_028d43ef",
+                        "type": "paragraph",
+                        "text": "Note that we set c to zero for all timesteps except the first.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2e17c5d7",
+                "title": "D IMPLEMENTATION DETAILS",
+                "blocks": [
+                    {
+                        "block_id": "b_6d59525d",
+                        "type": "paragraph",
+                        "text": "We used TensorFlow (Abadi et al., 2015) to implement and train all versions of the model.",
+                        "extracted_citations": [
+                            "Citation_b31"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_05016fd2",
+                "title": "D.1 ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_686f3fe4",
+                        "type": "paragraph",
+                        "text": "In our implementation of the controller, we used a two-layer MLP each with 100 units. The first layer used ReLU activations and the second layer used a multiplicative interaction similar to van den Oord et al. ( 2016 ), which we found to work better in practice. In our implementation of the memory, we used a single LSTM layer of size 100. In our implementation of the manager, we used a MLP of two fully connected layers of 100 units each, with ReLU nonlinearities.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d2013df3",
+                        "type": "paragraph",
+                        "text": "We constructed three different experts to test the various controllers. The true simulation expert was the same as the world model, and consisted of a simulation for 11 timesteps with = 0.05 (see Appendix C). The IN expert was an interaction network (Battaglia et al., 2016) , which has previously been shown to be able to learn to predict n-body dynamics accurately for simple systems.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4a07f572",
+                        "type": "paragraph",
+                        "text": "The IN consists of a relational module and an object module. In our case, the relational module was composed of 4 hidden layers of 150 nodes each, outputting \"effects\" encodings of size 100. These effects, together with the relational model input are then used as input to the object model, which contained a single hidden layer of 100 nodes. The object model outputs the velocity of the spaceship and we trained it to predict the velocity on every timestep of the spaceship's trajectory. The MLP expert was a MLP that predicted the final location of the spaceship and had the same architecture as the controller.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_142f6e77",
+                        "type": "paragraph",
+                        "text": "As discussed in Appendix B, we used a critic to train the controller and memory. We always used the IN expert as the critic, except in the case when the true simulation expert was used, in which case we also used the true simulation as the critic.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5c9b0af3",
+                "title": "D.2 TRAINING PROCEDURE",
+                "blocks": [
+                    {
+                        "block_id": "b_6ce84a55",
+                        "type": "paragraph",
+                        "text": "All weights were initialized uniformly at random between 0 and 0.01. An iteration of training consisted of gradient updates over a minibatch of size 1000; in total, we ran training for 100,000 iterations. We additionally used a waterfall schedule for each of the learning rates during training, such that after 1000 iterations, if the loss was not decreasing, we would decay the step size by 5%.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_350cbb6a",
+                        "type": "paragraph",
+                        "text": "We trained the controller and memory together using the Adam optimizer (Kingma & Ba, 2014) with gradients clipped to a maximum global norm of 10 (Pascanu et al., 2013) . The manager was trained simultaneously, but using a different learning rate than the controller and memory. The IN and MLP experts were also trained simultaneously, but again with different learning rates. Learning rates were determined using a grid search over a small number of values, and are given in Table 1 for the iterative agent, in Table 2 for the metacontroller with one expert, and in Table 3 for the metacontroller with two experts.",
+                        "extracted_citations": [
+                            "Citation_b38"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8917c5fe",
+                        "type": "paragraph",
+                        "text": "The iterative agent was trained to take a fixed number of ponder steps, ranging from 0 (i.e., the reactive agent) to 10. The metacontrollers were allowed to take a variable number of ponder steps up to a maximum of 10. For the metacontroller with a single expert, we trained the manager using \u03c4 = 0 and 20 additional values of \u03c4 spaced logarithmically between 0.00004 and 0.4 (inclusive).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6e9e8cf0",
+                        "type": "paragraph",
+                        "text": "For the metacontroller with multiple experts, we trained the manager on a grid of pairs of \u03c4 values, where each expert could have \u03c4 = 0 or one of 6 values spaced logarithmically between 0.00004 and 0.2 (inclusive). In all cases, the entropy penalty for the metacontroller was \u03bb = 0.2.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a3e3da81",
+                "title": "D.3 CONVERGENCE",
+                "blocks": [
+                    {
+                        "block_id": "b_40c516d5",
+                        "type": "paragraph",
+                        "text": "Reactive agent. Training for the reactive agents was straightforward and converged reliably on all datasets.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b656353f",
+                        "type": "paragraph",
+                        "text": "Iterative agent. For the iterative agent with the interaction network or true simulation experts, convergence was also reliable for small numbers of ponder steps. Convergence was somewhat less reliable for larger numbers of ponder steps. We believe this is because for some scenes, a larger number of ponder steps was more than necessary to solve the task (as is evidenced by the plateauing performance in Figure 2 ). So, the iterative agent had to effectively \"remember\" what the best control was while it took the last few ponder steps, which is a more complicated and difficult task to perform.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7940ada4",
+                        "type": "paragraph",
+                        "text": "For the iterative agent with the MLP expert, convergence was more variable especially when the task was harder, as can be seen in the variable performance on the five planets dataset in Figure 2 (left). We believe this is because the MLP agent was so poor, and that convergence would have been more reliable with a better agent.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5aec8b6b",
+                        "type": "paragraph",
+                        "text": "Metacontroller with a single expert. The metacontroller agent with a single expert converged more reliably than the corresponding iterative agent (see the bottom row of Figure 3 ). As mentioned in the previous paragraph, the iterative agent had to take more steps than actually necessary, causing it to perform less well for larger numbers of ponder steps, whereas the metacontroller agent had the flexibility of stopping when it had found a good control. On the other hand, we found that the metacontroller agent sometimes performed too many ponder steps for large values of \u03c4 (see Figures 3 and 7 ). We believe this is due to the entropy term (\u03bb) added to the REINFORCE loss. This is because when then ponder cost is very high, the optimal thing to do is to behave deterministically and always execute (never ponder); however, the entropy term encouraged the policy to be nondeterministic. We plan to explore different training regimes in future work to alleviate this problem, for example by annealing the entropy term to zero over the course of training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fd868555",
+                        "type": "paragraph",
+                        "text": "Metacontroller with multiple experts. The metacontroller agent with multiple experts was somewhat more difficult to train, especially for high ponder cost of the interaction network expert. For example, note how the proportion of steps using the MLP expert does not decrease monotonically in Figure 5 (right) with increasing cost for the MLP expert. We believe this is also an unexpected result of using the entropy term: in all of these cases, the optimal thing to do actually is to rely on the MLP expert 100% of the time, yet the entropy term encourages the policy to be non-deterministic. Future work will explore these difficulties further by using experts that complement each other better (i.e., so there is not one that is wholly better than the other).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2d17db78",
+                        "type": "paragraph",
+                        "text": "Experts. The experts themselves always converged quickly and reliably, and trained much faster than the rest of the network.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_73957371",
+                        "type": "paragraph",
+                        "text": "Published as a conference paper at ICLR 2017  Each point represents the total cost of the best iterative agent under a particular value of \u03c4 (x-axis) versus the total cost achieved by the metacontroller trained with the same value of \u03c4 (y-axis). The best iterative agent was chosen by computing the cost for all the different number of ponder steps, and then choosing the whichever number of ponder stpes yielded the lowest cost (i.e., finding the minimum of the curves in Figure 3 , top row). In almost all cases, the managed controller achieves a lower loss than the iterative controller: for the metacontroller with the IN expert, the cost is 11% lower than the iterative controller on average, and for the metacontroller with the true simulation expert, it is 15% lower on average.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Learning to learn by gradient descent by gradient descent Marcin Andrychowicz Misha Denil Sergio Gomez Matthew W Hoffman David Pfau Tom Schaul Nando De Freitas arXiv:1606.04474 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Interaction networks for learning about objects, relations and physics Peter Battaglia Razvan Pascanu Matthew Lai Danilo Jimenez Rezende Koray Kavukcuoglu Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Simulation as an engine of physical scene understanding Peter W Battaglia Jessica B Hamrick Joshua B Tenenbaum Proceedings of the National Academy of Sciences 110 45 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Emmanuel Bengio Pierre-Luc Bacon Joelle Pineau Doina Precup arXiv:1511.06297 Conditional computation in neural networks for faster models 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "R\u00e9mi Coulom. Efficient selectivity and backup operators in monte-carlo tree search Yoshua Bengio arXiv:1305.0445 Deep learning of representations: Looking forward Springer 2013. 2006 International Conference on Computers and Games",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Learning Visual Predictive Models of Physics for Playing Billiards Katerina Fragkiadaki Pulkit Agrawal Sergey Levine Jitendra Malik Proceedings of the International Conference on Learning Representations (ICLR 2016) the International Conference on Learning Representations (ICLR 2016) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "States versus rewards: Dissociable neural prediction error signals underlying model-based and model-free reinforcement learning Jan Gl\u00e4scher Nathaniel Daw Peter Dayan John P O'doherty Neuron 66 4 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Adaptive computation time for recurrent neural networks Alex Graves arXiv:1603.08983 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Think again? the amount of mental simulation tracks uncertainty in the outcome Jessica B Hamrick Kevin A Smith Thomas L Griffiths Edward Vul Proceedings of the 37th Annual Conference of the Cognitive Science Society the 37th Annual Conference of the Cognitive Science Society 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Selecting computations: Theory and applications Nicholas Hay Stuart J Russell David Tolpin Solomon Eyal Shimony Proceedings of the 28th Conference on Uncertainty in Artificial Intelligence the 28th Conference on Uncertainty in Artificial Intelligence 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Learning continuous control policies by stochastic value gradients Nicolas Heess Gregory Wayne David Silver Tim Lillicrap Tom Erez Yuval Tassa Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Sepp Hochreiter and J\u00fcrgen Schmidhuber. Long short-term memory Mary Hegarty Trends in Cognitive Sciences 8 6 2004. 1997 Neural computation",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Portfolio allocation for Bayesian optimization Eric Matthew W Hoffman Nando Brochu De Freitas Proceedings of the 27th Conference on Uncertainty in Artificial Intelligence the 27th Conference on Uncertainty in Artificial Intelligence 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Reasoning about beliefs and actions under computational resource constraints Eric J Horvitz Uncertainty in Artificial Intelligence 3 1988",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Mental models and human reasoning Johnson-Laird Philip Proceedings of the National Academy of Sciences 107 43 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Diederik Kingma Jimmy Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "When does model-based control pay off? Wouter Kool A Fiery Samuel J Cushman Gershman PLOS Computational Biology in press",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Neural computations underlying arbitration between model-based and model-free learning Sang Wan Lee Shinsuke Shimojo John P O'doherty Neuron 81 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "End-to-end training of deep visuomotor policies Sergey Levine Chelsea Finn Trevor Darrell Pieter Abbeel Journal of Machine Learning Research 17 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Strategy selection as rational metareasoning Falk Lieder Thomas L Griffiths in revision",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Algorithm selection by rational metareasoning as a model of human strategy selection Falk Lieder Dillon Plunkett Jessica B Hamrick Stuart J Russell Nicholas J Hay Thomas L Griffiths 2014 27",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Timothy P Lillicrap Jonathan J Hunt Alexander Pritzel Nicolas Heess Tom Erez Yuval Tassa David Silver Daan Wierstra arXiv:1509.02971 Continuous control with deep reinforcement learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Human-level control through deep reinforcement learning Volodymyr Mnih Koray Kavukcuoglu David Silver Andrei A Rusu Joel Veness Marc G Bellemare Alex Graves Martin Riedmiller Andreas K Fidjeland Georg Ostrovski Nature 518 7540 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "J\u00fcrgen Schmidhuber. An on-line algorithm for dynamic reinforcement learning and planning in reactive environments Stuart Russell Eric Wefald Proceedings of the International Joint Conference on Neural Networks (IJCNN) the International Joint Conference on Neural Networks (IJCNN) 1991. 1990 49 Principles of metareasoning. a",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Reinforcement learning in Markovian and non-Markovian environments J\u00fcrgen Schmidhuber Advances in Neural Information Processing Systems 1990",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Bobak Shahriari Ziyu Wang Matthew W Hoffman Alexandre Bouchard-C\u00f4t\u00e9 Nando De Freitas arXiv:1406.4625 An entropy search portfolio for Bayesian optimization 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Deterministic policy gradient algorithms David Silver Guy Lever Nicolas Heess Thomas Degris Daan Wierstra Martin Riedmiller Proceedings of the 31st International Conference on Machine Learning the 31st International Conference on Machine Learning 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Mastering the game of Go with deep neural networks and tree search David Silver Aja Huang Chris J Maddison Arthur Guez Laurent Sifre George Van Den Julian Driessche Ioannis Schrittwieser Veda Antonoglou Marc Panneershelvam Lanctot Nature 529 7587 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Value Iteration Networks Aviv Tamar Sergey Levine Pieter Abbeel Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Simple statistical gradient-following algorithms for connectionist reinforcement learning Ronald J Williams Machine Learning 8 3-4 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Multiple paired forward and inverse models for motor control D M Wolpert M Kawato Neural Networks 11 78 1998",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "TensorFlow: Large-scale machine learning on heterogeneous systems Mart\u00edn Abadi Ashish Agarwal Paul Barham Eugene Brevdo Zhifeng Chen Craig Citro Greg S Corrado Andy Davis Jeffrey Dean Matthieu Devin 2015 Software available from tensorflow.org",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Interaction networks for learning about objects, relations and physics Peter Battaglia Razvan Pascanu Matthew Lai Danilo Jimenez Rezende Koray Kavukcuoglu Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Adaptive computation time for recurrent neural networks Alex Graves arXiv:1603.08983 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "Selecting computations: Theory and applications Nicholas Hay Stuart J Russell David Tolpin Solomon Eyal Shimony Proceedings of the 28th Conference on Uncertainty in Artificial Intelligence the 28th Conference on Uncertainty in Artificial Intelligence 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Learning continuous control policies by stochastic value gradients Nicolas Heess Gregory Wayne David Silver Tim Lillicrap Tom Erez Yuval Tassa Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b36",
+                "raw_text": "Diederik Kingma Jimmy Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b37",
+                "raw_text": "Asynchronous methods for deep reinforcement learning Volodymyr Mnih Adri\u00e0 Puigdom\u00e8nech Badia Mehdi Mirza Alex Graves Timothy P Lillicrap Tim Harley David Silver Koray Kavukcuoglu Proceedings of the 33rd International Conference on Machine Learning the 33rd International Conference on Machine Learning 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b38",
+                "raw_text": "On the difficulty of training recurrent neural networks Razvan Pascanu Tomas Mikolov Yoshua Bengio Proceedings of the 27st International Conference on Machine Learning the 27st International Conference on Machine Learning 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b39",
+                "raw_text": "A\u00e4ron van den Oord, Nal Kalchbrenner, Oriol Vinyals, Lasse Espeholt, Alex Graves, and Koray Kavukcuoglu. Conditional image generation with PixelCNN decoders Stuart Russell Eric Wefald arXiv:1606.05328 Artificial Intelligence 49 1 1991. 2016 Principles of metareasoning",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b40",
+                "raw_text": "Simple statistical gradient-following algorithms for connectionist reinforcement learning Ronald J Williams Machine Learning 8 3-4 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b41",
+                "raw_text": "Function optimization using connectionist reinforcement learning algorithms Ronald J Williams Jing Peng Connection Science 3 3 1991",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.5338,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "Thank you for an interesting read on an approach to choose computational models based on kind of examples given.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Pros\n- As an idea, using a meta controller to decide the computational model and the number of steps to reach the conclusion is keeping in line with solving an important practical issue of increased computational times of a simple example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "- The approach seems similar to an ensemble learning construct.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "But instead of random experts and a fixed computational complexity during testing time the architecture is designed to estimate hyper-parameters like number of ponder steps which gives this approach a distinct advantage.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Cons\n- Even though the metacontroller is designed to choose the best amongst the given experts, its complete capability has not been explored yet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "It would be interesting to see the architecture handle more than 2 experts.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.7374,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "A well written paper and an interesting construction - I thoroughly enjoyed reading it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "I found the formalism a bit hard to follow without specific examples- that is, it wasn't clear to me at first what the specific components in figure 1A were.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "What constitutes the controller, a control, the optimizer, what was being optimized, etc., in specific cases.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "Algorithm boxes may have been helpful, especially in the case of your experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "A description of existing models that fall under your conceptual framework might help as well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "In Practical Bayesian Optimization of Machine Learning Algorithms, Snoek, Larochelle and Adams propose optimizing with respect to expected improvement per second to balance computation cost and performance loss.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "It might be interesting to see how this falls into your framework.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "Experimental results were presented clearly and well illustrated the usefulness of the metacontroller.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "I'm curious to see the results of using more metaexperts.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.576,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "Pros (quality, clarity, originality, significance:):\n\nThis paper presents a novel metacontroller optimization system that learns the best action for a one-shot learning task, but as a framework has the potential for wider application.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "The metacontroller is a model-free reinforcement learning agent that selects how many optimization iterations and what function or \u201cexpert\u201d to consult from a fixed set (such as an action-value or state transition function).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "Experimental results are presented from simulation experiments where a spacecraft must fire its thruster once to reach a target location, in the presence of between 1 and 5 heavy bodies.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "The metacontroller system has a similar performance loss on the one-shot learning task as an iterative (standard) optimization procedure.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "However, by taking into account the computational complexity of running a classical, iterative optimization procedure as a second \u201cresource loss\u201d term, the metacontroller is shown to be more efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "Moreover, the metacontroller agent successfully selects the optimal expert to consult, rather than relying on an informed choice by a domain-expert model designer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "The experimental performance is a contribution that merits publication, and it also exhibits the use of an interaction network for learning the dynamics of a simulated physical system.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "The dataset that has been developed for this task also has the potential to act as a new baseline for future work on one-shot physical control systems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "The dataset constitutes an ancillary contribution which could positively impact future research in this area.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "Cons:\nIt's not clear how this approach could be applied more broadly to other types of optimization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "Moreover, the REINFORCE gradient estimation method is known to suffer from very high variance, yielding poor estimates.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_11",
+                    "text": "I'm curious what methods were used to ameliorate these problems and if any other performance tricks were necessary to train well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_12",
+                    "text": "Content of this type this could form a useful additional appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_13",
+                    "text": "A few critiques on the communication of results:\n\n- The formal explication of the paper\u2019s content is clear, but Fig.\u2019s 1A and 3 could be improved.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_14",
+                    "text": "1A is missing a clear visual demarcation of what exactly the metacontroller agent is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_15",
+                    "text": "Have you considered a plate or bounding box around the corresponding components?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_16",
+                    "text": "This would likely speed the uptake of the formal description.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_17",
+                    "text": "3 is generally clear, but the lack of x-axis tick marks on any subplots makes it more challenging than necessary to compare among the experts.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_18",
+                    "text": "Also, the overlap among the points and confidence intervals in the upper-left subplot interferes with the quantitative meaning of those symbols.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_19",
+                    "text": "Perhaps thinner bars of different colors would help here.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_20",
+                    "text": "Moreover, this figure lacks a legend and so the different lines are impossible to compare with each other.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_21",
+                    "text": "- Lastly, the second sentence in Appendix B.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_22",
+                    "text": "2 is a typo and terminates without completion.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.1288,
+            "aspect_scores": {
+                "originality": 2,
+                "substance": "Not Discussed",
+                "clarity": 5,
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "This paper introduces an approach to reinforcement learning and control wherein, rather than training a single controller to perform a task, a metacontroller with access to a base-level controller and a number of accessory \u00ab experts \u00bb is utilized.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "The job of the metacontroller is to decide how many times to call the controller and the experts, and which expert to invoke at which iteration.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "(The controller is a bit special in that in addition to being provided the current state, it is given a summary of the history of previous calls to itself and previous experts.) The sequence of controls and expert advice is embedded into a fixed-size vector through an LSTM.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "The method is tested on an N-body  control task, where it is shown that there are benefits to multiple iterations (\u00ab pondering \u00bb) even for simple experts, and that the metacontroller can deliver accuracy and computational cost benefits over fixed-iteration controls.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "The paper is in general well written, and reasonably easy to follow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_5",
+                    "text": "As the authors note, the topic of metareasoning has been studied to some extent in AI, but its use as a differentiable and fully trainable component within an RL system appears new.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_6",
+                    "text": "At this stage, it is difficult to evaluate the impact of this kind of approach: the overall model architecture is intriguing and probably merits publication, but whether and how this will scale to other domains remains the subject of future work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_7",
+                    "text": "The experimental validation is interesting and well carried out, but remains of limited scope.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_8",
+                    "text": "Moreover, given such a complex architecture, there should be a discussion of the training difficulties and convergence issues, if any.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_9",
+                    "text": "Here are a few specific comments, questions and suggestions:\n\n1) in Figure 1A, the meaning of the graphical language should be explained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_10",
+                    "text": "For instance, there are arrows of different thickness and line style \u2014 do these mean different things?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_11",
+                    "text": "2) in Figure 3, the caption should better explain the contents of the figure.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_12",
+                    "text": "For example, what do the colours of the different lines refer to?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_13",
+                    "text": "Also, in the top row, there are dots and error bars that are given, but this is explained only in the \u00ab bottom row \u00bb part.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_14",
+                    "text": "This makes understanding this figure difficult.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_15",
+                    "text": "3) in Figure 4, the shaded area represents a 95% confidence interval on the regression line; in addition, it would be helpful to give a standard error on the regression slope (to verify that it excludes zero, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_16",
+                    "text": "the slope is significant), as well as a fraction of explained variance (R^2).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_17",
+                    "text": "4) in Figure 5, the fraction of samples using the MLP expert does not appear to decrease monotonically with the increasing cost of the MLP expert (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_18",
+                    "text": "the bottom left part of the right plot, with a few red-shaded boxes).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_19",
+                    "text": "Why is that?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_20",
+                    "text": "Is there lots of variance in these fractions from experiment to experiment?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_21",
+                    "text": "5) the supplementary materials are very helpful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_22",
+                    "text": "Thank you for all these details.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.5338,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": 3
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "Thank you for an interesting read on an approach to choose computational models based on kind of examples given.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "Pros\n- As an idea, using a meta controller to decide the computational model and the number of steps to reach the conclusion is keeping in line with solving an important practical issue of increased computational times of a simple example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "- The approach seems similar to an ensemble learning construct.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "But instead of random experts and a fixed computational complexity during testing time the architecture is designed to estimate hyper-parameters like number of ponder steps which gives this approach a distinct advantage.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "Cons\n- Even though the metacontroller is designed to choose the best amongst the given experts, its complete capability has not been explored yet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "It would be interesting to see the architecture handle more than 2 experts.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_6",
+            "type": "Human",
+            "liang_alpha_score": 0.5338,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_6_s_0",
+                    "text": "Thank you for an interesting read on an approach to choose computational models based on kind of examples given.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_1",
+                    "text": "Pros\n- As an idea, using a meta controller to decide the computational model and the number of steps to reach the conclusion is keeping in line with solving an important practical issue of increased computational times of a simple example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_2",
+                    "text": "- The approach seems similar to an ensemble learning construct.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_3",
+                    "text": "But instead of random experts and a fixed computational complexity during testing time the architecture is designed to estimate hyper-parameters like number of ponder steps which gives this approach a distinct advantage.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_4",
+                    "text": "Cons\n- Even though the metacontroller is designed to choose the best amongst the given experts, its complete capability has not been explored yet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_5",
+                    "text": "It would be interesting to see the architecture handle more than 2 experts.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_8",
+            "type": "Human",
+            "liang_alpha_score": 0.7374,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_8_s_0",
+                    "text": "A well written paper and an interesting construction - I thoroughly enjoyed reading it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_1",
+                    "text": "I found the formalism a bit hard to follow without specific examples- that is, it wasn't clear to me at first what the specific components in figure 1A were.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_2",
+                    "text": "What constitutes the controller, a control, the optimizer, what was being optimized, etc., in specific cases.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_3",
+                    "text": "Algorithm boxes may have been helpful, especially in the case of your experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_4",
+                    "text": "A description of existing models that fall under your conceptual framework might help as well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_5",
+                    "text": "In Practical Bayesian Optimization of Machine Learning Algorithms, Snoek, Larochelle and Adams propose optimizing with respect to expected improvement per second to balance computation cost and performance loss.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_6",
+                    "text": "It might be interesting to see how this falls into your framework.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_7",
+                    "text": "Experimental results were presented clearly and well illustrated the usefulness of the metacontroller.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_8",
+                    "text": "I'm curious to see the results of using more metaexperts.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_9",
+            "type": "Human",
+            "liang_alpha_score": 0.576,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_9_s_0",
+                    "text": "Pros (quality, clarity, originality, significance:):\n\nThis paper presents a novel metacontroller optimization system that learns the best action for a one-shot learning task, but as a framework has the potential for wider application.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_1",
+                    "text": "The metacontroller is a model-free reinforcement learning agent that selects how many optimization iterations and what function or \u201cexpert\u201d to consult from a fixed set (such as an action-value or state transition function).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_2",
+                    "text": "Experimental results are presented from simulation experiments where a spacecraft must fire its thruster once to reach a target location, in the presence of between 1 and 5 heavy bodies.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_3",
+                    "text": "The metacontroller system has a similar performance loss on the one-shot learning task as an iterative (standard) optimization procedure.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_4",
+                    "text": "However, by taking into account the computational complexity of running a classical, iterative optimization procedure as a second \u201cresource loss\u201d term, the metacontroller is shown to be more efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_5",
+                    "text": "Moreover, the metacontroller agent successfully selects the optimal expert to consult, rather than relying on an informed choice by a domain-expert model designer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_6",
+                    "text": "The experimental performance is a contribution that merits publication, and it also exhibits the use of an interaction network for learning the dynamics of a simulated physical system.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_7",
+                    "text": "The dataset that has been developed for this task also has the potential to act as a new baseline for future work on one-shot physical control systems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_8",
+                    "text": "The dataset constitutes an ancillary contribution which could positively impact future research in this area.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_9",
+                    "text": "Cons:\nIt's not clear how this approach could be applied more broadly to other types of optimization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_10",
+                    "text": "Moreover, the REINFORCE gradient estimation method is known to suffer from very high variance, yielding poor estimates.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_11",
+                    "text": "I'm curious what methods were used to ameliorate these problems and if any other performance tricks were necessary to train well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_12",
+                    "text": "Content of this type this could form a useful additional appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_13",
+                    "text": "A few critiques on the communication of results:\n\n- The formal explication of the paper\u2019s content is clear, but Fig.\u2019s 1A and 3 could be improved.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_14",
+                    "text": "1A is missing a clear visual demarcation of what exactly the metacontroller agent is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_15",
+                    "text": "Have you considered a plate or bounding box around the corresponding components?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_16",
+                    "text": "This would likely speed the uptake of the formal description.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_17",
+                    "text": "3 is generally clear, but the lack of x-axis tick marks on any subplots makes it more challenging than necessary to compare among the experts.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_18",
+                    "text": "Also, the overlap among the points and confidence intervals in the upper-left subplot interferes with the quantitative meaning of those symbols.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_19",
+                    "text": "Perhaps thinner bars of different colors would help here.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_20",
+                    "text": "Moreover, this figure lacks a legend and so the different lines are impossible to compare with each other.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_21",
+                    "text": "- Lastly, the second sentence in Appendix B.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_22",
+                    "text": "2 is a typo and terminates without completion.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_10",
+            "type": "Human",
+            "liang_alpha_score": 0.1288,
+            "aspect_scores": {
+                "originality": 2,
+                "substance": "Not Discussed",
+                "clarity": 5,
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_10_s_0",
+                    "text": "This paper introduces an approach to reinforcement learning and control wherein, rather than training a single controller to perform a task, a metacontroller with access to a base-level controller and a number of accessory \u00ab experts \u00bb is utilized.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_1",
+                    "text": "The job of the metacontroller is to decide how many times to call the controller and the experts, and which expert to invoke at which iteration.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_2",
+                    "text": "(The controller is a bit special in that in addition to being provided the current state, it is given a summary of the history of previous calls to itself and previous experts.) The sequence of controls and expert advice is embedded into a fixed-size vector through an LSTM.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_3",
+                    "text": "The method is tested on an N-body  control task, where it is shown that there are benefits to multiple iterations (\u00ab pondering \u00bb) even for simple experts, and that the metacontroller can deliver accuracy and computational cost benefits over fixed-iteration controls.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_4",
+                    "text": "The paper is in general well written, and reasonably easy to follow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_5",
+                    "text": "As the authors note, the topic of metareasoning has been studied to some extent in AI, but its use as a differentiable and fully trainable component within an RL system appears new.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_6",
+                    "text": "At this stage, it is difficult to evaluate the impact of this kind of approach: the overall model architecture is intriguing and probably merits publication, but whether and how this will scale to other domains remains the subject of future work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_7",
+                    "text": "The experimental validation is interesting and well carried out, but remains of limited scope.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_8",
+                    "text": "Moreover, given such a complex architecture, there should be a discussion of the training difficulties and convergence issues, if any.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_9",
+                    "text": "Here are a few specific comments, questions and suggestions:\n\n1) in Figure 1A, the meaning of the graphical language should be explained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_10",
+                    "text": "For instance, there are arrows of different thickness and line style \u2014 do these mean different things?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_11",
+                    "text": "2) in Figure 3, the caption should better explain the contents of the figure.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_12",
+                    "text": "For example, what do the colours of the different lines refer to?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_13",
+                    "text": "Also, in the top row, there are dots and error bars that are given, but this is explained only in the \u00ab bottom row \u00bb part.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_14",
+                    "text": "This makes understanding this figure difficult.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_15",
+                    "text": "3) in Figure 4, the shaded area represents a 95% confidence interval on the regression line; in addition, it would be helpful to give a standard error on the regression slope (to verify that it excludes zero, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_16",
+                    "text": "the slope is significant), as well as a fraction of explained variance (R^2).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_17",
+                    "text": "4) in Figure 5, the fraction of samples using the MLP expert does not appear to decrease monotonically with the increasing cost of the MLP expert (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_18",
+                    "text": "the bottom left part of the right plot, with a few red-shaded boxes).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_19",
+                    "text": "Why is that?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_20",
+                    "text": "Is there lots of variance in these fractions from experiment to experiment?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_21",
+                    "text": "5) the supplementary materials are very helpful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_22",
+                    "text": "Thank you for all these details.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_11",
+            "type": "Human",
+            "liang_alpha_score": 0.5338,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": 3
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_11_s_0",
+                    "text": "Thank you for an interesting read on an approach to choose computational models based on kind of examples given.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_1",
+                    "text": "Pros\n- As an idea, using a meta controller to decide the computational model and the number of steps to reach the conclusion is keeping in line with solving an important practical issue of increased computational times of a simple example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_2",
+                    "text": "- The approach seems similar to an ensemble learning construct.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_3",
+                    "text": "But instead of random experts and a fixed computational complexity during testing time the architecture is designed to estimate hyper-parameters like number of ponder steps which gives this approach a distinct advantage.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_4",
+                    "text": "Cons\n- Even though the metacontroller is designed to choose the best amongst the given experts, its complete capability has not been explored yet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_5",
+                    "text": "It would be interesting to see the architecture handle more than 2 experts.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_8378a4ab",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_8378a4ab",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_8378a4ab",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_8378a4ab",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_198e2209",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8378a4ab"
+        },
+        {
+            "source": "b_f0971a7e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_f0971a7e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_f0971a7e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_f0971a7e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_f0971a7e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_f0971a7e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_f0971a7e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_f0971a7e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_198e2209",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0971a7e"
+        },
+        {
+            "source": "b_c99f74c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_198e2209",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c99f74c9"
+        },
+        {
+            "source": "b_568cfe42",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_568cfe42",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_568cfe42",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_568cfe42",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_568cfe42",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_198e2209",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_568cfe42"
+        },
+        {
+            "source": "sec_79c97833",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e2a02f17"
+        },
+        {
+            "source": "sec_79c97833",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_62e05581"
+        },
+        {
+            "source": "sec_79c97833",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7c9fa4df"
+        },
+        {
+            "source": "sec_4fea40b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5a94758b"
+        },
+        {
+            "source": "sec_4fea40b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_16d68793"
+        },
+        {
+            "source": "b_bdb6ce03",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_bdb6ce03",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_4fea40b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bdb6ce03"
+        },
+        {
+            "source": "sec_6e3bb1b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cd65e892"
+        },
+        {
+            "source": "sec_6e3bb1b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3af99d94"
+        },
+        {
+            "source": "sec_6e3bb1b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b557a8fc"
+        },
+        {
+            "source": "sec_6e3bb1b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a663cba4"
+        },
+        {
+            "source": "sec_6e3bb1b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2ca48622"
+        },
+        {
+            "source": "sec_6e3bb1b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7a8e8674"
+        },
+        {
+            "source": "sec_6e3bb1b9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_696b1d19"
+        },
+        {
+            "source": "sec_d66d38d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8e5b6a3a"
+        },
+        {
+            "source": "sec_d66d38d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_249cf5ff"
+        },
+        {
+            "source": "sec_d66d38d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e0d5cf02"
+        },
+        {
+            "source": "sec_aaae4de8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1ff1b4cc"
+        },
+        {
+            "source": "b_53d25f8a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_53d25f8a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_aaae4de8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_53d25f8a"
+        },
+        {
+            "source": "sec_aaae4de8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_72b39ec9"
+        },
+        {
+            "source": "sec_86d8498d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_510c1f74"
+        },
+        {
+            "source": "sec_86d8498d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bcdfb019"
+        },
+        {
+            "source": "sec_53279fc3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d9bdd230"
+        },
+        {
+            "source": "sec_53279fc3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_32faaf62"
+        },
+        {
+            "source": "sec_53279fc3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_caec599f"
+        },
+        {
+            "source": "sec_9bf89150",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_095862eb"
+        },
+        {
+            "source": "sec_9bf89150",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9aede208"
+        },
+        {
+            "source": "sec_9bf89150",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5a010c03"
+        },
+        {
+            "source": "sec_9bf89150",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_99494948"
+        },
+        {
+            "source": "sec_9bf89150",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3d652d4b"
+        },
+        {
+            "source": "sec_9bf89150",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d815bd4b"
+        },
+        {
+            "source": "sec_9bf89150",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1c2276fa"
+        },
+        {
+            "source": "sec_6ecf2eea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7864f7df"
+        },
+        {
+            "source": "sec_6ecf2eea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4754057"
+        },
+        {
+            "source": "sec_6ecf2eea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_badb682e"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ce0ccf4f"
+        },
+        {
+            "source": "b_51d35b3f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_51d35b3f"
+        },
+        {
+            "source": "b_122c7d5b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_122c7d5b"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07058b75"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f5a7cec6"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dc1dc5c4"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_05bb9cf0"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_248bd367"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c1f7bdf2"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_759fbfb6"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ce4fefd5"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fc9acda7"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dea79a18"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_27567bcb"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0889a5f"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8cbd66c5"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_46379ab3"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d3a677a9"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_48e9be5d"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d8c9fcff"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ac0177e5"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f78cda4d"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c64c47d1"
+        },
+        {
+            "source": "sec_ac43aabc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c3080f70"
+        },
+        {
+            "source": "sec_0a8eaec5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2fa91148"
+        },
+        {
+            "source": "sec_0a8eaec5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_137e66b3"
+        },
+        {
+            "source": "sec_0a8eaec5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_973778dc"
+        },
+        {
+            "source": "sec_6cfbff3c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08e14311"
+        },
+        {
+            "source": "sec_d6aa0ede",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ec1b05c"
+        },
+        {
+            "source": "sec_d6aa0ede",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e47c3440"
+        },
+        {
+            "source": "b_f2c511d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "sec_d6aa0ede",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f2c511d4"
+        },
+        {
+            "source": "sec_d6aa0ede",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8e6a64ee"
+        },
+        {
+            "source": "b_bac6a649",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b41"
+        },
+        {
+            "source": "b_bac6a649",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "sec_52ac1bf5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bac6a649"
+        },
+        {
+            "source": "sec_52ac1bf5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f7738f46"
+        },
+        {
+            "source": "sec_6f5c3ab8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fcd61809"
+        },
+        {
+            "source": "sec_b173b1ed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4dcd4ffb"
+        },
+        {
+            "source": "sec_b173b1ed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e74ce87d"
+        },
+        {
+            "source": "sec_b173b1ed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e201e9c5"
+        },
+        {
+            "source": "sec_b173b1ed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_028d43ef"
+        },
+        {
+            "source": "b_6d59525d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "sec_2e17c5d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6d59525d"
+        },
+        {
+            "source": "sec_05016fd2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_686f3fe4"
+        },
+        {
+            "source": "sec_05016fd2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d2013df3"
+        },
+        {
+            "source": "sec_05016fd2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4a07f572"
+        },
+        {
+            "source": "sec_05016fd2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_142f6e77"
+        },
+        {
+            "source": "sec_5c9b0af3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6ce84a55"
+        },
+        {
+            "source": "b_350cbb6a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "sec_5c9b0af3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_350cbb6a"
+        },
+        {
+            "source": "sec_5c9b0af3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8917c5fe"
+        },
+        {
+            "source": "sec_5c9b0af3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6e9e8cf0"
+        },
+        {
+            "source": "sec_a3e3da81",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_40c516d5"
+        },
+        {
+            "source": "sec_a3e3da81",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b656353f"
+        },
+        {
+            "source": "sec_a3e3da81",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7940ada4"
+        },
+        {
+            "source": "sec_a3e3da81",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5aec8b6b"
+        },
+        {
+            "source": "sec_a3e3da81",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fd868555"
+        },
+        {
+            "source": "sec_a3e3da81",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2d17db78"
+        },
+        {
+            "source": "sec_a3e3da81",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_73957371"
+        }
+    ]
+}

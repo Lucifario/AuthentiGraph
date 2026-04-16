@@ -1,0 +1,1435 @@
+{
+    "paper_metadata": {
+        "paper_id": "HklpCzC6-",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_ec2359ef",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_8b336c94",
+                        "type": "paragraph",
+                        "text": "Based on response timing and propagation delays in the brain, a plausible hypothesis is that the visual cortex can perform fast feedforward (Thorpe et al., 1996) inference when an answer is needed quickly and the image interpretation is easy enough (requiring as little as 200ms of cortical propagation for some object recognition tasks, i.e., just enough time for a single feedforward pass) but needs more time and iterative inference in the case of more complex inputs (Vanmarcke et al., 2016) . Recent deep learning research and the success of residual networks (He et al., 2016; Greff et al., 2016) point towards a similar scenario (Liao & Poggio, 2016) : early computation which is feedforward, a series of non-linear transformations which map low-level features to high-level ones, while later computation is iterative (using lateral and feedback connections in the brain) in order to capture complex dependencies between different elements of the interpretation. Indeed, whereas a purely feedforward network could model a unimodal posterior distribution (e.g., the expected target with some uncertainty around it), the joint conditional distribution of output variables given inputs could be more complex and multimodal. Iterative inference could then be used to either sample from this joint distribution or converge towards a dominant mode of that distribution, whereas a unimodaloutput feedfoward network would converge to some statistic like the conditional expectation, which might not correspond to a coherent configuration of the output variables when the actual conditional distribution is multimodal.",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b22",
+                            "Citation_b9",
+                            "Citation_b8",
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_07516e52",
+                        "type": "paragraph",
+                        "text": "This paper proposes such an approach combining a first feedforward phase with a second iterative phase corresponding to searching for a dominant mode of the conditional distribution while tackling the problem of semantic image segmentation. We take advantage of theoretical results (Alain & Bengio, 2013) on denoising autoencoder (DAE), which show that they can estimate the score or negative gradient of the energy function of the joint distribution of observed variables: the difference between the reconstruction and the input points in the direction of that estimated gradient. We propose to condition the autoencoder with an additional input so as to obtain the conditional score, i.e., the gradient of the energy of the conditional density of the output variables, given the input variables. The autoencoder takes a candidate output y as well as an input x and outputs a value \u0177 so that \u0177y estimates the direction \u2202 log p(y|x) \u2202y . We can then take a gradient step in that direction and update y towards a lower-energy value and iterate in order to approach a mode of the implicit p(y|x) captured by the autoencoder. We find that instead of corrupting the segmentation target as input of the DAE, we obtain better results by training the DAE with the corrupted feedforward prediction, which is closer to what will be seen as the initial state of the iterative inference process. The use of a denoising autoencoder framework to estimate the gradient of the energy is an alternative to more traditional graphical modeling approaches, e.g., with conditional random fields (CRFs) (Lafferty et al., 2001; He et al., 2004) , which have been used to model the joint distribution of pixel labels given an image (Kr\u00e4henb\u00fchl & Koltun, 2011) . The potential advantage of the DAE approach is that it is not necessary to decide on an explicitly parametrized energy function: such energy functions tend to only capture local interactions between neighboring pixels, whereas a convolutional DAE can potentially capture dependencies of any order and across the whole image, taking advantage of the state-of-the-art in deep convolutional architectures in order to model these dependencies via the direct estimation of the energy function gradient. Note that this is different from the use of convolutional networks for the feedforward part of the network, and regards the modeling of the conditional joint distribution of output pixel labels, given image features.",
+                        "extracted_citations": [
+                            "Citation_b0",
+                            "Citation_b13",
+                            "Citation_b10",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b8ea0167",
+                        "type": "paragraph",
+                        "text": "The main contributions of this paper are the following:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_279b4b85",
+                        "type": "paragraph",
+                        "text": "1. A novel training framework for modeling structured output conditional distributions, which is an alternative to CRFs, inspired by denoising autoencoder estimation of energy gradients. 2. Showing how this framework can be used in an architecture for image pixel-wise segmentation, in which the above energy gradient estimator is used to propose a highly probable segmentation through gradient descent in the output space. 3. Demonstrating that this approach to image segmentation outperforms or matches classical alternatives such as combining convolutional nets with CRFs and more recent state-of-theart alternatives on the CamVid dataset.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_54e81259",
+                "title": "BACKGROUND",
+                "blocks": [
+                    {
+                        "block_id": "b_5f37ba74",
+                        "type": "paragraph",
+                        "text": "As pointed in section 1, DAE can estimate a density p(y) via an estimator of the score or negative gradient -\u2202E \u2202y of the energy function E (Vincent et al., 2010; Vincent, 2011; Alain & Bengio, 2013) . These theoretical analyses of DAE are presented for the particular case where the corruption noise added to the input is Gaussian. Results show that DAE can estimate the gradient of the energy function of a joint distribution of observed variables. The main result is the following:",
+                        "extracted_citations": [
+                            "Citation_b24",
+                            "Citation_b23",
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e6e3601e",
+                        "type": "paragraph",
+                        "text": "where \u03c3 2 is the amount of Gaussian noise injected during training, y is the input of the autoencoder and r(y) is its output (the reconstruction). The approximation becomes exact as \u03c3 \u2192 0 and the autoencoder is given enough capacity, training examples and training time. The direction of (r(y)y) points towards more likely configurations of y. Therefore, the DAE learns a vector field pointing towards the manifold where the input data lies.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_36f06114",
+                "title": "OUR FRAMEWORK",
+                "blocks": [
+                    {
+                        "block_id": "b_738a1d77",
+                        "type": "paragraph",
+                        "text": "In our case, we seek to rapidly learn a vector field pointing towards more probable configurations of y|x. We propose to extend the results summarized in subsection 2.1 and condition the autoencoder with an additional input. If we condition the autoencoder with features h, which are a function of x, the DAE framework with Gaussian corruption learns to estimate",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1b21addf",
+                        "type": "paragraph",
+                        "text": ", where y is a segmentation candidate, x an input image and E is an energy function. Gradient descent in energy can thus be performed in order to iteratively reach a mode of the estimated conditional distribution:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a9a90488",
+                        "type": "paragraph",
+                        "text": "with step size . In addition, whereas Gaussian noise around the target y true would be the DAE prescription for the corrupted input to be mapped to y true , this may be inefficient at visiting the configurations we really care about, i.e. those produced by our feedforward predictor, which we use to obtain a first guess for y, as initialization of the iterative inference towards an energy minimum. Therefore, we propose that during training, instead of using a corrupted y true as input, the DAE takes as input a corrupted segmentation candidate y and either the input x or some features h extracted from a feedforward segmentation network applied to x: y = f L (x), h = f l (x), where f k is a non-linear function and l \u2208 {1, ..., L} is the index of a layer in the feedforward segmentation network. The output of the DAE is computed as \u0177 = r(\u1ef9, h), where r is a non-linear function which is trained to denoise conditionally and \u1ef9 is a corrupted form of y. During training, \u1ef9 is y plus noise, while at test time (for inference) it is simply y itself.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a1a996dc",
+                        "type": "paragraph",
+                        "text": "In order to train the DAE, (1) we extract both y and h from a feedforward segmentation network;",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7d11abd2",
+                        "type": "paragraph",
+                        "text": "(2) we corrupt y into \u1ef9; and (3) we train the DAE by minimizing the following loss",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c30549f0",
+                        "type": "paragraph",
+                        "text": "where H is the categorical cross-entropy and y true is the segmentation ground truth. Once trained, we can exploit the trained model to iteratively take gradient steps in the direction of the segmentation manifold. To do so, we first obtain a segmentation proposal y from the feedforward network and then we iteratively refine this proposal by applying the following rule",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_683e791d",
+                        "type": "paragraph",
+                        "text": "For practical reasons, we collapsed the corruption noise \u03c3 2 into the step size .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0debf7ff",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_18f1a596",
+                        "type": "paragraph",
+                        "text": "On one hand, recent advances in semantic segmentation mainly focus on improving the architecture design (Ronneberger et al., 2015; Badrinarayanan et al., 2015; Drozdzal et al., 2016; J\u00e9gou et al., 2017) , increasing the context understanding capabilities (Gatta et al., 2014; Visin et al., 2016; Chen et al., 2015; Yu & Koltun, 2016) and building processing modules to enforce structure consistency to segmentation outputs (Kr\u00e4henb\u00fchl & Koltun, 2011; Chen et al., 2015; Zheng et al., 2015) .",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b1",
+                            "Citation_b4",
+                            "Citation_b12",
+                            "Citation_b25",
+                            "Citation_b3",
+                            "Citation_b27",
+                            "Citation_b13",
+                            "Citation_b3",
+                            "Citation_b30"
+                        ]
+                    },
+                    {
+                        "block_id": "b_75f28c8a",
+                        "type": "paragraph",
+                        "text": "Here, we are interested in this last research direction. CRFs are among the most popular choices to impose structured information at the output of a segmentation network, being fully connected CRFs (Kr\u00e4henb\u00fchl & Koltun, 2011) and CRFs as RNNs (Zheng et al., 2015) among best performing variants. More recently, an alternative to promote structure consistency by decomposing the prediction process into multiple steps and iteratively adding structure information, was introduced by (Li et al., 2016) . Another iterative approach was introduced by Gidaris & Komodakis (2016) to tackle image semantic segmentation by repeatedly detecting, replacing and refining segmentation masks. Finally, the reinterpretation of residual networks (Liao & Poggio, 2016; Greff et al., 2016) was exploited by Drozdzal et al. (2017) , in the context of biomedical image segmentation, by iteratively refining learned pre-normalized images to generate segmentation predictions.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b30",
+                            "Citation_b14",
+                            "Citation_b15",
+                            "Citation_b8",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_017b4ff9",
+                        "type": "paragraph",
+                        "text": "On the other hand, there has recently been some research devoted to exploit results of DAE on different tasks, such as image generation (Nguyen et al., 2016) 2016 ) exploit convolutional pseudo-priors trained on the ground-truth labels in semantic segmentation task. During the training phase, the pseudo-prior is combined with the segmentation proposal from a segmentation model to produce joint distribution over data and labels. At test time, the ground truth is not accessible, thus feedforward segmentation predictions are fed iteratively to the convolutional pseudo-prior network. In this work, we exploit DAEs in the context of image segmentation and extend them in two ways, first by using them to learn a conditional score, and second by using a corrupted feedforward prediction as input during training to obtain better segmentations.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5e20fe76",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_be6499c2",
+                        "type": "paragraph",
+                        "text": "The main objective of these experiments is to answer the following questions: Can a conditional DAE be used successfully as the building block of iterative inference for image segmentation? Does our proposed corruption model (based on the feedforward prediction) work better than the prescribed target output corruption? Does the resulting segmentation system outperform more classical iterative approaches to segmentation such as CRFs?",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1c50ac23",
+                        "type": "paragraph",
+                        "text": "4.1 CAMVID DATASET CamVid 1 (Brostow et al., 2008 ) is a fully annotated urban scene understanding dataset. It contains videos that are fully segmented. We used the same split and image resolution as (Badrinarayanan et al., 2015) . The split contains 367 images (video frames) for training, 101 for validation and 233 for test. Each frame has a resolution of 360x480 and pixels are labeled with 11 different classes.",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b1"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2ff3ffdb",
+                "title": "FEEDFORWARD SEGMENTATION ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_4ec65010",
+                        "type": "paragraph",
+                        "text": "We experimented with two feedforward architectures for segmentation: the classical fully convolutional network FCN-8 of Long et al. (2015) and the more recent state-of-the-art fully convolutional densenet (FC-DenseNet103) of J\u00e9gou et al. (2017) , which do not make use of any additional synthetic data to boost their performances.",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9fdefcdf",
+                        "type": "paragraph",
+                        "text": "FCN-8 (Long et al., 2015) : FCN-8 is a feedforward segmentation network, which consists of a convolutional downsampling path followed by a convolutional upsampling path. The downsampling path successively applies convolutional and pooling layers, and the upsampling path successively applies transposed convolutional layers. The upsampling path recovers spatial information by merging features skipped from the various resolution levels on the downsampling path.",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5ef6794d",
+                        "type": "paragraph",
+                        "text": "FC-DenseNet103 (J\u00e9gou et al., 2017) : FC-DenseNet is a feedforward segmentation network, that exploits the feature reuse idea of Huang et al. (2016) and extends it to perform semantic segmentation. FC-DenseNet103 consists of a convolutional downsampling path, followed by a convolutional upsampling path. The downsampling path iteratively concatenates all feature outputs in a feedforward fashion. The upsampling path applies a transposed convolution to feature maps from the previous stage and recovers information from higher resolution features from the downsampling path of the network by using skip connections.",
+                        "extracted_citations": [
+                            "Citation_b12",
+                            "Citation_b11"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a475ef5a",
+                "title": "DAE ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_bbcfbceb",
+                        "type": "paragraph",
+                        "text": "Our DAE is composed of a downsampling path and an upsampling path. The downsampling path contains convolutions and pooling operations, while the upsampling path is built from unpooling with switches (also known as unpooling with index tracking) (Zhao et al., 2015; Zhang et al., 2016; Badrinarayanan et al., 2015) and convolution operations. As discussed in (Zhang et al., 2016) , reverting the max pooling operations more faithfully, significantly improves the quality of the reconstructed images. Moreover, while exploring potential network architectures, we found out that using fully convolutional-like architectures with upsampling and skip connections (between downsampling and upsampling paths) decreases segmentation results when compared to unpooling with switches. This is not surprising, since we inject noise to the model's input when training the DAE. Skip connections directly propagate this added noise to the end layers; making them responsible for the data denoising process. Note that the last layers of the model might not have enough capacity to accomplish the denoising task.",
+                        "extracted_citations": [
+                            "Citation_b29",
+                            "Citation_b28",
+                            "Citation_b1",
+                            "Citation_b28"
+                        ]
+                    },
+                    {
+                        "block_id": "b_82adfbf4",
+                        "type": "paragraph",
+                        "text": "In our experiments, we use DAE built from 6 interleaved pooling and convolution operations, followed by 6 interleaved unpooling and convolution operations. We start with 64 feature maps in the first convolution and duplicate the number of feature maps in consecutive convolutions in the downsampling path. Thus, the number of feature maps in the networks downsampling path is: 64, 128, 256, 512, 1024 and 2048. In the upsampling path, we progressively reduce the number of feature maps up to the number of classes. Thus, the number of feature maps in consecutive layers of the upsampling path is the following: 1024, 512, 256, 128, 64 and 11 (number of classes). We concatenate the output of 4th pooling operation in downsampling path of DAE together with the feature maps h corresponding to 4th pooling operation in downsampling path of the segmentation network.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cef3a99f",
+                "title": "TRAINING AND INFERENCE DETAILS",
+                "blocks": [
+                    {
+                        "block_id": "b_d6b0d3f7",
+                        "type": "paragraph",
+                        "text": "We train our DAE by means of stochastic gradient descent with RMSprop (Tieleman & Hinton, 2012) , initializing the learning rate to 10 -3 and applying an exponential decay of 0.99 after each epoch. All models are trained with data augmentation, randomly applying crops of size 224 \u00d7 224 and horizontal flips. We regularize our model with a weight decay of 10 -4 . We use a minibatch size of 10. While training, we add zero-mean Gaussian noise (\u03c3 = 0.1 or \u03c3 = 0.5) to the DAE input. We train the models for a maximum of 500 epochs and monitor the validation reconstruction error to early stop the training using a patience of 100 epochs.",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_19d4a9a8",
+                        "type": "paragraph",
+                        "text": "At test time, we need to determine the step size and the number of iterations to get the final segmentation output. We select and the number of iterations by evaluating the pipeline on the validation set. Therefore, we try \u2208 {0.01, 0.02, 0.05, 0.08, 0.1, 0.5, 1} for up to 50 iterations (iteration \u2208 {1, 2, ..., 50}). For each iteration, we compute the mean intersection over union (mean IoU) on the validation set and keep the combination ( , number of iterations) that maximizes this metric to evaluate the test set. 2",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_47bf75d6",
+                "title": "RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_aa07498d",
+                        "type": "paragraph",
+                        "text": "Table 1 reports our results for FCN-8 and FC-DenseNet103 without any post-processing step, applying fully connected CRF (Kr\u00e4henb\u00fchl & Koltun, 2011) , context network (Yu & Koltun, 2016) as trained post-processing step, CRF-RNN (Zheng et al., 2015) trained end-to-end with the segmentation network and DAE's iterative inference. For CRF, we use publicly available implementation of Kr\u00e4henb\u00fchl & Koltun (2011) .",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b27",
+                            "Citation_b30",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_342be9f6",
+                        "type": "paragraph",
+                        "text": "As shown in the table, using DAE's iterative inference on the segmentation candidates of a feedforward segmentation network (DAE(y)) outperforms state-of-the-art post-processing variants; improving upon FCN-8 by a margin of 3.0% IoU. When applying CRF as a post-processor, the FCN-8 segmentation results improve 1.2%. Note that similar improvements for CRF were reported on other architectures for the same dataset (e.g. Badrinarayanan et al. (2015) ). Comparable improvements are achieved when using the context module (Yu & Koltun, 2016) as post-processor (1.3%) and when applying CRF-RNN (1.7%). It is worth noting that our method does not decrease the performance of any class with respect to FCN-8. However, CRF loses 2.8% when segmenting column poles, whereas CRF-RNN loses 1.1% when segmenting signs. When it comes to more recent state-ofthe-art architectures such as FC-DenseNet103, the post-processing increment on the segmentation metrics is lower, as expected. Nevertheless, the improvement is still perceivable (+ 0.5% in IoU).",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b27"
+                        ]
+                    },
+                    {
+                        "block_id": "b_82ecc9fe",
+                        "type": "paragraph",
+                        "text": "When comparing our method to other state-of-the-art post-processors, we observe a slight improvement. End-to-end training of CRF-RNN with FC-DenseNet103 did not yield any improvement over FC-DenseNet103.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_67593b03",
+                        "type": "paragraph",
+                        "text": "It is worth comparing the performance of the proposed approach DAE(y) with DAE(y true ) trained from the ground truth. As shown in the table, DAE(y) consistently outperforms DAE(y true ). For FCN-8, the proposed method outperforms DAE(y true ) by a margin of 2.2%. For FC-DenseNet103, differences are smaller but still noticeable. In both cases, DAE(y) not only outperforms DAE(y true )  globally, but also in the vast majority of classes that exhibit an improvement. Note that the model trained on the ground truth requires a bigger Gaussian noise \u03c3 in order to slightly increase the performance of the pre-trained feedforward segmentation networks. It is worth mentioning that training our model end-to-end with the segmentation network didn't improve the results, while being more memory demanding.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_13c39642",
+                        "type": "paragraph",
+                        "text": "Figure 3 shows some qualitative segmentation results that compare the output of the feedforward network to both the CRF and iterative inference outputs. Figures 3(b )-3(f) show an example from the FCN-8 case, where as Figures 3(g)-3(k) show an example from FC-DenseNet103. As shown in Figure 3 (d), the FCN-8 segmentation network fails to properly find the fence in the image, mistakenly classifying it as part of a building (highlighted with a white box on the image). CRF is able to clean the segmentation candidate, for example, by filling in missing parts of the sidewalk but is not able to add non-existing structure (see Figure 3 (e)). Our method not only improves the segmentation candidate by smoothing large regions such as the sidewalk, but also corrects the prediction by incorporating missing objects such as the fence on Figure 3 (f). As depicted in Figures 3(g)-3(k), in case of FC-DenseNet the improvement in segmentation quality is minor and difficult to perceive by visual inspection. The qualitative results follow the findings from quantitative analysis, CRF decreases slightly the quality of column pole segmentations (e. g. see area inside white boxes when comparing Figures 3(j) and 3(k)).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0131ed6e",
+                "title": "ANALYSIS OF ITERATIVE INFERENCE STEPS",
+                "blocks": [
+                    {
+                        "block_id": "b_a65066a4",
+                        "type": "paragraph",
+                        "text": "In this subsection, we analyze the influence of the two inference parameters of our method, namely the step size and the number of iterations. This analysis is performed on the validation set of CamVid dataset, for the above-mentioned feedforward segmentation networks. For the sake of comparison, we perform a similar analysis on densely connected CRF; by fixing the best configuration and only changing the number of CRF iterations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2a27890f",
+                        "type": "paragraph",
+                        "text": "Figure 4 shows how the performance varies with number of iterations. Figure 4 (a) and Figure 4 (b) plot the results in the case of FCN-8 and FC-DenseNet103, respectively. As expected, there is a trade-off between the selected step size and the number of iterations. The smaller the , the more iterations are required to achieve the best performance. Interestingly, all within a reasonable range lead to similar maximum performances.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_87ad1f22",
+                "title": "CONCLUSIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_342b1051",
+                        "type": "paragraph",
+                        "text": "We have proposed to use a novel form of denoising autoencoders for iterative inference in structured output tasks such as image segmentation. The autoencoder is trained to map corrupted predictions to target outputs and iterative inference interprets the difference between the output and the input as a direction of improved output configuration, given the input image.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b51a6c67",
+                        "type": "paragraph",
+                        "text": "Experiments provide positive evidence for the three questions raised at the beginning of Sec. 4: (1) a conditional DAE can be used successfully as the building block of iterative inference for image segmentation, (2) the proposed corruption model (based on the feedforward prediction) works better than the prescribed target output corruption, and (3) the resulting segmentation system outperforms state-of-the-art methods for obtaining coherent outputs.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "What regularized auto-encoders learn from the data generating distribution Guillaume Alain Yoshua Bengio International Conference on Learning Representations (ICLR'2013) 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Segnet: A deep convolutional encoder-decoder architecture for image segmentation Vijay Badrinarayanan Alex Kendall Roberto Cipolla CoRR, abs/1511.00561 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Segmentation and recognition using structure from motion point clouds J Gabriel Jamie Brostow Julien Shotton Roberto Fauqueur Cipolla European Conference on Computer Vision (ECCV) 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Semantic image segmentation with deep convolutional nets and fully connected crfs Liang-Chieh Chen George Papandreou Iasonas Kokkinos Kevin Murphy Alan L Yuille 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "The importance of skip connections in biomedical image segmentation Michal Drozdzal Eugene Vorontsov Gabriel Chartrand Samuel Kadoury Chris Pal CoRR, abs/1608.04117 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Learning normalized inputs for iterative estimation in medical image segmentation Michal Drozdzal Gabriel Chartrand Eugene Vorontsov Lisa Di-Jorio An Tang Adriana Romero Yoshua Bengio Chris Pal Samuel Kadoury CoRR, abs/1702.05174 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Unrolling loopy top-down semantic feedback in convolutional deep networks Carlo Gatta Adriana Romero Joost Van De Weijer IEEE Conference on Computer Vision and Pattern Recognition (CVPR) workshop, 2014. Spyros Gidaris and Nikos Komodakis. Detect, replace, refine: Deep structured prediction for pixel wise labeling",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Corr abs/1612.04770 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Highway and residual networks learn unrolled iterative estimation Klaus Greff Rupesh Kumar Srivastava J\u00fcrgen Schmidhuber CoRR, abs/1612.07771 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Deep residual learning for image recognition Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun IEEE Conference on Computer Vision and Pattern Recognition (CVPR) 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Multiscale conditional random fields for image labeling Xuming He Richard S Zemel Miguel \u00c1 Carreira-Perpi\u00f1\u00e1n Proceedings of the 2004 IEEE Computer Society Conference on Computer Vision and Pattern Recognition, CVPR'04 the 2004 IEEE Computer Society Conference on Computer Vision and Pattern Recognition, CVPR'04 Washington, DC, USA IEEE Computer Society 2004",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Densely connected convolutional networks Gao Huang Zhuang Liu Kilian Q Weinberger Laurens Van Der Maaten CoRR, abs/1608.06993 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "The one hundred layers tiramisu: Fully convolutional densenets for semantic segmentation Simon J\u00e9gou Michal Drozdzal David V\u00e1zquez Adriana Romero Yoshua Bengio Workshop on Computer Vision in Vehicle Technology CVPRW 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Conditional random fields: Probabilistic models for segmenting and labeling sequence data Philipp Kr\u00e4henb\u00fchl Vladlen Koltun ; John D Lafferty Andrew Mccallum Fernando C N Pereira Proceedings of the Eighteenth International Conference on Machine Learning, ICML '01 the Eighteenth International Conference on Machine Learning, ICML '01 San Francisco, CA, USA Morgan Kaufmann Publishers Inc 2011. 2001 Efficient inference in fully connected crfs with gaussian edge potentials",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Iterative instance segmentation Ke Li Bharath Hariharan Jitendra Malik Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition the IEEE Conference on Computer Vision and Pattern Recognition 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Bridging the gaps between residual learning, recurrent neural networks and visual cortex Qianli Liao Tomaso A Poggio CoRR, abs/1604.03640 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Fully convolutional networks for semantic segmentation Jonathan Long Evan Shelhamer Trevor Darrell 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Plug & play generative networks: Conditional iterative generation of images in latent space Anh Nguyen Jason Yosinski Yoshua Bengio Alexey Dosovitskiy Jeff Clune CoRR, abs/1612.00005 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "U-net: Convolutional networks for biomedical image segmentation Olaf Ronneberger Philipp Fischer Thomas Brox International Conference on Medical Image Computing and Computer-Assisted Intervention (MICAI) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Amortised MAP inference for image super-resolution Casper Kaae Jose Caballero Lucas Theis Wenzhe Shi Ferenc Husz\u00e1r International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Speed of processing in the human visual system S Thorpe D Fize C Marlot Nature 381 520 1996",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "rmsprop adaptive learning T Tieleman G Hinton COURSERA: Neural Networks for Machine Learning 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "The time-course of ultrarapid categorization: The influence of scene congruency and top-down processing Steven Vanmarcke Filip Calders Johan Wagemans 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "A connection between score matching and denoising autoencoders Pascal Vincent Neural Computation 23 7 July 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Stacked denoising autoencoders: Learning useful representations in a deep network with a local denoising criterion Pascal Vincent Hugo Larochelle Isabelle Lajoie Yoshua Bengio Pierre-Antoine Manzagol J. Mach. Learn. Res 1532-4435 11 December 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Reseg: A recurrent neural network-based model for semantic segmentation Francesco Visin Marco Ciccone Adriana Romero Kyle Kastner Kyunghyun Cho Yoshua Bengio Matteo Matteucci Aaron Courville IEEE Conference on Computer Vision and Pattern Recognition (CVPR) workshop 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Top-Down Learning for Structured Labeling with Convolutional Pseudoprior Saining Xie Xun Huang Zhuowen Tu 10.1007/978-3-319-46493-0_19 2016 Springer International Publishing Cham",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Multi-scale context aggregation by dilated convolutions Fisher Yu Vladlen Koltun 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Augmenting supervised neural networks with unsupervised objectives for large-scale image classification Yuting Zhang Kibok Lee Honglak Lee Proceedings of the 33nd International Conference on Machine Learning, ICML 2016 the 33nd International Conference on Machine Learning, ICML 2016 New York City, NY, USA June 19-24, 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Stacked what-where auto-encoders Jake Junbo Michal Zhao Ross Mathieu Yann Goroshin Lecun CoRR, abs/1506.02351 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Conditional random fields as recurrent neural networks Shuai Zheng Sadeep Jayasumana Bernardino Romera-Paredes Vibhav Vineet Zhizhong Su Dalong Du Chang Huang Philip Torr International Conference on Computer Vision (ICCV) 2015",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.2923,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "The paper proposes an image segmentation method which iteratively refines the semantic segmentation mask obtained from a deep net.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "To this end the authors investigate a denoising auto-encoder (DAE).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "Its purpose is to provide a semantic segmentation which improves upon its input in terms of the log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "More specifically, the authors `propose to condition the autoencoder with an additional input\u2019 (page 1).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "To this end they use features obtained from the deep net.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Instead of training the DAE with ground truth y, the authors found usage of the deep net prediction to yield better results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "The proposed approach is evaluated on the CamVid dataset.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "Summary:\n\u2014\u2014\nI think the paper discusses a very interesting topic and presents an elegant approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "A few points are missing which would provide significantly more value to a reader.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Specifically, an evaluation on the classical Pascal VOC dataset, details regarding the training protocol of the baseline (which are omitted right now), an assessment regarding stability of the proposed approach (not discussed right now), and a clear focus of the paper on segmentation or conditioning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "See comments below for details and other points.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "Comments:\n\u2014\u2014\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "When training the DAE, a combination of squared loss and categorical cross-entropy loss is used.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "What\u2019s the effect of the squared error loss and would the categorical cross-entropy on its own be sufficient?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "This question remains open when reading the submission.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "The proposed approach is evaluated on the CamVid dataset which is used less compared to the standard and larger Pascal VOC dataset.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "I conjecture that the proposed approach wouldn\u2019t work too well on Pascal VOC.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "On Pascal VOC, images are distinctly different from each other whereas subsequent frames are similar in CamVid, i.e., the road is always located at the bottom center of the image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "The proposed architecture is able to take advantage of this dataset bias, but would fail to do so on Pascal VOC, which has a much more intricate bias.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "It would be great if the authors could check this hypothesis and report quantitative results similar to Tab.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "4 for Pascal VOC.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "The authors mention a grid-search for the stepsize and the number of iterations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "What values were selected in the end on the CamVid and hopefully the Pascal VOC dataset?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "Was the dense CRF applied out of the box, or were its parameters adjusted for good performance on the CamVid validation dataset?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "While parameters such as the number of iterations and epsilon are tuned for the proposed approach on the CamVid validation set, the submission doesn\u2019t specify whether a similar procedure was performed for the CRF baseline.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "4 seems to indicate that the proposed approach doesn\u2019t converge.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_26",
+                    "text": "Hence an appropriate stepsize and a reasonable number of iterations need to be chosen on a validation set.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_27",
+                    "text": "Choosing those parameters guarantees that the method performs well on average, but individual results could potentially be entirely wrong, particularly if large step sizes are chosen.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_28",
+                    "text": "I suspect this effect to be more pronounced on the Pascal VOC dataset (hence my conjecture in point 2).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_29",
+                    "text": "To further investigate this property, as a reader, I\u2019d be curious to get to know the standard deviation/variance of the accuracy in addition to the mean IoU.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_30",
+                    "text": "Again, it would be great if the authors could check this hypothesis and report those results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_31",
+                    "text": "I find the experimental section to be slightly disconnected from the initial description.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_32",
+                    "text": "Specifically, the paper `proposes to condition the autoencoder with an additional input\u2019 (page 1).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_33",
+                    "text": "No experiments are conducted to validate this proposal.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_34",
+                    "text": "Hence the main focus of the paper (image segmentation or DAE conditioning) remains vague.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_35",
+                    "text": "If the authors choose to focus on image segmentation, a comparison to state-of-the-art should be provided on classical datasets such as Pascal VOC, if DAE conditioning is the focus, some experiments in this direction should be included in addition to the Pascal VOC results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_36",
+                    "text": "Minor comment:\n\u2014\u2014\n- I find it surprising that the authors choose not to cite some related work on combining deep nets with structured prediction.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.4532,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper proposes an iterative procedure on top of a standard image semantic segmentation networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The submission proposes a change to the training procedure of stacking a denoising auto-encoder for image segmentation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The technical contribution of this paper is small.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "The paper aims to answer a single question: When using a DAE network on top of a segmentation network output, should one condition on the predicted, or the ground truth segmentation?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "(why not on both?) The answer is conditioning on the predicted image for a second round of inference is a bit better.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "The method also performs a bit better (no statistical significance tests) than other post-processing methods (Dense-CRF, CRF-RNNs)\n\nExperimental results are available only on a small dataset and for two different networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "This may be sufficient for a first proof-of-concept but a comparison against standard benchmark methods and datasets for semantic segmentation is missing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "It is unlikely that in the current state of this submission is a contribution to image segmentation, evidence is weak and several improvements are suggested.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "- The experimental evidence is insufficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "The improvements are small, statistical tests are not available.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "The CamVid dataset is the smallest of the image segmentation datasets used these days, more compelling would be MSCOCO or Cityscapes, better most of them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "The question whether this network effect is tied to small-dataset and low-resolution is not answered.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "Will a similar effect be observed when compared to networks trained on way more data (e.g., CityScapes)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "- The most important baseline is missing: auto-context [Tu08].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "Training the same network the DAE uses in an auto-context way.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "That is, take the output of the first model, then train another network using both input and prediction again for semantic segmentation (and not Eq.3).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "This is easy to do, practically almost always achieves better performance and I would assume the resulting network is faster and performs similar to the method presented in this submission on (guessing, I have not tried).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "In any case, to me this is the most obvious baseline.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "- I am in favour of probabilistic methods, but the availability of an approximation of p(y) (or the nearest mode) is not used (as is most often the case).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "- Runtimes are absent.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "This is a practical consideration which is important especially if there is little technological improvement.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "The DAE model of this submission compares to simple filtering methods as Kr\u00e4henb\u00fchl&Koltun DenseCRF which are fast and performance results are comparable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_22",
+                    "text": "The question wether this is practically relevant is missing, judging from the construction I guess this does not fare well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_23",
+                    "text": "Also training time is significantly more, please comment.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_24",
+                    "text": "- The related work is very well written, thanks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_25",
+                    "text": "This proposal is conceptually very similar to auto-context [Tu08] and this reference missing (this is also the most important baseline)\n\n[Tu08] Tu, \u201cAuto-context and its application to high-level vision tasks\u201d, CVPR 2008",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.2237,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "I am a returning reviewer for this paper, from a previous conference.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Much of the paper remains unchanged from the time of my previous review.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "I have revised my review according to the updates in the paper:\n\nSummary of the paper:\nThis work proposes a neural network based alternative to standard CRF post-processing techniques that are generally used on top semantic segmentation CNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "As an alternative to CRF, this work proposes to iteratively refine the predicted segmentation with a denoising auto encoder (DAE).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Results on CamVid semantic segmentation dataset showed better improvements over base CNN predictions in comparison to popular DenseCRF technique.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Paper Strengths:\n- A neat technique for incorporating CRF-like pixel label relations into semantic segmentation via neural networks (auto encoders).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "- Promising results on CamVid segmentation dataset with reliable improvements over baseline techniques and minor improvements when used in conjunction with recent models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "Major Weaknesses:\nI have two main concerns for this work:\n- One is related to the novelty as the existing work of Xie et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "ECCV'16 also proposed similar technique with very similar aim.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "I think, conceptual or empirical comparisons are required to assess the importance of the proposed approach with respect to existing ones.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "Mere citation and short discussion is not enough.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "Moreover, Xie et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "seem to have demonstrated their technique on two different tasks and on three different datasets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "- Another concern is related to experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Authors experimented with only one dataset and with one problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "But, I would either expect some demonstration of generality (more datasets or tasks) or strong empirical performance (state-of-the-art on CamVid) to assess the empirical usefulness with respect to existing techniques.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "Both of these aspects are missing in experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "Minor Weaknesses:\n- Negligible improvements with respect to CRF techniques on modern deep architectures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "- Runtime comparison is missing with respect to baseline techniques.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "Applying the proposed DAE 40-50 times seems very time consuming for each image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "- By back-propagating through CRF-like techniques [Zheng et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "ICCV'15, Gadde et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "ECCV'16, Chandra et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_23",
+                    "text": "ECCV'16 etc.], one could refine the base segmentation CNN as well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_24",
+                    "text": "It seems this is also possible with the proposed architecture.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_25",
+                    "text": "Is that correct?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_26",
+                    "text": "Or, are there any problems with the end-to-end fine-tuning as the input distribution to DAE constantly changes?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_27",
+                    "text": "Did authors try this?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_28",
+                    "text": "Suggestions:\n- Only Gaussian noise corruption is used for training DAE.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_29",
+                    "text": "Did authors experiment with any other noise types?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_30",
+                    "text": "Probably, more structured noise would help in learning better contextual relations across pixel labels?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_31",
+                    "text": "Clarifications:\nWhat is the motivation to add Euclidean loss to the standard cross-entropy loss for segmentation in Eq-3?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_32",
+                    "text": "Review summary:\nThe use of denoising auto encoders (DAEs) for capturing pixel label relations and then using them to iteratively refine the segmentation predictions is interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_33",
+                    "text": "But, incomplete comparisons with similar existing work and limited experiments makes this a weak paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_8b336c94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_8b336c94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_8b336c94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_8b336c94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_8b336c94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_ec2359ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8b336c94"
+        },
+        {
+            "source": "b_07516e52",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_07516e52",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_07516e52",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_07516e52",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_ec2359ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07516e52"
+        },
+        {
+            "source": "sec_ec2359ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b8ea0167"
+        },
+        {
+            "source": "sec_ec2359ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_279b4b85"
+        },
+        {
+            "source": "b_5f37ba74",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_5f37ba74",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_5f37ba74",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_54e81259",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5f37ba74"
+        },
+        {
+            "source": "sec_54e81259",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6e3601e"
+        },
+        {
+            "source": "sec_36f06114",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_738a1d77"
+        },
+        {
+            "source": "sec_36f06114",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1b21addf"
+        },
+        {
+            "source": "sec_36f06114",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a9a90488"
+        },
+        {
+            "source": "sec_36f06114",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a1a996dc"
+        },
+        {
+            "source": "sec_36f06114",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7d11abd2"
+        },
+        {
+            "source": "sec_36f06114",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c30549f0"
+        },
+        {
+            "source": "sec_36f06114",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_683e791d"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_18f1a596",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_0debf7ff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18f1a596"
+        },
+        {
+            "source": "b_75f28c8a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_75f28c8a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_75f28c8a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_75f28c8a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_75f28c8a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_75f28c8a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_0debf7ff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_75f28c8a"
+        },
+        {
+            "source": "b_017b4ff9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_0debf7ff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_017b4ff9"
+        },
+        {
+            "source": "sec_5e20fe76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_be6499c2"
+        },
+        {
+            "source": "b_1c50ac23",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_1c50ac23",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_5e20fe76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1c50ac23"
+        },
+        {
+            "source": "b_4ec65010",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_4ec65010",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_2ff3ffdb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4ec65010"
+        },
+        {
+            "source": "b_9fdefcdf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_2ff3ffdb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9fdefcdf"
+        },
+        {
+            "source": "b_5ef6794d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_5ef6794d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_2ff3ffdb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5ef6794d"
+        },
+        {
+            "source": "b_bbcfbceb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_bbcfbceb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_bbcfbceb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_bbcfbceb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "sec_a475ef5a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bbcfbceb"
+        },
+        {
+            "source": "sec_a475ef5a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_82adfbf4"
+        },
+        {
+            "source": "b_d6b0d3f7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_cef3a99f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d6b0d3f7"
+        },
+        {
+            "source": "sec_cef3a99f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_19d4a9a8"
+        },
+        {
+            "source": "b_aa07498d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_aa07498d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_aa07498d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_aa07498d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_47bf75d6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aa07498d"
+        },
+        {
+            "source": "b_342be9f6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_342be9f6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "sec_47bf75d6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_342be9f6"
+        },
+        {
+            "source": "sec_47bf75d6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_82ecc9fe"
+        },
+        {
+            "source": "sec_47bf75d6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_67593b03"
+        },
+        {
+            "source": "sec_47bf75d6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_13c39642"
+        },
+        {
+            "source": "sec_0131ed6e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a65066a4"
+        },
+        {
+            "source": "sec_0131ed6e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2a27890f"
+        },
+        {
+            "source": "sec_87ad1f22",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_342b1051"
+        },
+        {
+            "source": "sec_87ad1f22",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b51a6c67"
+        }
+    ]
+}

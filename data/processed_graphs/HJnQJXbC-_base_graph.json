@@ -1,0 +1,1678 @@
+{
+    "paper_metadata": {
+        "paper_id": "HJnQJXbC-",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_9900f6b5",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_569fc66e",
+                        "type": "paragraph",
+                        "text": "An emerging category of neural networks show the common trait of reacting in dynamic and unique ways to properties of their input. Networks like tree-structured recursive neural networks (Socher et al., 2013; Tai et al., 2015) and graph neural networks (GNNs) (Scarselli et al., 2009; Li et al., 2015; Gilmer et al., 2017) take structured data types as input and and execute a computation that depends on the input structure. This defies the moden GPU-driven paradigm of minibatch-based processing, and we refer to this new class of models with dynamic control flow as dynamic neural networks.",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b36",
+                            "Citation_b31",
+                            "Citation_b20",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_405b828c",
+                        "type": "paragraph",
+                        "text": "The development of dynamic neural network frameworks -Chainer (Tokui et al., 2015) , DyNet (Neubig et al., 2017a) , and PyTorch (PyTorch core team) -speaks to the importance of this class of models and highlights the challenge of how to make it easy for users to describe them. Yet there is another big challenge: how can we train these models efficiently?",
+                        "extracted_citations": [
+                            "Citation_b37"
+                        ]
+                    },
+                    {
+                        "block_id": "b_75adc80e",
+                        "type": "paragraph",
+                        "text": "Managing minibatches to keep GPUs fully utilized is typically considered a user's responsibility in these dynamic frameworks (with the exception of DyNet's autobatching feature; see Sec. 7). This means that users have to think about how to change their data feeding pipeline or even the model itself to run efficiently on GPUs, rather spending time innovating to improve the model accuracy.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a227db3e",
+                        "type": "paragraph",
+                        "text": "What if we had a hypothetical device with low memory overhead that allows perfect scaling without batching; i.e., processing 1 item is simply 100x faster than processing 100 items? Recent work on FPGAs and other specialized hardware (Farabet et al., 2011; Caulfield et al., 2016; Jouppi et al., 2017) for deep learning encourages us to investigate this question. Our premises are 1. No batching is required for efficient processing.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b4",
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_aef15b0a",
+                        "type": "paragraph",
+                        "text": "2. Each device may not have enough memory to hold the entire model (this is a realistic constraint for current memory systems that approach the perfect scaling we require)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5fc79122",
+                        "type": "paragraph",
+                        "text": "Based on these premises, we propose an asynchronous model-parallel (AMP) training algorithm.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4230bfbb",
+                        "type": "paragraph",
+                        "text": "Our idea is illustrated in Figure 1 . We need model parallelism because each device may be too small to hold the entire model (premise 2). However, if we perform synchronous parameter updates following the full forward and backward propagations, the only way to increase device utilization is by pipelining multiple instances into the system (see e.g., Chen et al., 2012) . Pipeline parallelism with synchronous updates is at odds with convergence speed due to a decreased parameter update frequency; compare Fig. 1 (a) and (b).",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_999426e1",
+                        "type": "paragraph",
+                        "text": "To overcome this problem, we propose asynchronous parameter updates that occur without global synchronization whenever a pre-specified number of gradients have been accumulated; see Fig. 1 (c) . With this design we aim for both high device utilization and update frequency.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_366dc71a",
+                        "type": "paragraph",
+                        "text": "In this setting, however, model parameters may be updated between the forward and the backward computation of an instance, introducing gradient \"staleness\". Despite staleness, we show that AMP training can converge fast with good hardware utilization. Specifically, our contributions are:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8f0e63da",
+                        "type": "paragraph",
+                        "text": "\u2022 We present the asynchronous model parallel training algorithm for efficient distributed training of dynamic networks.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_db5bf094",
+                        "type": "paragraph",
+                        "text": "\u2022 We present an intermediate representation (IR) with explicit constructs for branching and joining control flow that supports AMP training. Unlike previous work that considers static computation graphs for static control flow (e.g., Caffe), and dynamic computation graphs for dynamic control flow (e.g., Chainer), our IR encodes a static computation graph to execute dynamic control flow 1 . This makes training easy to distribute and parallelize.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a4aefbb7",
+                        "type": "paragraph",
+                        "text": "\u2022 We show that our IR can readily encode replicas, a form of data parallelism (see Sec. 5). In addition, our IR includes operators for data aggregation, which recover a form of batching, enabling our methods to be applied even on hardware where batching is beneficial.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c8afb2bc",
+                        "type": "paragraph",
+                        "text": "\u2022 We implement AMP training on a multi-core CPU and empirically demonstrate that AMP training converges to similar accuracies as synchronous algorithms on a variety of dynamic neural network models including Tree RNN and gated graph neural networks (GGNN).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f8876d0d",
+                        "type": "paragraph",
+                        "text": "In summary, our work demonstrates the benefits of AMP training and gives a novel way to design and deploy neural network libraries with dynamic control flow. In addition, we use our implementation to estimate the performance on a hypothetical device satisfying premises 1 & 2, with 1TFLOPS compute capability (see Appendix C). Together, these contributions open up new ways to scale up dynamic networks on interconnected compute devices.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8563324f",
+                "title": "NEURAL NETWORKS WITH DYNAMIC CONTROL FLOW",
+                "blocks": [
+                    {
+                        "block_id": "b_676871df",
+                        "type": "paragraph",
+                        "text": "Below we highlight three models with dynamic control flow that will be studied in depth in this paper:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4c63302a",
+                        "type": "paragraph",
+                        "text": "Variable-length RNNs iterate over the tokens of variable-length sequences. Pseudo-code for a simple vanilla RNN is given in Figure 2 . The linear (fully connected) layer and rectified linear unit (ReLU) can be substituted with a more sophisticated unit such as a gated recurrent unit (Chung et al., 2014) .",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_18d26909",
+                        "type": "paragraph",
+                        "text": "Though each instance has a different length, it is possible to add padding to enable batching. However this may lead to significant redundant compute due to variability in sequence lengths. Tree-structured neural networks are powerful models used for parsing of natural language and images, semantic representation, and sentiment analysis (Socher et al., 2011; Bowman et al., 2016; Socher et al., 2013; Tai et al., 2015) . They require evaluation of (potentially multiple) trees with shared parameters but different topology for each instance. Each tree structure is instance-specific and batching requires nontrivial planning (Looks et al., 2017) . A simple form of tree neural network performs a bottom up traversal of the instance, starting from an embedding of the leaves. At each level the values from the child nodes are concatenated and sent through a specialized unit (e.g. LSTM). The result is then propagated further up the tree. Backpropagation over the tree structure is known as backpropagation through structure (Goller and Kuchler, 1996) .",
+                        "extracted_citations": [
+                            "Citation_b34",
+                            "Citation_b3",
+                            "Citation_b35",
+                            "Citation_b36",
+                            "Citation_b21",
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e8aea9a6",
+                "title": "Concat",
+                "blocks": [
+                    {
+                        "block_id": "b_772695c7",
+                        "type": "paragraph",
+                        "text": "Graph neural networks (Scarselli et al., 2009; Li et al., 2015; Gilmer et al., 2017) combine both the temporal recurrence and recurrence over the structure. GNNs can be seen as performing aggregation/distribution operations over a general graph structure with shared parameters.",
+                        "extracted_citations": [
+                            "Citation_b31",
+                            "Citation_b20",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d2d3d484",
+                        "type": "paragraph",
+                        "text": "Apart from the models above, there exist many recently proposed models with flexible control flow (e.g. hierarchical memory networks (Chandar et al., 2016) , neural programmer interpreters (Reed and De Freitas, 2015) , adaptive computation networks (Graves, 2016; Figurnov et al., 2016) , and sparsely-gated mixture of experts (Shazeer et al., 2017) , to which our framework can be applied.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b29",
+                            "Citation_b14",
+                            "Citation_b11",
+                            "Citation_b33"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b98aa0e1",
+                "title": "ASYNCHRONOUS MODEL-PARALLEL TRAINING",
+                "blocks": [
+                    {
+                        "block_id": "b_3aee88bd",
+                        "type": "paragraph",
+                        "text": "In AMP training, each node of a computation graph (including control flow nodes -see next section) is associated with a worker, which is an abstraction of a compute device. Neural network training and inference is carried out by message passing among workers following algorithm 1. All workers run in parallel without synchronization. Each message contains a payload (float or int tensor), as well as a state that includes the IDs of the source and sink nodes and a label indicating the type of message (forward, backward, or update). The state is used to keep track of algorithm and control flow information. For example, in a variable-length RNN the state also contains the instance identifier, the current position in the sequence, and the total sequence length for the instance. More generally, if the neural model use (possibly nested) loops, then the state for the messages that arrive to and are produced from nodes that logically belong in loop bodies will contain sets of loop counters that together with the instance id uniquely identify the messages throughout the course of the computation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_681d1334",
+                        "type": "paragraph",
+                        "text": "When a worker receives a message labeled as forward (or backward) then it performs the operation of the node indicated by the sink node ID on the supplied payload. This produces one or more outgoing messages that are then enqueued into the queues of the workers hosting the next sink nodes in the computation graph. The final loss layer initiates backward propagation. If the message type is update, the worker will carry out weight updates on the sink node using gradients accumulated in the appropriate slot in the worker's local memory. Since both the operation weights and weight gradients can be stored locally on the worker then workers only need to communicate activations and activation gradients, which are typically an order of magnitude smaller than the weights. The update message is typically sent from the sink node to itself as part of the backward process but it can also be sent from a controller node to simulate synchronous pipelined training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e6f69ca9",
+                        "type": "paragraph",
+                        "text": "There are two important details that are not fully spelled out in Algorithm 1. First, since the messages arrive asynchronously (and possibly out of order), any operation that has more than one parent nodes need to store the payload into its local cache until all the parents send the corresponding payloads. Thus output message(s) can only be produced when all the payloads become available. The cache needs to be able to distinguish payloads received from different parents and payloads with different instance ID, and different counters (all encoded in the message states). The same is true in the backward pass for a node with multiple child nodes. Second, op * denotes the adjoint operation of op and takes the backward message msg and potentially the forward message fwd msg stored in the cache. For a nonlinear activation node (e.g., ReLU), the node will not change the state of the message in the forward pass. Thus in the backward pass, the adjoint operation will just multiply the partial derivative of the activation function to the payload of the received backward message keeping the state unchanged. By contrast, an operation that only changes the state of the message in the forward pass (e.g., increment the loop counter) will reverse the change in the backward pass leaving the payload unchanged.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5306716d",
+                        "type": "paragraph",
+                        "text": "In the experiments we vary two hyper parameters to control the effect of asynchrony: min update interval: determines the minimum number of gradients that a parameterized operation needs to accumulate before it can update its parameters (using the update message). The staleness of a gradient can be measured by the number of updates between the forward and backward computation that produces the gradient. Small min update interval may increase gradient staleness. On the other hand, large min update interval can reduce the variance of the gradient but can result in very infrequent updates and also slow down convergence. max active keys: controls the maximum number of active instances that are in-flight at any point in time. By setting max active keys = 1 we restrict to single-instance processing, typically equivalent to synchronous training. More in-flight messages generally increase hardware utilization, but may also increase gradient staleness. Section 6 demonstrates the effects of these parameters in a multi-core CPU runtime.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_97a83015",
+                "title": "WORKER AFFINITY",
+                "blocks": [
+                    {
+                        "block_id": "b_437850bf",
+                        "type": "paragraph",
+                        "text": "In our asynchronous execution model, the optimal assignment of N neural network computation graph nodes to W workers (referred to as affinitization) is in general a non-trivial scheduling problem. We investigated several heuristics for assigning affinities (for example k-hop coloring (Ichrak et al., 2012) to ensure subsequent heavy operations were assigned different workers). However, we find that the following procedure achieves high performance in practice in our multi-core CPU implementation, and is adopted throughout our experiments for simplicity. We first partition the nodes into H 'heavy' operations (namely matrix multiplies) and (N -H) 'light' operations, and then balance the heavy nodes across the workers by affinitizing the h th with the (h mod W ) th worker. Finally, the light operations are affinitized randomly among the rest of the workers. Note that in scenarios where communication is over a physical network affinitization will become more critical for high performance.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a443f159",
+                "title": "A STATIC INTERMEDIATE REPRESENTATION FOR DYNAMIC CONTROL FLOW",
+                "blocks": [
+                    {
+                        "block_id": "b_6d4770f5",
+                        "type": "paragraph",
+                        "text": "Overview Computation graphs are expressed using a static intermediate representation (IR) that can be a compilation target for high-level libraries (e.g. TensorFlow or our own Python and C++ frontends), and can itself admit multiple backends (e.g. the multi-core CPU runtime in this paper, or a network of accelerators). Static means that the IR graph is instance-independent. Nevertheless, it can execute dynamic and instance-dependent control flow decisions, in a forward and backward manner, by storing instance-and iteration-dependent information as the computation evolves. Each IR node comes with a forward and a backward semantics. A model is specified by (i) an IR graph, and (ii) a specialized controller loop that pumps instances and other data (e.g. initial hidden states or labels), and is responsible for throttling asynchrony. In the rest of this section we discuss the most important IR nodes along with their operational semantics, and show how they are used in the example models.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ee2e1f45",
+                        "type": "paragraph",
+                        "text": "Payload transformations Parameterized payload transform (PPT) nodes can be used to encode, for instance, fully connected layers. They apply a transform in the forward pass, but also record the activation in order to use it to compute gradients in the backward pass. An activation is recorded by keying on the state of the message, allowing thus to process forward and backwards messages completely asynchronously, and -in the extreme case -out of order. A PPT node requires specification of the forward and the backward transformation. It may decide to independently apply accumulated gradients to update its parameters. For transformations that do not involve parameters (e.g. ReLUs) our IR offers a simpler non-parameterized payload transform.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_13bc884b",
+                        "type": "paragraph",
+                        "text": "Loops, state, and control flow A condition node (Cond f ) is parameterized by a function f that queries the state (but not the payload) of the incoming message and, based on the response, routes the input to one of the successor nodes. A join node (Phi) propagates the messages it receives from each of its ancestor nodes but records the origin (using the state of the message as the key) so that in the backward pass it can backpropagate them to the correct origin. An invertible state update node (Isu f f -1 ) is parameterized by two functions f and f -1 that operate on the state of a message, and satisfy f -1 (f (x)) = x. Typically these are loop counter update functions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7ba83309",
+                        "type": "paragraph",
+                        "text": "Figure 2 shows how to encode an RNN. The loop at the heart of the RNN is implemented with Cond, Phi and Isu nodes. The controller pumps sequences in a lookup table (just another PPT layer), and our Ungroup node (to be described in the next section) generates a stream of tensors each corresponding to a single token, tagged with the current time-step (loop counter). For each forward message, the Isu node increments the time-step, and the conditional node tests whether the end of the sequence has been reached. Depending on the answer it either propagates the hidden state back to Phi, or pushes the hidden state to the final linear and loss layers. In backward mode, messages pass through the Isu (which decrements the time-step), and reach the Phi node. The Phi node will (based on information from the forward phase) either back-propagate to the Cond node, or to the controller to terminate. Hence the loop is executed in both the forward and backward direction. Aggregation and disaggregation Our IR offers several constructs for aggregation and disagreggation; for example RNN requires us to concatenate (Concat) hidden states and embeddings with matching timesteps and instance ids (states). We offer a construct for broadcasting (Bcast) a message to multiple successors. We offer an ungrouping construct (Ungroup) that ungroups a matrix and emits all resulting messages tagged with an extra user-provided increasing loop counter. This allows us to insert the stream of token embeddings in the middle of the RNN loop in Figure 2 . In backward mode Ungroup groups back all the incoming gradients. A simpler variant of Ungroup is Replicate, which replicates a message with an extra loop counter in the state. In backwards mode Replicate sums up all incoming gradients that correspond to the state without the extra loop counter.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5e444c00",
+                        "type": "paragraph",
+                        "text": "Figure 4 (a) describes a GNN that combines aggregation on the structure of a graph instance with an outer loop. The controller pumps data that contain the feature embeddings of all nodes of an input graph. In addition it pumps in a map specifiying graph topology. The Distribute node uses that information along with the graph itself to create sub-matrices (here each corresponding to edge types) and pass them through linear (fully connected) layers. The Collect node collects and re-groups the results based on graph topology. These nodes correspond to a form of dynamic partition and merging.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4d431ce4",
+                        "type": "paragraph",
+                        "text": "Schematically the Distribute behaviour is given in Figure 3 . In backward mode, based on the control information received during the forward pass (gray line) re-groups the gradients and sums together those that correspond to the same index. The Collect operator is essentially symmetric.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_52a41a5a",
+                "title": "DATA PARALLELISM IN MODEL PARALLELISM",
+                "blocks": [
+                    {
+                        "block_id": "b_b16e8ef0",
+                        "type": "paragraph",
+                        "text": "Pipelined model parallelism can often be augmented with forms of data parallelism. Consider the RNN in Fig. 2 . The only heavy operation (Linear-1) in the body of the loop will act as a bottleneck for computation. One solution is to split the linear layer into smaller tiles and compute them in parallel. This is expressible in our IR but the linear operation needs to be large enough to benefit from tiling in this way. Another approach is to replicate the linear layer in full. This requires only minimal new machinery -we can replicate the linear layer and place the replicas inside Cond and Phi nodes as in Figure 4 (b). Different instances or messages from the same instance but with different position in the sequence can be processed in an (pipeline-)parallel fashion by being sent to one of the replicas chosen by a random or deterministic function of the message state. To enable parameters to be shared among the replicas, we use infrequent end-of-epoch replica synchronization (averaging) that incurs negligible communication cost. We also tried more elaborate message-passing protocols for group synchronization, but found that infrequent global synchronization was sufficient for fast convergence.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_42ed93a0",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_acd01ae7",
+                        "type": "paragraph",
+                        "text": "We evaluate AMPNet using the dynamic models introduced in Section 2. For completeness, we additionally consider a multi-layer perceptron (MLP) as an example of a static, batched network It is also interesting to compare how the raw CPU performance of the AMP runtime compares with existing frameworks (TensorFlow, TensorFlow Fold and DyNet) to see that our implementation is already competitive with state of the art methods even on CPUs that do not conform to our target hardware model. We provide additional analysis for each experiment below.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d64ca860",
+                        "type": "paragraph",
+                        "text": "On MNIST, Table 1 shows 3x speedup from synchrony (max active keys = 1) to asynchrony (max active keys = 4) in terms of throughput. This is almost ideal as the first three linear layers are the heaviest operations. The number of epochs to reach the target validation accuracy increases from 3 to 4 but the overall speedup in terms of the wall clock time is 2.2x. We have also compared   Figure 5 : Throughput-convergence trade-off as a function of mode of parallelism and asynchrony hyper-parameters. Solid gray lines show constant convergence time trajectories; mak and mui stand for max active keys and min update interval, respectively.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_40ac1450",
+                        "type": "paragraph",
+                        "text": "and higher throughput at max active keys = 8 is achieved at the cost of the sharp increase in the number of epochs to convergence.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1b650ef9",
+                        "type": "paragraph",
+                        "text": "The list reduction dataset demonstrates the power of replicas. As there is only one heavy operation (Linear-1, Figure 2 ), the speedup from asynchrony is mild (1.3x). However we get 2.5x and 3.5x speedup for 2 and 4 replicas, respectively, which is nearly ideal. Again, the # of epochs to convergence is not affected by increasing max active keys. The slowdown in convergence for 4 replicas is due to the increased effective minibatch size -also commonly observed in data parallel training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_017efb0e",
+                        "type": "paragraph",
+                        "text": "Next the sentiment tree-RNN dataset shows that our runtime is competitive without batching to TensorFlow Fold (Looks et al., 2017) using dynamic batching of batch size 100. It is worth mentioning that our runtime allows us to specify different min update interval parameter for each parameterized operation. We set this parameter to 1000 for the embedding layer, which is initialized by Glove vectors, and 50 for all other layers. This reduced gradient staleness in the embedding layer.",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_cd389d20",
+                        "type": "paragraph",
+                        "text": "The QM9 dataset demonstrates that increasing asynchrony helps on real-world tasks with complex control flow, and our method outperforms an efficient TensorFlow implementation on CPUs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_64698982",
+                        "type": "paragraph",
+                        "text": "Finally, we have implemented the BiLSTM w/ char model in Neubig et al. (2017b) on Wikiner dataset Nothman et al. (2013) . Our preliminary implementation without any batching achieves 130 sentences/s at max active keys = 32 without any noticeable loss in accuracy (around 94 % after one epoch). This is competitive with DyNet's performance on the same machine (23 sentences/s without and 220 with autobatching, respectively); See Sec. B.5 for details.",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9e4bce22",
+                        "type": "paragraph",
+                        "text": "Asynchrony Finally we provide additional analysis on the effect of asynchrony. The degree of asynchrony is controlled by hyperparameters min update interval and max active keys. In Fig. 5 (b) we use an 8-replica RNN model on the list reduction dataset to investigate how these parameters affect the data and time required to converge to 96% validation accuracy. We find, in analogy with minibatch size in traditional systems, that min update interval must neither be too large nor too small. Increasing max active keys (increasing asynchrony) monotonically increases performance when the number of keys is similar to the number of individually affinitized heavy operations in the model 8 in this case). Increasing max active keys significantly beyond this point produces diminishing returns.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e22faf8e",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_ab2b4fed",
+                        "type": "paragraph",
+                        "text": "One approach to the task of training networks with instance dependent control flow is to define the computation graph dynamically per-instance. This approach is taken in Chainer (Tokui et al., 2015) , DyNet et al., 2017a) , and PyTorch (PyTorch core team). There are key challenges in accelerating this approach: Model parallelism would require the dynamically generated computation graph to be scheduled on-the-fly, and BLAS level parallelism would require operations to be batched on-the-fly. Automatic dynamic batching has been implemented in DyNet (Neubig et al., 2017a) , and is an interesting alternative to our asynchronous execution. Similar methods are used in TensorFlow Fold (Looks et al., 2017) . The basic idea is to inspect and merge together (by depth) the unrolled computation graphs of several instances to create batched BLAS operations. The effectiveness of automatic batching greatly depends on the model -for example, it would not perform well on random permutations of a sequence of operations. By contrast, our IR would very succinctly express and achieve pipeline parallelism using a static computation graph that is easy to distribute and optimize.",
+                        "extracted_citations": [
+                            "Citation_b37",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1a7e84f1",
+                        "type": "paragraph",
+                        "text": "Theano (Al-Rfou et al., 2016) and TensorFlow (TF) (Abadi et al., 2016) can syntactically handle instance dependent control flow with abstractions for conditional execution (ifelse in Theano and cond in TF) and loops (scan and while loop, respectively); TF also provides higher-order functions, such as map, foldl, foldr, and scan. The main difference between AMPNet and the above frameworks is that AMPNet is streaming and asynchronous whereas Theano is non-streaming and synchronous. Although not designed for streaming, TF can support streaming programmatically as it exposes first-class queues, as well as data prefetching with so called input pipelines. In our IR, all the queuing is implicit and stream-based execution is the default. TF additionally does support static description of dynamic control flow and state update, but we depart from the classic dataflow architecture that TF follows (Arvind and Culler, 1986) : First, instead of having nodes that represent mutable reference cells, we encapsulate the state with which a message should be processed through the graph in the message itself. Second, because we encapsulate algorithmic state in the messages, we do not introduce the notion of control dependencies (which can be used to impose a specific execution order on TF operations). Our choices complicate algorithmic state management from a programming point of view and make the task of designing a high-level compiler non-trivial, but allow every node to run asynchronously and independently without a scheduler and without the need for control messages: For example, nodes that dynamically take a control flow path or split the data simply consult the state of the incoming message, instead of having to accept additional control inputs.",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b0",
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2e9d75c9",
+                        "type": "paragraph",
+                        "text": "For \"small\" states (e.g. nested loop counters or edge and node ids) this might be preferable than out-of-band signaling. Our IR can implement loops by simply using state-update, conditional, and phi nodes, because the state accompanies the payload throughout its lifetime, whereas TF introduces specialized operators from timely dataflow (Murray et al., 2016) to achieve the same effect.",
+                        "extracted_citations": [
+                            "Citation_b23"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e95c30ac",
+                        "type": "paragraph",
+                        "text": "Asynchronous data parallel training (Recht et al., 2011; Dean et al., 2012; Chilimbi et al., 2014) is another popular approach to scale out optimization by removing synchronization (orthogonal to and combinable with model-parallel training). For example, convolutional layers are more amenable to data-parallel training than fully connected layers, because the weights are smaller than the activations. Moreover, when control flow differs per data instance, data parallelism is one way to get an effective minibatch size > 1, which may improve convergence by reducing variance. The impact of staleness on convergence (Recht et al., 2011) and optimization dynamics (Mitliagkas et al., 2016) have been studied for data parallelism. It would be interesting to extend those results to our setting. Jaderberg et al. (2016) , like us, aim to to train different parts of a model in a decoupled or asynchronous manner. More precisely, their goal is to approximate a gradient with a synthetic gradient computed by a small neural network that is locally attached to each layer. Hence, the local gradient calculation becomes independent of other layers (except for the training of the gradient predictor network) and allows asynchronous parameter updates. This would be especially useful if the evaluation of the local network is cheaper than the computation of the real gradient; for example, if the computation of the real gradient required significant communication of forward/backward messages between devices.",
+                        "extracted_citations": [
+                            "Citation_b28",
+                            "Citation_b9",
+                            "Citation_b7",
+                            "Citation_b28",
+                            "Citation_b22",
+                            "Citation_b16"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4dee64d1",
+                "title": "CONCLUSION AND OUTLOOK",
+                "blocks": [
+                    {
+                        "block_id": "b_2f73c378",
+                        "type": "paragraph",
+                        "text": "We have presented an asynchronous model-parallel SGD algorithm for distributed neural network training. We have described an IR and multi-core CPU runtime for models with irregular and/or instance-dependent control flow. Looking forward, we aim to deploy our system on specialized hardware. Equally importantly, we plan to build a compiler that automatically deduces the information to be placed in the states and generates state keying functions from a higher-level description of the models. By unlocking scalable distributed training of dynamic models, we hope to enable exploration of this class of models that are currently only on the horizon but may become more mainstream in the future.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cba2aaf0",
+                "title": "A AMPNET IMPLEMENTATION",
+                "blocks": [
+                    {
+                        "block_id": "b_f7f52108",
+                        "type": "paragraph",
+                        "text": "We have implemented an AMPNet runtime for multi-core CPUs. Our runtime spawns multiple workers each associated with a hardware thread and hosting one or more IR nodes -in a more general setting each worker corresponds to a compute device. To remain faithful to a distributed environment communication is only through message passing. Each worker is equipped with a multiple-producer single-consumer queue that can accept messages for any IR node hosted on that worker.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_995c72ac",
+                        "type": "paragraph",
+                        "text": "The main worker loop periodically offloads messages from the concurrent queue to a worker-local priority queue that assigns higher priority to backward messages. Backward prioritization is designed for situations when multiple IR nodes with a dependency on the IR graph end up hosted on the same worker. As a consequence, backpropagation can complete faster and new instances can be pumped in by the controller. We dequeue the top message and invoke the forward or backward method of the target IR node. These methods may update internal IR node state (such as cache the state of the incoming message and wait for more messages) or post new forward or backward messages.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3493904f",
+                        "type": "paragraph",
+                        "text": "How to update the parameters using the gradients is a configuration option that selects amongst a range of optimization algorithms. We have implemented runtime configuration options for selecting several well-known schemes such as (momentum-)SGD and Adam Kingma and Ba (2014) , and for controlling the training hyper-parameters.",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1f81a968",
+                "title": "B DETAILS OF THE EXPERIMENTAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_e68374cc",
+                        "type": "paragraph",
+                        "text": "We provide more details of the experiment and analysis in this section. All experiments were carried out on machines with 16 cores and 112 GB of RAM. The validation curves were averaged over at least 20 independent runs. The time/epoch to reach a target accuracy was calculated as median of the time an algorithm takes to reach the target accuracy over the repetitions. We found this approach to be more reliable than reporting the time/epoch when the averaged accuracy reaches the target. Table 2 shows both the training and validation throughputs we obtained with AMPNet and our TensorFlow baselines.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_405ada66",
+                "title": "B.1 MNIST",
+                "blocks": [
+                    {
+                        "block_id": "b_cebdd27c",
+                        "type": "paragraph",
+                        "text": "We train a 4-layer perceptron with ReLUs and 784-dimensional hidden units on MNIST (LeCun and Cortes, 1998) . Both the AMP runtime and a TensorFlow baseline use SGD with learning rate 0.1 and batch size of 100.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d40803bd",
+                        "type": "paragraph",
+                        "text": "Figure 6 (a) shows the validation accuracy vs. time, validation accuracy vs. epochs, and throughputs of synchronous and asynchronous versions of AMPNet as well as TensorFlow. The throughput greatly increases from synchronous (max active keys = 1) to asynchronous (max active keys = 4) while the speed of convergence (middle panel) is hardly affected for mild amount of asynchrony. Taking higher max active keys = 8 increase throughput only very little (because there is no more work) and seems to rather make the convergence more unstable. This is due to the fact that our current scheduler is greedy and pumps in a forward message whenever the first layer is unoccupied, which leads to large gradient staleness. Clearly a better scheduling will remove this sensitivity.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2c324b7a",
+                "title": "B.2 LIST REDUCTION DATASET",
+                "blocks": [
+                    {
+                        "block_id": "b_099846ec",
+                        "type": "paragraph",
+                        "text": "We train a vanilla RNN to perform reduction operations on variable length lists of digits. Each training instance is a sequence of at most 10 tokens: The first token indicates which of 4 reduction operations 2 is to be performed, and the remaining tokens represent the list of digits. The output is the result of the calculation rounded modulo 10. The dataset consists of 10 5 training and 10 4 validation instances.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_779c51c6",
+                        "type": "paragraph",
+                        "text": "We present this task as a classification problem to a vanilla RNN with ReLU activation and a hidden dimension of 128. All parameterized operations are affinitized on individual workers. We bucket training instances into batches of 100 sequences (in the baseline and in AMPNet). Semeniuta et al. (2016) . Furthermore, we split our Tree-LSTM cell into Leaf LSTM and Branch LSTM cells. This does not affect the expressiveness of the model because the LSTM cell receives either zero input (on branch) or zero hidden states (on leaves); i.e., the two cells do not share weights except for the bias parameters, which are learned independently in our implementation. We compare the time to reach 82 % fine grained (5 classes) accuracy (averaged over all the nodes) on the validation set.",
+                        "extracted_citations": [
+                            "Citation_b32"
+                        ]
+                    },
+                    {
+                        "block_id": "b_906d9b3d",
+                        "type": "paragraph",
+                        "text": "Figure 6 (c) shows the averaged fine grained validation accuracy for the tree RNN model with different max active keyson the Stanford Sentiment Tree Bank dataset. Interestingly although TensorFlow Fold achieves higher throughput, AMPNet converges faster (in terms of the number of epochs). This speedup is mainly due to the fact that we are not batching and updating whenever we have accumulated 50 gradients (except for the lookup table node that updates every 1000 gradients); 50 gradients correspond to roughly 2 trees. The reason for the lower throughput compared to TensorFlow Fold is that we are only grouping the leaf operations and not the branch operations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_01460516",
+                        "type": "paragraph",
+                        "text": "Grouping the branch operations is by extending our IR nodes and we are actively working on it.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_399521ea",
+                        "type": "paragraph",
+                        "text": "Figure 6 (d) shows the same information for fixed max active keys = 16 and different min update interval. We can see that as we increase min update interval from the originally used 50 to larger values, the peak of the validation accuracy shifts later and lower becoming closer to the curve obtained by TensorFlow Fold. This is consistent with the parallels between min update interval and minibatch size we drew in Section 6. The min update interval parameter has marginal influence on the training throughput.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8ba32726",
+                "title": "B.4 QM9 DATASET",
+                "blocks": [
+                    {
+                        "block_id": "b_5ae2c2cb",
+                        "type": "paragraph",
+                        "text": "We study a real-world application for GNNs: prediction of organic molecule properties from structural formulae in the QM9 dataset Ruddigkeit et al. (2012) ; Ramakrishnan et al. (2014) . GNNs have previously been applied to this task in Gilmer et al. (2017) .",
+                        "extracted_citations": [
+                            "Citation_b30",
+                            "Citation_b27",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_358994e3",
+                        "type": "paragraph",
+                        "text": "We concentrate on prediction of the norm of a molecule's dipole moment using a regression layer build on the propagation model from Li et al. (2015) (corresponding to the simplest setting in Gilmer et al. (2017) ). We use a hidden dimension of 100 and 4 propagation steps, initializing the graph nodes (atoms) following Gilmer et al. (2017) . The molecules contain up to 29 atoms and in a TensorFlow baseline we bucket molecules into batches of 20 with atom counts differing by at most 1 within a batch. Following Gilmer et al. (2017) , we report regression accuracies in multiples of a target accuracy from the chemistry community.",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b12",
+                            "Citation_b12",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_3e34bec3",
+                        "type": "paragraph",
+                        "text": "Figure 6 (e) shows that GGNN can tolerate relatively large max active keys = 16, and increased the throughput significantly from 300 graphs/s (synchronous) to 1797 graphs/s (see Table 2 ).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_531e48b0",
+                "title": "B.5 WIKINER DATASET",
+                "blocks": [
+                    {
+                        "block_id": "b_ca7d7e94",
+                        "type": "paragraph",
+                        "text": "We compare the performance of AMP training with DyNet with and without autobatching using the BiLSTM tagger w/ char model from the DyNet benchmark suite 3 . This model consists of both character-level and word-level bidirectional LSTMs. The model uses a learnable word embedding for frequent words (more than 5 times in the corpus) and character-level bidirectional LSTMs for infrequent words. We use our Distribute and Collect nodes to dynamically route the messages depending on the word frequencies.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e962c1d5",
+                        "type": "paragraph",
+                        "text": "Wikiner dataset 4 is a named entity recognition dataset extracted from Wikipedia by Nothman et al. (2013) . We use the training/validation split provided by the DyNet benchmark suite with 142,153 and 1,696 sentences, respectively.",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b278e5cf",
+                        "type": "paragraph",
+                        "text": "The result is shown in Fig. 6 (f). We achieve more than 3x in throughput from max active keys = 1 to max active keys = 32 without any noticeable loss in the validation accuracy after 2 or 3 epochs. The slight decrease in the validation accuracy after the third epoch is due to overfitting and it is not related to asynchrony.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fe041d9d",
+                "title": "C THROUGHPUT ESTIMATION FOR A HYPOTHETICAL 1 TFLOPS DEVICE",
+                "blocks": [
+                    {
+                        "block_id": "b_04d44d67",
+                        "type": "paragraph",
+                        "text": "In order to estimate the performance of AMPNet on a hypothetical device with 1 TFLOPS compute capability, we replaced all fully connected layers in the network with a dummy operation that simply waits for a specified time The results are shown in Table 3 . For the 4-way replicated RNN, we estimate roughly 260k instances/s, which is a 3.7x speedup compared to our CPU runtime. For tree RNN and GGSNN, we estimate milder 30 -70 % speedups mainly due to the fact that they have more complicated operations like Distribute and Collect, which we did not attempt to extrapolate the computation time because the implementation on a new hardware may be drastically different from the current CPU runtime.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "TensorFlow: Large-scale machine learning on heterogeneous distributed systems M Abadi A Agarwal P Barham E Brevdo Z Chen C Citro G S Corrado A Davis J Dean M Devin arXiv:1603.04467 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Theano: A python framework for fast computation of mathematical expressions R Al-Rfou G Alain A Almahairi C Angermueller D Bahdanau N Ballas F Bastien J Bayer A Belikov arXiv:1605.02688 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Arvind D E Culler Dataflow architectures 1986 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "S R Bowman J Gauthier A Rastogi R Gupta C D Manning C Potts arXiv:1603.06021 A fast unified model for parsing and sentence understanding 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "A cloud-scale acceleration architecture A M Caulfield E S Chung A Putnam H Angepat J Fowers M Haselman S Heil M Humphrey P Kaur J.-Y Kim Microarchitecture (MICRO), 2016 49th Annual IEEE/ACM International Symposium on IEEE 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "S Chandar S Ahn H Larochelle P Vincent G Tesauro Y Bengio arXiv:1605.07427 Hierarchical memory networks 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Pipelined back-propagation for context-dependent deep neural networks X Chen A Eversole G Li D Yu F Seide In Interspeech 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Project Adam: Building an efficient and scalable deep learning training system T M Chilimbi Y Suzue J Apacible K Kalyanaraman OSDI 2014 14",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Empirical evaluation of gated recurrent neural networks on sequence modeling J Chung C Gulcehre K Cho Y Bengio arXiv:1412.3555 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Large scale distributed deep networks J Dean G Corrado R Monga K Chen M Devin M Mao A Senior P Tucker K Yang Q V Le Advances in neural information processing systems 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Large-scale FPGA-based convolutional networks C Farabet Y Lecun K Kavukcuoglu E Culurciello B Martini P Akselrod S Talay Scaling up Machine Learning: Parallel and Distributed Approaches 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "M Figurnov M D Collins Y Zhu L Zhang J Huang D Vetrov R Salakhutdinov arXiv:1612.02297 Spatially adaptive computation time for residual networks 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "J Gilmer S S Schoenholz P F Riley O Vinyals G E Dahl arXiv:1704.01212 Neural message passing for quantum chemistry 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Learning task-dependent distributed representations by backpropagation through structure C Goller A Kuchler Neural Networks IEEE 1996. 1996 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Adaptive computation time for recurrent neural networks A Graves arXiv:1603.08983 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Node coloring in wireless networks: Complexity results and grid coloring A Ichrak P Minet C Adjih 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "M Jaderberg W M Czarnecki S Osindero O Vinyals A Graves K Kavukcuoglu arXiv:1608.05343 Decoupled neural interfaces using synthetic gradients 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "N P Jouppi C Young N Patil D Patterson G Agrawal R Bajwa S Bates S Bhatia N Boden A Borchers arXiv:1704.04760 -datacenter performance analysis of a tensor processing unit 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Adam: A method for stochastic optimization D P Kingma J Ba CoRR, abs/1412.6980 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Y Lecun C Cortes The MNIST database of handwritten digits 1998",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Y Li M Tarlow R Brockschmidt Zemel arXiv:1511.05493 Gated graph sequence neural networks 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Deep learning with dynamic computation graphs M Looks M Herreshoff D Hutchins P Norvig arXiv:1702.02181 2017 arXiv preprint Sentiment Tree Bank example",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Asynchrony begets momentum, with an application to deep learning I Mitliagkas C Zhang S Hadjis C R\u00e9 arXiv:1605.09774 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Incremental, iterative data processing with timely dataflow D G Murray F Mcsherry M Isard R Isaacs P Barham M Abadi Commun. ACM 0001-0782 59 10 Sept. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "G Neubig C Dyer Y Goldberg A Matthews W Ammar A Anastasopoulos M Ballesteros D Chiang D Clothiaux T Cohn arXiv:1701.03980 The dynamic neural network toolkit 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "On-the-fly operation batching in dynamic computation graphs G Neubig Y Goldberg C Dyer arXiv:1705.07860 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Learning multilingual named entity recognition from wikipedia J Nothman N Ringland W Radford T Murphy J R Curran Artificial Intelligence 194 2013 PyTorch core team",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "R Ramakrishnan P O Dral M Rupp O A Lilienfeld Quantum chemistry structures and properties of 134 kilo molecules. Scientific Data 2014 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Hogwild: A lock-free approach to parallelizing stochastic gradient descent B Recht C Re S Wright F Niu Advances in Neural Information Processing Systems 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "S Reed N De Freitas arXiv:1511.06279 2015 Neural programmer-interpreters. arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Enumeration of 166 billion organic small molecules in the chemical universe database gdb-17 L Ruddigkeit R Van Deursen L C Blum J.-L Reymond Journal of chemical information and modeling 52 11 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "The graph neural network model F Scarselli M Gori A C Tsoi M Hagenbuchner G Monfardini IEEE Transactions on Neural Networks 20 1 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "S Semeniuta A Severyn E Barth arXiv:1603.05118 Recurrent dropout without memory loss 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "N Shazeer A Mirhoseini K Maziarz A Davis Q Le G Hinton J Dean arXiv:1701.06538 Outrageously large neural networks: The sparsely-gated mixture-of-experts layer 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "Parsing natural scenes and natural language with recursive neural networks R Socher C C Lin C Manning A Y Ng Proceedings of the 28th international conference on machine learning (ICML-11) the 28th international conference on machine learning (ICML-11) 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Recursive deep models for semantic compositionality over a sentiment treebank R Socher A Perelygin J Y Wu J Chuang C D Manning A Y Ng C Potts Proceedings of the conference on empirical methods in natural language processing (EMNLP) the conference on empirical methods in natural language processing (EMNLP) 2013 1631 1642",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b36",
+                "raw_text": "Improved semantic representations from tree-structured long short-term memory networks K S Tai R Socher C D Manning arXiv:1503.00075 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b37",
+                "raw_text": "Chainer: a next-generation open source framework for deep learning S Tokui K Oono S Hido J Clayton Proceedings of workshop on machine learning systems (LearningSys) in the twenty-ninth annual conference on neural information processing systems (NIPS) workshop on machine learning systems (LearningSys) in the twenty-ninth annual conference on neural information processing systems (NIPS) 2015",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.3514,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper presents AMPNet, that addresses parallel training for dynamic networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "This is accomplished by building a static graph like IR that can serve as a target for compilation for high-level libraries such as tensor flow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "In the IR each node of the computation graph is a parallel worker, and synchronization occurs when a sufficient number of gradients have been accumulated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The IR uses constructs such as concat, split, broadcast,..",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "allowing dynamic, instance dependent control flow decisions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "The primary improvement in training performance is from reducing synchronization costs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "Comments for the author:\n\nThe paper proposes a solution to an important problem of model parallel training especially over dynamic batching that is increasingly important as we see more complex models where batching is not straightforward.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "The proposed solution can be effective.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "However, this is not really evident from the evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Furthermore, the paper can be a little dense read for the ICLR audience.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "I have the following additional concerns:\n\n1) The paper stresses new hardware throughout the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "The paper also alludes to \u201csimulator\" of a 1 TFLOPs FPGA in the conclusion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "However, your entire evaluation is over CPU.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "The said simulator is a bunch of sleep() calls (unless some details are skipped).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "I would encourage the authors to remove these references since these new devices have very different hardware behavior.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "For example, on a real constrained device, you may not enjoy a large L2 cache which you are benefitting from by doing an entire evaluation over CPUs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "Likewise, the vector instruction processing behavior is also very different since these devices have limited power budgets and may not be able to support AVX style instructions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "Unless an actual simulator like GEM5 is used, a correct representation of what hardware environment is being used is necessary before making claims that this is ideal for emerging hardware.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "2) To continue on the hardware front and the evaluation, I feel for this paper to be accepted or appreciated, a simulated hardware is not necessary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "Personally, I found the evaluation with simulated sleep functions more confusing than helpful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "An appropriate evaluation for this paper can be just benefits over CPU or GPUs, For example, you have a 7 TFLOPS device (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "a GPU or a CPU).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "Existing algorithms extract X TFLOPs of processing power and using your IR/system one gets Y effective TFLOPs and Y>X.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "This is all that is required.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "Currently, looking at your evaluation riddled with hypothetical hardware, it is unclear to me if this is helpful for existing hardware.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "For example, in Table 1, are Tensorflow numbers only provided over the 1 TFLOPs device (they correspond to the 1 TFLOPs column for all workloads except for MNIST)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_26",
+                    "text": "Do you use the parallelism at all in your Tensorflow baseline?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_27",
+                    "text": "Please clarify.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_28",
+                    "text": "3) How do you compare for dynamic batching with dynamic IR platforms like pytorch?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_29",
+                    "text": "Furthermore, more details about how dynamic batching is happening in benchmarks mentioned in Table 1 will be nice to have.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_30",
+                    "text": "Finally, an emphasis on the novel contributions of the paper will also be appreciated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_31",
+                    "text": "4) Finally, the evaluation appears to be sensitive to the two hyper-parameters introduced.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_32",
+                    "text": "Are they dataset specific?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_33",
+                    "text": "I feel tuning them would be rather cumbersome for every model given how sensitive they are (Figure 5).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The paper describes a model-parallel training framework/algorithm that is specialized for new devises including FPGA.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "Because of the small memory of those devices, model-parallel training is necessary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Most current other frameworks are for model parallelism, so in this sense, the framework proposed by the authors is different and original.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "The framework includes a few interesting ideas including using intermediate representation (IR) to express static computation graph and execute it as dynamic control flow, combining pipeline model parallelism and data parallelism by splitting or replicating certain layers, and enabling asynchronous training, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "Some concerns/questions are \n1) The framework is targeted at devices like FPGA, but the implementation is a multicore CPU SMP.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "It makes the computational result less convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "Also, does the implementation use threading or message passing?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "2) Pipeline model parallelism seems need a lot of load balance tuning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "The reported speedup results confirm this conjecture.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "Can the limitation of pipeline model parallelism be improved?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Page 4, in the \"min_update_interval\" paragraph, why \"Small min update interval may increase gradient staleness.\"?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "I would think it decreases staleness.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "The paper is clearly written and easy to follow.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.3965,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper proposes new direction for asynchronous training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "While many synchronous and asynchronous approaches for data parallelism have been proposed and implemented in the past, the space of asynchronous model parallelism hasn't really been explored before.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "This paper discusses an implementation of this approach and compares the results on dynamic neural networks as compared to existing parallel approaches.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "Pros:\n- Paper seems to cover and contrast well with the existing approaches and is able to clarify where it differs from existing papers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "- The new approach seems to show positive results on certain dynamic neural network problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Cons:\n- Data parallelism is a very commonly used technique for scaling.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "While the paper mentions support for it, the results are only showed on a toy problem, and it is unclear that it will work well for real problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "It will be great to see more results that use multiple replicas.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "- As the authors mention the messages also encapsulate meta-data or \"state\" as the authors refer to it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "This does seem to make their compiler more complex.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "This doesn't seem to be a requirement for their design and proposal, and it will be good to see explorations to improve on this in the future.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "- Comparisons with Dynet (somewhat hidden away) that offers auto-batching in a dynamic mode aren't very positive.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "Questions: \n- It appears that only a single copy of the parameters is kept, thus it is possible that some of the gradients may be computed with newer values than what the forward computation used.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "Is this true?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Does this cause convergence issues?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "Overall it seems like a valuable area for exploration, especially given the growing interest in dynamic neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "[Update] Lowered rating based on other feedback and revisiting empirical results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "The ideas are still interesting, but the empirical results are less convincing.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_569fc66e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_569fc66e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b36"
+        },
+        {
+            "source": "b_569fc66e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_569fc66e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_569fc66e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_569fc66e"
+        },
+        {
+            "source": "b_405b828c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_405b828c"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_75adc80e"
+        },
+        {
+            "source": "b_a227db3e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_a227db3e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_a227db3e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a227db3e"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aef15b0a"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5fc79122"
+        },
+        {
+            "source": "b_4230bfbb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4230bfbb"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_999426e1"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_366dc71a"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8f0e63da"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_db5bf094"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a4aefbb7"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c8afb2bc"
+        },
+        {
+            "source": "sec_9900f6b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f8876d0d"
+        },
+        {
+            "source": "sec_8563324f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_676871df"
+        },
+        {
+            "source": "b_4c63302a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_8563324f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4c63302a"
+        },
+        {
+            "source": "b_18d26909",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "b_18d26909",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_18d26909",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_18d26909",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b36"
+        },
+        {
+            "source": "b_18d26909",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_18d26909",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_8563324f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18d26909"
+        },
+        {
+            "source": "b_772695c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_772695c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_772695c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_e8aea9a6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_772695c7"
+        },
+        {
+            "source": "b_d2d3d484",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_d2d3d484",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_d2d3d484",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_d2d3d484",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_d2d3d484",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "sec_e8aea9a6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d2d3d484"
+        },
+        {
+            "source": "sec_b98aa0e1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3aee88bd"
+        },
+        {
+            "source": "sec_b98aa0e1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_681d1334"
+        },
+        {
+            "source": "sec_b98aa0e1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6f69ca9"
+        },
+        {
+            "source": "sec_b98aa0e1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5306716d"
+        },
+        {
+            "source": "b_437850bf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_97a83015",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_437850bf"
+        },
+        {
+            "source": "sec_a443f159",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6d4770f5"
+        },
+        {
+            "source": "sec_a443f159",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee2e1f45"
+        },
+        {
+            "source": "sec_a443f159",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_13bc884b"
+        },
+        {
+            "source": "sec_a443f159",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ba83309"
+        },
+        {
+            "source": "sec_a443f159",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e444c00"
+        },
+        {
+            "source": "sec_a443f159",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4d431ce4"
+        },
+        {
+            "source": "sec_52a41a5a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b16e8ef0"
+        },
+        {
+            "source": "sec_42ed93a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_acd01ae7"
+        },
+        {
+            "source": "sec_42ed93a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d64ca860"
+        },
+        {
+            "source": "sec_42ed93a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_40ac1450"
+        },
+        {
+            "source": "sec_42ed93a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1b650ef9"
+        },
+        {
+            "source": "b_017efb0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_42ed93a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_017efb0e"
+        },
+        {
+            "source": "sec_42ed93a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cd389d20"
+        },
+        {
+            "source": "b_64698982",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_42ed93a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_64698982"
+        },
+        {
+            "source": "sec_42ed93a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9e4bce22"
+        },
+        {
+            "source": "b_ab2b4fed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_ab2b4fed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_e22faf8e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ab2b4fed"
+        },
+        {
+            "source": "b_1a7e84f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_1a7e84f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_1a7e84f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_e22faf8e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1a7e84f1"
+        },
+        {
+            "source": "b_2e9d75c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "sec_e22faf8e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2e9d75c9"
+        },
+        {
+            "source": "b_e95c30ac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_e95c30ac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_e95c30ac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_e95c30ac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_e95c30ac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_e95c30ac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_e22faf8e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e95c30ac"
+        },
+        {
+            "source": "sec_4dee64d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2f73c378"
+        },
+        {
+            "source": "sec_cba2aaf0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f7f52108"
+        },
+        {
+            "source": "sec_cba2aaf0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_995c72ac"
+        },
+        {
+            "source": "b_3493904f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_cba2aaf0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3493904f"
+        },
+        {
+            "source": "sec_1f81a968",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e68374cc"
+        },
+        {
+            "source": "sec_405ada66",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cebdd27c"
+        },
+        {
+            "source": "sec_405ada66",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d40803bd"
+        },
+        {
+            "source": "sec_2c324b7a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_099846ec"
+        },
+        {
+            "source": "b_779c51c6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "sec_2c324b7a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_779c51c6"
+        },
+        {
+            "source": "sec_2c324b7a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_906d9b3d"
+        },
+        {
+            "source": "sec_2c324b7a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_01460516"
+        },
+        {
+            "source": "sec_2c324b7a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_399521ea"
+        },
+        {
+            "source": "b_5ae2c2cb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_5ae2c2cb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_5ae2c2cb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_8ba32726",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5ae2c2cb"
+        },
+        {
+            "source": "b_358994e3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_358994e3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_358994e3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_358994e3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_8ba32726",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_358994e3"
+        },
+        {
+            "source": "sec_8ba32726",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3e34bec3"
+        },
+        {
+            "source": "sec_531e48b0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ca7d7e94"
+        },
+        {
+            "source": "b_e962c1d5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_531e48b0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e962c1d5"
+        },
+        {
+            "source": "sec_531e48b0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b278e5cf"
+        },
+        {
+            "source": "sec_fe041d9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_04d44d67"
+        }
+    ]
+}

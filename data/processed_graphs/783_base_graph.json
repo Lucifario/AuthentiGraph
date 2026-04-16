@@ -1,0 +1,1660 @@
+{
+    "paper_metadata": {
+        "paper_id": "783",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Rejected",
+        "total_reviews_available": 8
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_83196477",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_213a164b",
+                        "type": "paragraph",
+                        "text": "The recent success of deep learning approaches for domains like speech recognition (Hinton et al., 2012) and computer vision (Ioffe & Szegedy, 2015) stems from many algorithmic improvements but also from the fact that the size of available training data has grown significantly over the years, together with the computing power, in terms of both CPUs and GPUs. While a single GPU often provides algorithmic simplicity and speed up to a given scale of data and model, there exist an operating point where a distributed implementation of training algorithms for deep architectures becomes necessary.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0248d23c",
+                        "type": "paragraph",
+                        "text": "Currently, popular distributed training algorithms include mini-batch versions of stochastic gradient descent (SGD) and other stochastic optimization algorithms such as AdaGrad (Duchi et al., 2011) , RMSProp (Tieleman & Hinton, 2012) , and ADAM (Kingma & Ba, 2014) . Unfortunately, bulksynchronous implementations of stochastic optimization are often slow in practice due to the need to wait for the slowest machine in each synchronous batch. To circumvent this problem, practitioners have resorted to asynchronous approaches which emphasize speed by using potentially stale information for computation. While asynchronous training have proven to be faster than their synchronous counterparts, they often result in convergence to poorer results.",
+                        "extracted_citations": [
+                            "Citation_b7",
+                            "Citation_b22",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9a180a56",
+                        "type": "paragraph",
+                        "text": "In this paper 1 , we revisit synchronous learning, and propose a method for mitigating stragglers in synchronous stochastic optimization. Specifically, we synchronously compute a mini-batch gradient with only a subset of worker machines, thus alleviating the straggler effect while avoiding any staleness in our gradients. The primary contributions of our paper are:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d29942e2",
+                        "type": "paragraph",
+                        "text": "\u2022 Illustration of how gradient staleness in asynchronous training negatively impacts test accuracy and is exacerbated by deep models.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8cf07b90",
+                        "type": "paragraph",
+                        "text": "\u2022 Measurement of machine response times for synchronous stochastic optimization in a large deployment of 100 GPUs, showing how stragglers in the tail end affect convergence speed.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_437a9194",
+                        "type": "paragraph",
+                        "text": "\u2022 Proposal of synchronous stochastic optimization with backup workers to mitigate straggler effects without gradient staleness.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fbdaf7c3",
+                        "type": "paragraph",
+                        "text": "\u2022 Establishing the need to measure both speed of convergence and test accuracy of optimum for empirical validation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c3232e59",
+                        "type": "paragraph",
+                        "text": "\u2022 Empirical demonstration that our proposed synchronous training method outperforms asynchronous training by converging faster and to better test accuracies.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_86f9e78f",
+                        "type": "paragraph",
+                        "text": "The remainder of this paper is organized as follows. We briefly present preliminaries and notation in Section 1.1. Section 2 describes asynchronous stochastic optimization and presents experimental evidence of gradient staleness in deep neural network models. We present our approach in Section 3, and exhibit straggler effects that motivate the approach. We then empirically evaluate our approach in Sections 4. Related work is discussed in Section 5, and we conclude in Section 6.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_15e51c7e",
+                "title": "PRELIMINARIES AND NOTATION",
+                "blocks": [
+                    {
+                        "block_id": "b_bb95c340",
+                        "type": "paragraph",
+                        "text": "Given a dataset X = {x i : i = 1, . . . , |X |}, our goal is to learn the parameters \u03b8 of a model with respect to an empirical loss function f , defined as f (\u03b8)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_179ededf",
+                        "type": "paragraph",
+                        "text": "is the loss with respect to a datapoint x i and the model \u03b8.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_622e7b5e",
+                        "type": "paragraph",
+                        "text": "A first-order stochastic optimization algorithm achieves this by iteratively updating \u03b8 using a stochastic gradient G \u2206 = \u2207F (x i ; \u03b8) computed at a randomly sampled x i , producing a sequence of models \u03b8 (0) , \u03b8 (1) , . . . . Stochastic optimization algorithms differ in their update equations. For example, the update of SGD is \u03b8",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aae4e23c",
+                        "type": "paragraph",
+                        "text": ", where \u03b3 t is the learning rate or step size at iteration t. A mini-batch version of the stochastic optimization algorithm computes the stochastic gradient over mini-batch of size B instead of a single datapoint, i.e., G",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d429b475",
+                        "type": "paragraph",
+                        "text": ", where x i 's are randomly sampled from X . We will often evaluate performance on an exponential moving average \u03b8(t) = \u03b1 \u03b8(t-1) + (1 -\u03b1)\u03b8 (t) with decay rate \u03b1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_863825ce",
+                        "type": "paragraph",
+                        "text": "Our interest is in distributed stochastic optimization using N worker machines in charge of computing stochastic gradients that are sent to M parameter servers. Each parameter server j is responsible for storing a subset \u03b8[j] of the model, and performing updates on \u03b8[j]. In the synchronous setting, we will also introduce additional b backup workers for straggler mitigation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ac9ae5c9",
+                "title": "ASYNCHRONOUS STOCHASTIC OPTIMIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_bba7ce3d",
+                        "type": "paragraph",
+                        "text": "An approach for a distributed stochastic gradient descent algorithm was presented in Dean et al. (2012) , consisting of two main ingredients. First, the parameters of the model are distributed on multiple servers, depending on the architecture. This set of servers are called the parameter servers. Second, there can be multiple workers processing data in parallel and communicating with the parameter servers. Each worker processes a mini-batch of data independently of the others, as follows:",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_819f8964",
+                        "type": "paragraph",
+                        "text": "\u2022 The worker fetches from the parameter servers the most up-to-date parameters of the model needed to process the current mini-batch; \u2022 It then computes gradients of the loss with respect to these parameters; \u2022 Finally, these gradients are sent back to the parameter servers, which then updates the model accordingly.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fc0fff71",
+                        "type": "paragraph",
+                        "text": "Since each worker communicates with the parameter servers independently of the others, this is called Asynchronous Stochastic Gradient Descent (Async-SGD), or more generally, Asynchronous Stochastic Optimization (Async-Opt). A similar approach was later proposed by Chilimbi et al. (2014) . Async-Opt is presented in Algorithms 1 and 2.",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c4894366",
+                        "type": "paragraph",
+                        "text": "In practice, the updates of Async-Opt are different than those of serially running the stochastic optimization algorithm for two reasons. Firstly, the read operation (Algo 1 Line 2) on a worker may be interleaved with updates by other workers to different parameter servers, so the resultant \u03b8 k may not be consistent with any parameter incarnation \u03b8 (t) . Secondly, model updates may have occurred while a worker is computing its stochastic gradient; hence, the resultant gradients are typically computed with respect to outdated parameters. We refer to these as stale gradients, and its staleness as the number of updates that have occurred between its corresponding read and update operations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9764f3a1",
+                        "type": "paragraph",
+                        "text": "Understanding the theoretical impact of staleness is difficult work and the topic of many recent papers, e.g. Recht et al. (2011) ; Duchi et al. (2013) ; Leblond et al. (2016); Reddi et al. (2015) ;",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b8",
+                            "Citation_b14",
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b1f97f46",
+                        "type": "paragraph",
+                        "text": "k to parameter servers. end Algorithm 2: Async-SGD Parameter Server j Input: \u03b30, \u03b31, . . . learning rates. Input: \u03b1 decay rate. Input: \u03b8 (0) model initialization. 1 for t = 0, 1, . . . do 2 Wait for gradient G from any worker.  De Sa et al. (2015) ; Mania et al. (2015) , most of which focus on individual algorithms, under strong assumptions that may not hold up in practice. This is further complicated by deep models with multiple layers, since the times at which model parameters are read and which gradients are computed and sent are dependent on the depth of the layers (Figure 1 ). To better understand this dependence in real models, we collected staleness statistics on a Async-Opt run with 40 workers on a 18-layer Inception model (Szegedy et al., 2016) trained on the ImageNet Challenge dataset (Russakovsky et al., 2015) , as shown in Table 1 . Despite the abovementioned problems, Async-Opt has been shown to be scale well up to a few dozens of workers for some models. However, at larger scales, increasing the number of machines (and thus staleness of gradients) can result in poorer trained models.",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b16",
+                            "Citation_b21",
+                            "Citation_b20"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ce71661b",
+                "title": "IMPACT OF STALENESS ON TEST ACCURACY",
+                "blocks": [
+                    {
+                        "block_id": "b_5e40b8ba",
+                        "type": "paragraph",
+                        "text": "We explore how increased staleness contributes to training of poorer models. In order to mimic the setting on a smaller scale, we trained a state-of-the-art MNIST CNN model but simulated staleness by using old gradients for the parameter updates. Details of the model and training are provided in Appendix A.1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_083c414c",
+                        "type": "paragraph",
+                        "text": "The best final classification error on a test set was 0.36%, which increases to 0.47% with average gradient staleness of 20 steps, and up to 0.79% with 50 steps (see Figure 2 ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7070563b",
+                        "type": "paragraph",
+                        "text": "Once the average simulated staleness was chosen to be more than 15 steps, the results started to significantly deteriorate and the training itself became much less stable. We had to employ following tricks to prevent the results from blowing up:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e7faf083",
+                        "type": "paragraph",
+                        "text": "\u2022 Slowly increase the staleness over the first 3 epochs of training. This mimics increasing the number of asynchronous workers and is also very important in practice for some of the models we experimented with (e.g. large word-level language models). The trick was not relevant with a simulated staleness less than 15 but became crucial for larger values.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_edf91381",
+                        "type": "paragraph",
+                        "text": "\u2022 Use lower initial learning rates when staleness is at least 20, which reduces a frequency of explosions (train error goes to 90%). This observation is similar to what we found in other experiments -we were able to use much larger learning rates with synchronous training and the results were also more stable.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_07e4e2b4",
+                        "type": "paragraph",
+                        "text": "\u2022 Even with above tricks the divergence occurs occasionally and we found that restarting training from random weights can lead to more successful runs. The best results were then chosen based on validation set performance.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_35a663e8",
+                "title": "REVISTING SYNCHRONOUS STOCHASTIC OPTIMIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_b594eb4d",
+                        "type": "paragraph",
+                        "text": "Both Dean et al. (2012) and Chilimbi et al. (2014) use versions of Async-SGD where the main potential problem is that each worker computes gradients over a potentially old version of the model.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_19b89e47",
+                        "type": "paragraph",
+                        "text": "In order to remove this discrepancy, we propose here to reconsider a synchronous version of distributed stochastic gradient descent (Sync-SGD), or more generally, Synchronous Stochastic Optimization (Sync-Opt), where the parameter servers wait for all workers to send their gradients, aggregate them, and send the updated parameters to all workers afterward. This ensures that the actual algorithm is a true mini-batch stochastic gradient descent, with an effective batch size equal to the sum of all the mini-batch sizes of the workers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9c51e4b5",
+                        "type": "paragraph",
+                        "text": "While this approach solves the staleness problem, it also introduces the potential problem that the actual update time now depends on the slowest worker. Although workers have equivalent computation and network communication workload, slow stragglers may result from failing hardware, or contention on shared underlying hardware resources in data centers, or even due to preemption by other jobs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_562396b2",
+                        "type": "paragraph",
+                        "text": "To alleviate the straggler problem, we introduce backup workers (Dean & Barroso, 2013) as follows: instead of having only N workers, we add b extra workers, but as soon as the parameter servers receive gradients from any N workers, they stop waiting and update their parameters using the N gradients. The slowest b workers' gradients will be dropped when they arrive. Our method is presented in Algorithms 3, 4. Wait to read \u03b8 (t) = (\u03b8 (t) [0], . . . , \u03b8 (t) [M ]) from parameter servers.",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8195b83b",
+                        "type": "paragraph",
+                        "text": "end Send (G Wait for (G, t ) from any worker.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e858f36d",
+                "title": "STRAGGLER EFFECTS",
+                "blocks": [
+                    {
+                        "block_id": "b_511b15e7",
+                        "type": "paragraph",
+                        "text": "The use of backup workers is motivated by the need to mitigate slow stragglers while maximizing computation. We investigate the effect of stragglers on Sync-Opt model training here.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0135e782",
+                        "type": "paragraph",
+                        "text": "We ran Sync-Opt with N = 100 workers, b = 0 backups, and 19 parameter servers on the Inception model. Using one variable as a proxy, we collected for each iteration both the start time of the iteration and the time when the kth gradient of that variable arrived at the parameter server. These times are presented in Figure 3 for k = 1, 50, 90, 97, 98, 99, 100. Note that 80% of the 98th gradient arrives in under 2s, whereas only 30% of the final gradient do. Furthermore, the time to collect the final few gradients grows exponentially, resulting in wasted idle resources and time expended to wait for the slowest gradients. This exponential increase is also seen in Figure 4 .  Thus, one might choose to drop slow stragglers to decrease the iteration time. However, using fewer machines implies a smaller effective mini-batch size and thus greater gradient variance, which in turn could require more iterations for convergence. We examine this relationship by running Sync-Opt 2 with N = 50, 70, 80, 90, 100 and b = 6, and note the number of iterations required for convergence in Figure 5 . Additional details of this training are provided in Appendix A.2. As N is doubled from 50 to 100, the number of iterations to converge nearly halves from 137.5e3 to 76.2e3.  Hence, there is a trade-off between dropping more stragglers to reduce iteration time, and waiting for more gradients to improve the gradient quality. Consider a hypothetical setting where we have N + b = 100 machines, and we wish to choose the best configuration of N and b to minimize running time to convergence 3 . For each configuration, we can estimate the iterations required from Figure 5 (linearly interpolating for values of N for which we did not collect data). We can multiply this with the mean iteration times (Figure 4 ) to obtain the running time required to converge for each setting of N and b. These results are shown in Figure 6 , indicating that N = 96, b = 4 converges fastest. Therefore, this motivates our choice to use a few backup workers for mitigating stragglers.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_519beedd",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_035cdde4",
+                        "type": "paragraph",
+                        "text": "In this section, we present our empirical comparisons of synchronous and asynchronous distributed stochastic optimization algorithms as applied to models such as Inception and PixelCNN. All experiments in this paper are using the TensorFlow system (Abadi et al., 2015) .",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b233ed2f",
+                "title": "METRICS OF COMPARISON: FASTER CONVERGENCE, BETTER OPTIMUM",
+                "blocks": [
+                    {
+                        "block_id": "b_a250bdfd",
+                        "type": "paragraph",
+                        "text": "We are interested in two metrics of comparison for our empirical validation: (1) test error or accuracy, and (2) speed of convergence 3 . We point out that for non-convex deep learning models, it is possible to converge faster to a poorer local optimum. Here we show a simple example with Inception using different learning rates.   To reach a lower test precision, small \u03b30's require fewer epochs than large \u03b30's. However, small \u03b30's either fail to attain high precision, or take more epochs than higher \u03b30's.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2e87a5f9",
+                        "type": "paragraph",
+                        "text": "We ran Sync-Opt on Inception with N = 100 and b = 6, but varied the initial learning rate \u03b3 0 between 1.125 and 9.0. (Learning rates are exponentially decreased with iterations.) Table 2 shows that smaller \u03b3 0 converge faster, but to poorer test precisions. Focusing on speed on an early phase of training could lead to misleading conclusions if we fail to account for eventual convergence. For example, Figure 3b shows that using \u03b3 0 = 1.125 reaches = 75% precision 1.5\u00d7 faster than \u03b3 0 = 4.5, but is slower for = 77.75%, and fails to reach higher precisions.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9d029d60",
+                "title": "INCEPTION",
+                "blocks": [
+                    {
+                        "block_id": "b_d21f5bb0",
+                        "type": "paragraph",
+                        "text": "We conducted experiments on the Inception model (Szegedy et al., 2016) trained on ImageNet Challenge dataset (Russakovsky et al., 2015) , where the task is to classify images out of 1000 categories. We used several configurations, varying N + b from 53 to 212 workers. Additional details of the training are provided in Appendix A.3. An epoch is a synchronous iteration for Sync-Opt, or a full pass of N updates for Async-Opt, which represent similar amounts of computation. Results of this experiment are presented in Figure 8 .",
+                        "extracted_citations": [
+                            "Citation_b21",
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1d71d6af",
+                        "type": "paragraph",
+                        "text": "Figure 8b shows that Sync-Opt outperforms Async-Opt in test precision: Sync-Opt attains \u223c0.5% better test precision than Async-Opt for comparable N + b workers. Furthermore, Sync-Opt con- Sync-Opt with backup workers converge faster, with fewer epochs, to higher test accuracies.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_331a628b",
+                        "type": "paragraph",
+                        "text": "verges 6h and 18h faster than Async-Opt for 106 and 212 workers respectively, and is 3h slower when 53 workers are used, as seen in Figure 8d . This difference in speed is largely due to the fewer epochs (Figure 8c ) needed by Sync-Opt, but comparable or better epoch time (Figure 8e ).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c913fce5",
+                "title": "PIXELCNN EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_6a36d00d",
+                        "type": "paragraph",
+                        "text": "The second model we experimented on is PixelCNN (Oord et al., 2016) Under review as a conference paper at ICLR 2017 Convergence of the test negative log likelihood (NLL) on PixelCNN is shown in Figure 9a , where lower is better. Observe that Sync-Opt obtains lower NLL than Async-Opt; in fact, Async-Opt is even outperformed by serial RMSProp with N = 1 worker, with degrading performance as N increases from 8 to 16. Figure 9b further shows the time taken to reach test NLL. Sync-Opt reduces the time to reach = 2.145 from 247h to 58.3h; this NLL is not even achieved by Async-Opt. An alternative solution, \"softsync\", was presented in Zhang et al. (2015b) , which proposed batching gradients from multiple machines before performing an asynchronous SGD update, thereby reducing the effective staleness of gradients. Similar to our proposal, softsync avoids stragglers by not forcing updates to wait for the slowest worker. However, softsync allows the use of stale gradients but we do not. The two solutions provide different explorations of the trade-off between high accuracy (by minimizing staleness) and fast throughput (by avoiding stragglers).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_355dc985",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_9bce34ed",
+                        "type": "paragraph",
+                        "text": "Watcharapichat et al. ( 2016 ) introduces a distributed deep learning system without parameter servers, by having workers interleave gradient computation and communication in a round-robin pattern. Like Async-Opt, this approach suffers from staleness. We also note that in principle, workers in Sync-Opt can double as parameter servers and execute the update operations and avoid the need to partition hardware resources between workers and servers. Das et al. (2016) analyzes distributed stochastic optimization and optimizes the system by solving detailed system balance equations. We believe this approach is complimentary to our work, and could potentially be applied to guide the choice of systems configurations for Sync-Opt. Keskar et al. (2016) suggests that large batch sizes for synchronous stochastic optimization leads to poorer generalization. Our effective batch size increases linearly with the number of workers N . However, we did not observe this effect in our experiments; we believe we are not yet in the large batch size regime examined by Keskar et al. (2016) .",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b11",
+                            "Citation_b11"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_342aa2aa",
+                "title": "CONCLUSION AND FUTURE WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_7ea80fae",
+                        "type": "paragraph",
+                        "text": "Distributed training strategies for deep learning architectures will become ever more important as the size of datasets increases. In this work, we have shown how both synchronous and asynchronous distributed stochastic optimization suffer from their respective weaknesses of stragglers and staleness. This has motivated our development of synchronous stochastic optimization with backup workers, which we show to be a viable and scalable strategy.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9547b0b5",
+                        "type": "paragraph",
+                        "text": "We are currently experimenting with different kinds of datasets, including word-level language models where parts of the model (the embedding layers) are often very sparse, which involves very different communication constraints. We are also working on further improving the performance of synchronous training like combining gradients from multiple workers sharing the same machine before sending them to the parameter servers to reduce the communication overhead. An alternative of using time-outs instead of backup workers is also being explored.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "TensorFlow: Large-scale machine learning on heterogeneous systems Mart\u00edn Abadi Ashish Agarwal Paul Barham Eugene Brevdo Zhifeng Chen Craig Citro Greg S Corrado Andy Davis Jeffrey Dean Matthieu Devin Sanjay Ghemawat Ian Goodfellow Andrew Harp Geoffrey Irving Michael Isard Yangqing Jia Rafal Jozefowicz Lukasz Kaiser Manjunath Kudlur Josh Levenberg Dan Man\u00e9 Rajat Monga Sherry Moore Derek Murray Chris Olah Mike Schuster Jonathon Shlens Benoit Steiner Ilya Sutskever Kunal Talwar Paul Tucker Vincent Vanhoucke Vijay Vasudevan Fernanda Vi\u00e9gas Oriol Vinyals Pete Warden Martin Wattenberg Martin Wicke Yuan Yu Xiaoqiang Zheng 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Revisiting distributed synchronous sgd Jianmin Chen Rajat Monga Samy Bengio Rafal Jozefowicz arXiv:1604.00981 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Project adam: Building an efficient and scalable deep learning training system T Chilimbi Y Suzue J Apacible K Kalyanaraman Proceedings of the 11th USENIX Symposium on Operating Systems Design and Implementation the 11th USENIX Symposium on Operating Systems Design and Implementation 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Distributed deep learning using synchronous stochastic gradient descent Dipankar Das Sasikanth Avancha Dheevatsa Mudigere Karthikeyan Vaidynathan Srinivas Sridharan Dhiraj Kalamkar Bharat Kaul Pradeep Dubey arXiv:1602.06709 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Taming the wild: A unified analysis of hogwild-style algorithms Christopher M De Sa Ce Zhang Kunle Olukotun Christopher R\u00e9 Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Large scale distributed deep networks J Dean G S Corrado R Monga K Chen M Devin Q V Le M Z Mao M A Ranzato A Senior P Tucker K Yang A Y Ng Advances in Neural Information Processing Systems, NIPS 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "The tail at scale Jeffrey Dean Luiz Andr Barroso Communications of the ACM 56 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Adaptive subgradient methods for online learning and stochastic optimization John Duchi Elad Hazan Yoram Singer Journal of Machine Learning Research 12 Jul. 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Estimation, optimization, and parallelism when data is sparse John Duchi Brendan Michael I Jordan Mcmahan Advances in Neural Information Processing Systems 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Deep neural networks for acoustic modeling in speech recognition G Hinton L Deng D Yu G Dahl A Mohamed N Jaitly A Senior V Vanhoucke P Nguyen T N Sainath B Kingsbury IEEE Signal Processing Magazine 29 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Batch normalization: Accelerating deep network training by reducing internal covariate shift S Ioffe C Szegedy Proceedings of the 32nd International Conference on Machine Learning, ICML the 32nd International Conference on Machine Learning, ICML 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "On large-batch training for deep learning: Generalization gap and sharp minima Nitish Shirish Keskar Dheevatsa Mudigere Jorge Nocedal Mikhail Smelyanskiy Ping Tak Peter Tang arXiv:1609.04836 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Diederik Kingma Jimmy Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Learning multiple layers of features from tiny images Alex Krizhevsky Geoffrey Hinton 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "R\u00e9mi Leblond Fabian Pedregosa Simon Lacoste-Julien arXiv:1606.04809 Asaga: Asynchronous parallel saga 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Scaling distributed machine learning with the parameter server Mu Li Jun Woo David G Andersen Alexander J Park Amr Smola Vanja Ahmed James Josifovski Eugene J Long Bor-Yiing Shekita Su 11th USENIX Symposium on Operating Systems Design and Implementation 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Perturbed iterate analysis for asynchronous stochastic optimization Horia Mania Xinghao Pan Dimitris Papailiopoulos Benjamin Recht Kannan Ramchandran Michael I Jordan arXiv:1507.06970 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Aaron Van Den Oord Nal Kalchbrenner Oriol Vinyals Lasse Espeholt Alex Graves Koray Kavukcuoglu arXiv:1606.05328 Conditional image generation with pixelcnn decoders 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Hogwild: A lock-free approach to parallelizing stochastic gradient descent Benjamin Recht Christopher Re Stephen Wright Feng Niu Advances in Neural Information Processing Systems 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "On variance reduction in stochastic gradient descent and its asynchronous variants J Sashank Ahmed Reddi Suvrit Hefny Barnabas Sra Alex J Poczos Smola Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Imagenet large scale visual recognition challenge Olga Russakovsky Jia Deng Hao Su Jonathan Krause Sanjeev Satheesh Sean Ma Zhiheng Huang Andrej Karpathy Aditya Khosla Michael Bernstein Alexander C Berg Li Fei-Fei International Journal of Computer Vision 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Rethinking the inception architecture for computer vision C Szegedy V Vanhoucke S Ioffe J Shlens Z Wojna ArXiv 1512.00567 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Lecture 6.5-rmsprop: Divide the gradient by a running average of its recent magnitude Tijmen Tieleman Geoffrey Hinton COURSERA: Neural Networks for Machine Learning 2012 4",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Ako: Decentralised deep learning with partial gradient exchange Pijika Watcharapichat Victoria Lopez Morales Raul Castro Fernandez Peter Pietzuch Proceedings of the Seventh ACM Symposium on Cloud Computing the Seventh ACM Symposium on Cloud Computing ACM 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Petuum: A new platform for distributed machine learning on big data Qirong Eric P Xing Wei Ho Jin Kyu Dai Jinliang Kim Seunghak Wei Xun Lee Pengtao Zheng Abhimanu Xie Yaoliang Kumar Yu IEEE Transactions on Big Data 1 2 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Deep learning with elastic averaging sgd Sixin Zhang Anna E Choromanska Yann Lecun Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Wei Zhang Suyog Gupta Xiangru Lian Ji Liu arXiv:1511.05950 Staleness-aware async-sgd for distributed deep learning 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Yuchen Zhang Michael I Jordan arXiv:1506.07552 Splash: User-friendly programming interface for parallelizing stochastic algorithms 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Parallelized stochastic gradient descent Martin Zinkevich Markus Weimer Lihong Li Alex J Smola Advances in neural information processing systems 2010",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.4036,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper was easy to read, the main idea was presented very clearly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The main points of the paper (and my concerns are below) can be summarized as follows:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "synchronous algoriths suffer from some struggeling nodes, for which the algorithm has to wait.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "From my own experience, this has never happend for me on e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Amazon EC2 cloud, however, it happens on our own cluster at my university, if the cluster is shared and some users make some nodes very busy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "So maybe if the nodes would be dedicated to just user's job, it wouldn't be such a big concer (I am not sure what kind of cluster was used to produce Figure 3 and 4).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "Also how many experiments have you run?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "In my own experience, most of the time I get the gradient on time from all nodes equality fast, but maybe just in less than 0.1% of iterations I observe that it took maybe twice as long for some node.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Also the increasing shape of the curve is somehow implying some weird implementation of communication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Isn't it only because you are somehow serialize the communication?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "And it would be maybe much faster if a \"MPI_Reduce\" would be used (even if we wait for the slowest guy)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "asynchronous algorithms are cutting the waiting time, however, the convergence speed may be slower.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "Moreover, those algorithms can be divergence it special care is not given to stale gradients.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "Also they have a nice guarantees for convex functions, but the non-convex DNN may cause pain.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "3.they propose to take gradient from the first \"N\" workers out of \"N+b\" \nworkers available.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "My concern here is that they focused only on the \nworkers, but what if the \"parameter server\" will became to slow?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "What \nif the parameter server would be the bottleneck?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "How would you address \nthis situation?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "But still if the number of nodes (N) is not large, and \nthe deep DNN is used, I can imagine that the communciation will not \ntake more than 30% of the run-time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "My largest concern is with the experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "Different batch size \nimplies that different learning rate should be chosen, right?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "How did \nyou tune the learning rates and other parameters for e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "Figure 5 you \nprovide some formulas in (A2) but clearly this can bias your Figures, \nright?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "meaning, that if you tune \"\\gamma, \\beta\" for each N, it could \nbe somehow more representative?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "also it would be nicer if you run the \nexperiment many times and then report average, best and worst case \nbehaviour.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "because now it can be just coinsidence, right?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.4036,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper was easy to read, the main idea was presented very clearly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The main points of the paper (and my concerns are below) can be summarized as follows:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "synchronous algoriths suffer from some struggeling nodes, for which the algorithm has to wait.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "From my own experience, this has never happend for me on e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Amazon EC2 cloud, however, it happens on our own cluster at my university, if the cluster is shared and some users make some nodes very busy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "So maybe if the nodes would be dedicated to just user's job, it wouldn't be such a big concer (I am not sure what kind of cluster was used to produce Figure 3 and 4).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Also how many experiments have you run?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "In my own experience, most of the time I get the gradient on time from all nodes equality fast, but maybe just in less than 0.1% of iterations I observe that it took maybe twice as long for some node.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Also the increasing shape of the curve is somehow implying some weird implementation of communication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Isn't it only because you are somehow serialize the communication?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "And it would be maybe much faster if a \"MPI_Reduce\" would be used (even if we wait for the slowest guy)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "asynchronous algorithms are cutting the waiting time, however, the convergence speed may be slower.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "Moreover, those algorithms can be divergence it special care is not given to stale gradients.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "Also they have a nice guarantees for convex functions, but the non-convex DNN may cause pain.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "3.they propose to take gradient from the first \"N\" workers out of \"N+b\" \nworkers available.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "My concern here is that they focused only on the \nworkers, but what if the \"parameter server\" will became to slow?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "What \nif the parameter server would be the bottleneck?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "How would you address \nthis situation?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "But still if the number of nodes (N) is not large, and \nthe deep DNN is used, I can imagine that the communciation will not \ntake more than 30% of the run-time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "My largest concern is with the experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "Different batch size \nimplies that different learning rate should be chosen, right?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "How did \nyou tune the learning rates and other parameters for e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "Figure 5 you \nprovide some formulas in (A2) but clearly this can bias your Figures, \nright?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_23",
+                    "text": "meaning, that if you tune \"\\gamma, \\beta\" for each N, it could \nbe somehow more representative?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_24",
+                    "text": "also it would be nicer if you run the \nexperiment many times and then report average, best and worst case \nbehaviour.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_25",
+                    "text": "because now it can be just coinsidence, right?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.7287,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "This paper proposed a synchronous parallel SGD by employing several backup machines.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "The parameter server does not have to wait for the return from all machines to perform the update on the model, which reduce the synchronization overhead.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "It sounds like a reasonable and straightforward idea.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "My main concern is that this approach is only suitable for some very specific scenario, that is, most learners (except a small number of learners) are at the same pace to return the results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "If the efficiency of learners does not follow such distribution, I do not think that the proposed algorithm will work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "So I suggest two revisions:\n\n- provide more experiments to show the performance with different efficiency distributions of learners.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "- assuming that all learners follow the same distribution of efficiency and show the expected idle time is minor by using the proposed algorithm.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_7",
+            "type": "Human",
+            "liang_alpha_score": 0.6413,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_7_s_0",
+                    "text": "The proposed technique of over-provisioning a few workers to improve the hardware efficiency of synchronous training gives a very welcome boost, as evidenced beautifully by Figure 6.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_1",
+                    "text": "However, as I have discussed in private communication with the authors, the comparison with asynchronous methods leaves a few questions regarding tuning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_2",
+                    "text": "Learning rate:\u00a0\n\nThe authors carefully describe the process of tuning the synchronous implementation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_3",
+                    "text": "However no tuning is reported for the asynchronous implementation: the value is set to 0.045 for all configurations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_4",
+                    "text": "Figure 7(a) shows that tuning the learning rate can cause a difference of almost a whole percentage point in test precision.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_5",
+                    "text": "What other values of LR have the authors tried for asynchronous training?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_6",
+                    "text": "Is 0.045 the best one for all configurations they report?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_7",
+                    "text": "Is there any chance that the 0.5% difference in precision between sync and async is due to insufficient LR tuning (as suggested by Figure 7(a))?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_8",
+                    "text": "Momentum:\n\nOur results (",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_9",
+            "type": "Human",
+            "liang_alpha_score": 0.4036,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_9_s_0",
+                    "text": "This paper was easy to read, the main idea was presented very clearly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_1",
+                    "text": "The main points of the paper (and my concerns are below) can be summarized as follows:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_2",
+                    "text": "synchronous algoriths suffer from some struggeling nodes, for which the algorithm has to wait.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_3",
+                    "text": "From my own experience, this has never happend for me on e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_4",
+                    "text": "Amazon EC2 cloud, however, it happens on our own cluster at my university, if the cluster is shared and some users make some nodes very busy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_5",
+                    "text": "So maybe if the nodes would be dedicated to just user's job, it wouldn't be such a big concer (I am not sure what kind of cluster was used to produce Figure 3 and 4).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_6",
+                    "text": "Also how many experiments have you run?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_7",
+                    "text": "In my own experience, most of the time I get the gradient on time from all nodes equality fast, but maybe just in less than 0.1% of iterations I observe that it took maybe twice as long for some node.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_8",
+                    "text": "Also the increasing shape of the curve is somehow implying some weird implementation of communication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_9",
+                    "text": "Isn't it only because you are somehow serialize the communication?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_10",
+                    "text": "And it would be maybe much faster if a \"MPI_Reduce\" would be used (even if we wait for the slowest guy)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_11",
+                    "text": "asynchronous algorithms are cutting the waiting time, however, the convergence speed may be slower.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_12",
+                    "text": "Moreover, those algorithms can be divergence it special care is not given to stale gradients.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_13",
+                    "text": "Also they have a nice guarantees for convex functions, but the non-convex DNN may cause pain.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_14",
+                    "text": "3.they propose to take gradient from the first \"N\" workers out of \"N+b\" \nworkers available.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_15",
+                    "text": "My concern here is that they focused only on the \nworkers, but what if the \"parameter server\" will became to slow?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_16",
+                    "text": "What \nif the parameter server would be the bottleneck?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_17",
+                    "text": "How would you address \nthis situation?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_18",
+                    "text": "But still if the number of nodes (N) is not large, and \nthe deep DNN is used, I can imagine that the communciation will not \ntake more than 30% of the run-time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_19",
+                    "text": "My largest concern is with the experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_20",
+                    "text": "Different batch size \nimplies that different learning rate should be chosen, right?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_21",
+                    "text": "How did \nyou tune the learning rates and other parameters for e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_22",
+                    "text": "Figure 5 you \nprovide some formulas in (A2) but clearly this can bias your Figures, \nright?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_23",
+                    "text": "meaning, that if you tune \"\\gamma, \\beta\" for each N, it could \nbe somehow more representative?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_24",
+                    "text": "also it would be nicer if you run the \nexperiment many times and then report average, best and worst case \nbehaviour.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_25",
+                    "text": "because now it can be just coinsidence, right?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_11",
+            "type": "Human",
+            "liang_alpha_score": 0.4036,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_11_s_0",
+                    "text": "This paper was easy to read, the main idea was presented very clearly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_1",
+                    "text": "The main points of the paper (and my concerns are below) can be summarized as follows:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_2",
+                    "text": "synchronous algoriths suffer from some struggeling nodes, for which the algorithm has to wait.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_3",
+                    "text": "From my own experience, this has never happend for me on e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_4",
+                    "text": "Amazon EC2 cloud, however, it happens on our own cluster at my university, if the cluster is shared and some users make some nodes very busy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_5",
+                    "text": "So maybe if the nodes would be dedicated to just user's job, it wouldn't be such a big concer (I am not sure what kind of cluster was used to produce Figure 3 and 4).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_6",
+                    "text": "Also how many experiments have you run?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_7",
+                    "text": "In my own experience, most of the time I get the gradient on time from all nodes equality fast, but maybe just in less than 0.1% of iterations I observe that it took maybe twice as long for some node.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_8",
+                    "text": "Also the increasing shape of the curve is somehow implying some weird implementation of communication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_9",
+                    "text": "Isn't it only because you are somehow serialize the communication?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_10",
+                    "text": "And it would be maybe much faster if a \"MPI_Reduce\" would be used (even if we wait for the slowest guy)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_11",
+                    "text": "asynchronous algorithms are cutting the waiting time, however, the convergence speed may be slower.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_12",
+                    "text": "Moreover, those algorithms can be divergence it special care is not given to stale gradients.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_13",
+                    "text": "Also they have a nice guarantees for convex functions, but the non-convex DNN may cause pain.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_14",
+                    "text": "3.they propose to take gradient from the first \"N\" workers out of \"N+b\" \nworkers available.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_15",
+                    "text": "My concern here is that they focused only on the \nworkers, but what if the \"parameter server\" will became to slow?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_16",
+                    "text": "What \nif the parameter server would be the bottleneck?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_17",
+                    "text": "How would you address \nthis situation?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_18",
+                    "text": "But still if the number of nodes (N) is not large, and \nthe deep DNN is used, I can imagine that the communciation will not \ntake more than 30% of the run-time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_19",
+                    "text": "My largest concern is with the experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_20",
+                    "text": "Different batch size \nimplies that different learning rate should be chosen, right?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_21",
+                    "text": "How did \nyou tune the learning rates and other parameters for e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_22",
+                    "text": "Figure 5 you \nprovide some formulas in (A2) but clearly this can bias your Figures, \nright?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_23",
+                    "text": "meaning, that if you tune \"\\gamma, \\beta\" for each N, it could \nbe somehow more representative?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_24",
+                    "text": "also it would be nicer if you run the \nexperiment many times and then report average, best and worst case \nbehaviour.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_25",
+                    "text": "because now it can be just coinsidence, right?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_12",
+            "type": "Human",
+            "liang_alpha_score": 0.7287,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_12_s_0",
+                    "text": "This paper proposed a synchronous parallel SGD by employing several backup machines.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_1",
+                    "text": "The parameter server does not have to wait for the return from all machines to perform the update on the model, which reduce the synchronization overhead.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_2",
+                    "text": "It sounds like a reasonable and straightforward idea.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_3",
+                    "text": "My main concern is that this approach is only suitable for some very specific scenario, that is, most learners (except a small number of learners) are at the same pace to return the results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_4",
+                    "text": "If the efficiency of learners does not follow such distribution, I do not think that the proposed algorithm will work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_5",
+                    "text": "So I suggest two revisions:\n\n- provide more experiments to show the performance with different efficiency distributions of learners.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_6",
+                    "text": "- assuming that all learners follow the same distribution of efficiency and show the expected idle time is minor by using the proposed algorithm.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_16",
+            "type": "Human",
+            "liang_alpha_score": 0.6413,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_16_s_0",
+                    "text": "The proposed technique of over-provisioning a few workers to improve the hardware efficiency of synchronous training gives a very welcome boost, as evidenced beautifully by Figure 6.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_1",
+                    "text": "However, as I have discussed in private communication with the authors, the comparison with asynchronous methods leaves a few questions regarding tuning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_2",
+                    "text": "Learning rate:\u00a0\n\nThe authors carefully describe the process of tuning the synchronous implementation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_3",
+                    "text": "However no tuning is reported for the asynchronous implementation: the value is set to 0.045 for all configurations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_4",
+                    "text": "Figure 7(a) shows that tuning the learning rate can cause a difference of almost a whole percentage point in test precision.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_5",
+                    "text": "What other values of LR have the authors tried for asynchronous training?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_6",
+                    "text": "Is 0.045 the best one for all configurations they report?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_7",
+                    "text": "Is there any chance that the 0.5% difference in precision between sync and async is due to insufficient LR tuning (as suggested by Figure 7(a))?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_8",
+                    "text": "Momentum:\n\nOur results (",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_213a164b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_213a164b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_213a164b"
+        },
+        {
+            "source": "b_0248d23c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_0248d23c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_0248d23c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0248d23c"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9a180a56"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d29942e2"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8cf07b90"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_437a9194"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fbdaf7c3"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c3232e59"
+        },
+        {
+            "source": "sec_83196477",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_86f9e78f"
+        },
+        {
+            "source": "sec_15e51c7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bb95c340"
+        },
+        {
+            "source": "sec_15e51c7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_179ededf"
+        },
+        {
+            "source": "sec_15e51c7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_622e7b5e"
+        },
+        {
+            "source": "sec_15e51c7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aae4e23c"
+        },
+        {
+            "source": "sec_15e51c7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d429b475"
+        },
+        {
+            "source": "sec_15e51c7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_863825ce"
+        },
+        {
+            "source": "b_bba7ce3d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_ac9ae5c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bba7ce3d"
+        },
+        {
+            "source": "sec_ac9ae5c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_819f8964"
+        },
+        {
+            "source": "b_fc0fff71",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_ac9ae5c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fc0fff71"
+        },
+        {
+            "source": "sec_ac9ae5c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c4894366"
+        },
+        {
+            "source": "b_9764f3a1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_9764f3a1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_9764f3a1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_9764f3a1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_ac9ae5c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9764f3a1"
+        },
+        {
+            "source": "b_b1f97f46",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_b1f97f46",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_b1f97f46",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_b1f97f46",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_ac9ae5c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b1f97f46"
+        },
+        {
+            "source": "sec_ce71661b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e40b8ba"
+        },
+        {
+            "source": "sec_ce71661b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_083c414c"
+        },
+        {
+            "source": "sec_ce71661b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7070563b"
+        },
+        {
+            "source": "sec_ce71661b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e7faf083"
+        },
+        {
+            "source": "sec_ce71661b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_edf91381"
+        },
+        {
+            "source": "sec_ce71661b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07e4e2b4"
+        },
+        {
+            "source": "b_b594eb4d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_b594eb4d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_35a663e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b594eb4d"
+        },
+        {
+            "source": "sec_35a663e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_19b89e47"
+        },
+        {
+            "source": "sec_35a663e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9c51e4b5"
+        },
+        {
+            "source": "b_562396b2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_35a663e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_562396b2"
+        },
+        {
+            "source": "sec_35a663e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8195b83b"
+        },
+        {
+            "source": "sec_e858f36d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_511b15e7"
+        },
+        {
+            "source": "sec_e858f36d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0135e782"
+        },
+        {
+            "source": "b_035cdde4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_519beedd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_035cdde4"
+        },
+        {
+            "source": "sec_b233ed2f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a250bdfd"
+        },
+        {
+            "source": "sec_b233ed2f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2e87a5f9"
+        },
+        {
+            "source": "b_d21f5bb0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_d21f5bb0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_9d029d60",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d21f5bb0"
+        },
+        {
+            "source": "sec_9d029d60",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d71d6af"
+        },
+        {
+            "source": "sec_9d029d60",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_331a628b"
+        },
+        {
+            "source": "sec_c913fce5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6a36d00d"
+        },
+        {
+            "source": "b_9bce34ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_9bce34ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_9bce34ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_355dc985",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9bce34ed"
+        },
+        {
+            "source": "sec_342aa2aa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ea80fae"
+        },
+        {
+            "source": "sec_342aa2aa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9547b0b5"
+        }
+    ]
+}

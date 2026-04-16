@@ -1,0 +1,1634 @@
+{
+    "paper_metadata": {
+        "paper_id": "688",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Rejected",
+        "total_reviews_available": 8
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_32cc5ab0",
+                "title": "Untitled Section",
+                "blocks": [
+                    {
+                        "block_id": "b_2a391bea",
+                        "type": "paragraph",
+                        "text": "There are many ways to learn good policies using past data. The two most popular are Q-learning and direct policy optimization. In Q-learning (Sutton & Barto, 1998) , we are trying to learn a mapping from a (state, action) pair to the reward. Given this mapping and a state, we can then find the action which leads to the maximal predicted reward. This method has been very successful, especially when the action space is small, since we need to test all the actions, and the reward somewhat predictable, since taking the maximum is unstable and a small error can lead to suboptimal actions.",
+                        "extracted_citations": [
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d52da849",
+                        "type": "paragraph",
+                        "text": "Direct policy optimization, rather than trying to estimate the value of a (state, action) pair, directly parameterizes a policy, i.e. a conditional distribution over actions given the current state. More precisely, and using the notation from Kober (2014) , we wish to maximize the expected return of a policy p(\u2022|\u03b8) with parameters \u03b8, i.e.",
+                        "extracted_citations": [
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c01ebbf2",
+                        "type": "paragraph",
+                        "text": "where T is the set of all paths \u03c4 and R(\u03c4 ) is the reward associated with path \u03c4 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2c19c9af",
+                        "type": "paragraph",
+                        "text": "A rollout \u03c4 = [s 1:T +1 , a 1:T ] is a series of states s 1:T +1 = [s 1 , . . . , s T +1 ] and actions a 1:T = [a 1 , . . . , a T ]. p(\u03c4 |\u03b8) is the probability of rollout \u03c4 when using a policy with parameters \u03b8 and R(\u03c4 ) is the aggregated return of \u03c4 . If we make the Markov assumption that a state only depends on the previous state and the action chosen, we have p(\u03c4 |\u03b8) = p(s 1 ) T t=1 p(s t+1 |s t , a t )\u03c0(a t |s t , t, \u03b8) where p(s t+1 |s t , a t ) is the next state distribution and is independent of our policy. The action space can be discrete or continuous.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_81ff5f46",
+                        "type": "paragraph",
+                        "text": "Without the ability to exactly compute J a , we must resort to sampling to get an estimate of both J and its gradient. These samples can come from p(\u2022|\u03b8) or from another distribution. In the latter case, we need to use importance sampling to keep our estimator unbiased b . Whether they use importance sampling or not, all methods which directly optimize the policy rely on iterative procedures. First, rollouts are performed under a policy to gather samples. Then, these samples are used to update the policy, which is in turn used to gather new samples, until convergence of the policy. These methods continuously gather new samples, mostly because the updates to the policy are more reliable when they are based on fresh samples. However, in a production environment, as we will see in Sec. 2, we will typically release a new policy to many users at once, gathering millions or billions of samples, but the delay between two updates of a policy is of the order of hours or even days. Thus, there is a strong need for policy learning techniques which can achieve a good performance with a limited number of policy updates. There is an analogous issue in robotics where each new rollout induces wear and tear on the robot, making such a method which limits the number of rollouts desirable.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_35a3cd23",
+                        "type": "paragraph",
+                        "text": "In this paper, we shall thus present a method dedicated to achieving high performance while limiting the number of different policies under which samples are gathered. Sec. 3 reviews the relevant literature. Sec. 4 presents a first version of our algorithm, proving its theoretical efficiency and providing a common framework to several existing techniques. Then, Sec. 5 shows how the positiveness assumption for the rewards can slow down learning and proposes an improvement which circumvents the issue. Sec. 6 shows results of the proposed algorithm on both a synthetic dataset and a real-life, large scale dataset in online advertising. Finally, Sec. 7.3 reflects on the current state and the future venues of research.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f3c46f0d",
+                "title": "DISPLAY ADVERTISING",
+                "blocks": [
+                    {
+                        "block_id": "b_befab7e6",
+                        "type": "paragraph",
+                        "text": "Retargeting is a type of advertising where ads are displayed to users who have already expressed interest in one or multiple products, generally by browsing on merchants' websites. Since the information used to know which ad to display are not related to a query, like in search advertising, these ads can be displayed on any website, for instance news sites or personal pages. More precisely, every time a user lands on such a website, the website contacts an ad-exchange platform which runs a real-time auction. The highest bidder gets the right to display an ad for this particular user and pays a price depending on many factors, including the opponents' bids. If the user then clicks on the ad, the retargeter is paid by the merchant whose ad was displayed. To maximize its revenue, the retargeter must thus only display ads leading to a click, and do so at the lowest possible price.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8cc68d8e",
+                        "type": "paragraph",
+                        "text": "Historically, these auctions were second-price, which means that the price paid by the highest bidder was the second highest bid. From a bidder perspective, the optimal strategy was straightforward as the optimal bid was the expected gain of displaying an ad. However, ad-exchanges have recently moved to other types of auctions, where the optimal strategy depends on the (unknown) bids of the other bidders. Worse, the exact type of auction is unknown to the bidders who only know the price they pay when they win the auction.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d9a71f50",
+                        "type": "paragraph",
+                        "text": "The bidding problem thus fits nicely in the reinforcement learning framework where the state is the set of information known about the user and the current website, the action is the bid and the reward is the payment (if there is a click) minus the cost of displaying the ad. As the reward depends mostly on whether there is a click or not, an event which is highly unpredictable, techniques such as doubly robust estimation (Dud\u00edk et al., 2011) or based on carefully crafted Q-functions (Lillicrap et al., 2015; Schulman et al., 2015b; Gu et al., 2016) are unlikely to yield significant improvements.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b9",
+                            "Citation_b4"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e9ece945",
+                        "type": "paragraph",
+                        "text": "There is another major difference with other reinforcement learning works. For quality control, a new policy can only be put in production every few hours or even days. Since large advertising companies display several billion ads each day, each new policy is used to gather about a billion samples. We are thus in a very specific setting where the number of samples is very large but the number of policies with which samples are gathered is limited.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_17a0cb51",
+                        "type": "paragraph",
+                        "text": "We will now review the existing literature and show how no existing work addresses the constraints we face. We will then present our solution which is both simple and leads to good policies. To a Computing J would require visiting every possible \u03c4 at least once, which is impossible, even for moderately long rollouts.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e54ce704",
+                        "type": "paragraph",
+                        "text": "b Using a biased estimator can be useful but this is outside the scope of this paper.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_67e309ad",
+                        "type": "paragraph",
+                        "text": "show its efficiency, we report results on both the Cartpole problem, a synthetic problem common in reinforcement learning, and a real-world example.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a8bd921d",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_dd0feed0",
+                        "type": "paragraph",
+                        "text": "We review here some of the most common techniques in reinforcement learning, limiting ourselves to those who try to directly optimize the policy.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fd29a4ad",
+                        "type": "paragraph",
+                        "text": "The first such method is REINFORCE (Williams, 1992), which performs a single gradient step between two rollouts of the policy. This method has multiple issues. First, one has to do rollouts after each update, ultimately resulting in many rollouts before reaching a good solution. This is further emphasized with the potential poor quality of the gradient update which is not insensitive to a reparametrization of the parameter space. Finally, as with any stochastic method, the choice of the stepsize has a strong influence of the convergence speed. Each of these problems has been treated in separate works. The need to perform rollouts after each update was alleviated by using importance sampling policy gradient (Swaminathan & Joachims, 2015) . The update direction can be improved by using natural gradient (Amari, 1998; Kakade, 2001) and doing a line search helps in choosing a correct stepsize (Jie & Abbeel, 2010) . These improvements can be computationally expensive and the additional hyperparameters make them less suited to a production environment where simplicity and robustness are key.",
+                        "extracted_citations": [
+                            "Citation_b21",
+                            "Citation_b0",
+                            "Citation_b6",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_122536db",
+                        "type": "paragraph",
+                        "text": "Another line of research used concave lower bounds on J(\u03b8), which could then be optimized using off-the-shelf classifiers such as L-BFGS (Liu & Nocedal, 1989) . Examples of such methods are PoWER (Kober & Peters, 2009) and Natural actor-critic (Peters & Schaal, 2008) . These bounds were obtained using an analogy with EM (Dempster et al., 1977; Minka) which required the rewards R(\u03c4 ) to be positive. In settings where multiple policies can achieve high accuracy, Neumann (2011) proposed another EM-based method which focuses on one of these policies rather than trying to loosely cover all of them, at the expense of a larger computational cost.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b8",
+                            "Citation_b15",
+                            "Citation_b2",
+                            "Citation_b11",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_affc0441",
+                        "type": "paragraph",
+                        "text": "We will show how these works can be extended to better optimize the policy between two updates. We will then show how the positiveness requirement hurts the optimization, then propose an extension which allows us to use any reward.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5594b370",
+                        "type": "paragraph",
+                        "text": "Since, in practice, we do not have access to the full distribution but rather to a set of N samples, we shall optimize a Monte-Carlo estimate of J:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f05bc8de",
+                        "type": "paragraph",
+                        "text": "where p(\u03c4 |\u03b8 0 ) is the probability of rollout \u03c4 under the distribution used to generate samples. This is the standard importance sampling trick commonly used in policy gradient (Sutton et al., 1999) .",
+                        "extracted_citations": [
+                            "Citation_b20"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8d5c3529",
+                "title": "CONCAVE APPROXIMATION OF THE EXPECTED LOSS",
+                "blocks": [
+                    {
+                        "block_id": "b_18605c3c",
+                        "type": "paragraph",
+                        "text": "In this section, we assume that all returns are nonnegative c . Due to this nonnegativity, the nonconcavity in J stems from the nonconcavity of each p(\u03c4 |\u03b8). However, if p(\u03c4 |\u03b8) belongs to the exponential family (Wainwright & Jordan, 2008) , then it is a log-concave function of its parameters and log p(\u03c4 |\u03b8) is a concave function of \u03b8. This suggests the following lower bound:",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_68d71e39",
+                        "type": "paragraph",
+                        "text": "with q such that q(\u03c4 ) = 0 when p(\u03c4 |\u03b8) = 0. Then we have p q (\u03c4 |\u03b8) \u2264 p(\u03c4 |\u03b8).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e32b8f55",
+                        "type": "paragraph",
+                        "text": "c Or at least bounded below, in which case they need to be adequately shifted.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4518719b",
+                        "type": "paragraph",
+                        "text": "The second line stems from the inequality x \u2265 1 + log x.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e6c55cea",
+                        "type": "paragraph",
+                        "text": "Lemma 1 shows that, regardless of the function q chosen, p q (\u03c4 |\u03b8) is a lower bound of p(\u03c4 |\u03b8) for any value of \u03b8. Thus, provided that p(\u03c4 |\u03b8) belongs to the exponential family, we have obtained a log-concave lower bound. Lemma 1, however, does not guarantee the quality of that lower bound. This is addressed by the following lemma: Lemma 2. If there is a \u03bd such that q(\u03c4 ) = p(\u03c4 |\u03bd), we have",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0447b213",
+                        "type": "paragraph",
+                        "text": "Proof. p q (\u03c4 |\u03bd) = p(\u03c4 |\u03bd) is immediate when setting \u03b8 = \u03bd in Eq. 4.1. Deriving p q (\u03c4 |\u03b8) with respect to \u03b8 yields",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a856af6b",
+                        "type": "paragraph",
+                        "text": "Taking \u03b8 = \u03bd on both sides yields",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e2b864c5",
+                        "type": "paragraph",
+                        "text": "To simplify further notations, we will write directly",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fc49d638",
+                        "type": "paragraph",
+                        "text": "to explicitly show the dependency of the bound on the parameter \u03bd.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_13ad3552",
+                        "type": "paragraph",
+                        "text": "The following result is a direct consequence of these two lemmas: Lemma 3. (lower bound of the expected reward estimator): Let",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b1f6cf41",
+                        "type": "paragraph",
+                        "text": ") is a log-concave function, then \u0134\u03bd is concave for any \u03bd.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4ca3626c",
+                        "type": "paragraph",
+                        "text": "Proof. Since each R(\u03c4 i ) is nonnegative, so is the ratio R(\u03c4i) p(\u03c4i|\u03b80) . The sum of lower bounds being a lower bound, this concludes the proof.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5f8f3dd5",
+                        "type": "paragraph",
+                        "text": "It is now worth going into more detail on the three parameters of Eq. 4.3:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5af5862e",
+                        "type": "paragraph",
+                        "text": "\u2022 \u03b8 is the current value of the parameter we are trying to optimize over;",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_debed4bb",
+                        "type": "paragraph",
+                        "text": "\u2022 \u03b8 0 is the parameter value used to gather samples;",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_64c599e9",
+                        "type": "paragraph",
+                        "text": "\u2022 \u03bd is the parameter used to create the lower bound. Any value of \u03bd is valid.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_128907e1",
+                        "type": "paragraph",
+                        "text": "There are two special cases of this bound. First, when \u03bd = \u03b8 = \u03b8 0 , this bound becomes an equality and we recover the policy gradient of Williams (1992). However, this equality only holds for the first update of \u03b8. Second, a more interesting case is \u03bd = \u03b8 0 = \u03b8. In this case, Eq. 4.3 simplifies and we get",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a9caf1c9",
+                        "type": "paragraph",
+                        "text": "This bound is used by multiple authors (Dayan & Hinton, 1997; Peters & Schaal, 2007; 2008; Kober, 2014; Schulman et al., 2015a) and has the attractive property that it is tight at the beginning of the optimization since we have \u03b8 = \u03b8 0 . When we optimize this bound without ever changing the value of \u03bd, we end up with exactly the PoWER algorithm. However, as we optimize \u03b8, this bound becomes looser and it might be useful to change the value of \u03bd.",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b14",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9770d8ed",
+                        "type": "paragraph",
+                        "text": "This suggest an iterative scheme where, after the optimization of Eq. 4.4 has ended in \u03b8 = \u03b8 1 , we recompute the bound of Eq. 4.3 with \u03bd = \u03b8 1 . This yields an iterative version of the PoWER algorithm as described in Algorithm 1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_01960aec",
+                        "type": "paragraph",
+                        "text": "The data: Rewards R(\u03c4 i ), probabilities p(\u03c4 i |\u03b8 0 ), initial parameters \u03b8 0 The result: Final parameters \u03b8 T for t = 1 to T do",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0bfc19ec",
+                        "type": "paragraph",
+                        "text": "We recall that PoWER is equivalent to Algorithm 1 but with T = 1. As we shall see in the experiments, larger values of T lead to vast improvements.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_442f034e",
+                        "type": "paragraph",
+                        "text": "One can also see that Algorithm 1 performs the same optimizations as the PoWER algorithm where new samples would be gathered at each iteration, with the difference that importance sampling is used rather than true samples. Thus, in the spirit of off-policy learning, we have replaced extra sampling with importance sampling. When, and only when, variance starts to be too high, can we sample from the new distribution.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9bf87678",
+                "title": "CONVEX UPPER BOUND",
+                "blocks": [
+                    {
+                        "block_id": "b_d1ff1110",
+                        "type": "paragraph",
+                        "text": "Lemma 3 requires positive returns. This has two undesirable consequences. First, this can lead to very slow convergence. One can see this by creating a setting where all rollouts lead to a positive return except for one which leads to a return of -\u03b2 < 0. To maintain the positivity of the returns, we need to shift all the returns by \u03b2 which does not change the optimal policy using the following transformation:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fcefd0aa",
+                        "type": "paragraph",
+                        "text": "We may now apply lemma 3 and optimize the following lower bound:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_25fb5c50",
+                        "type": "paragraph",
+                        "text": "Without the rollout with a negative return, the returns would not need to be shifted by \u03b2 and we could have optimized J 0 \u03bd (\u03b8) instead. The difference between the two is equal to",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_89c97fd0",
+                        "type": "paragraph",
+                        "text": "where KL is the Kullback-Leibler divergence, which encourages p(\u03c4 |\u03b8) to be close to p(\u03c4 |\u03bd). Hence, one rollout with a negative return would slow down our optimization with a regularization term proportional to that return. A simple heuristic would be to discard such rollouts but we would lose all guarantees about the improvement of the expected return.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_61991e19",
+                        "type": "paragraph",
+                        "text": "Further, the positivity of the returns precludes the use of control variates which are especially useful when the shifted rewards are approximately centered on 0. Thus, it prevents us from benefiting of all the existing techniques based around these control variates which would help reducing the variance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_73f15044",
+                        "type": "paragraph",
+                        "text": "The positivity assumption is required since we multiply our lower bound with the returns. If, instead, we have convex upper bounds of p(\u03c4 |\u03b8), then this would provide us with a concave lower bound whenever it is associated with a negative return. Lemma 4 provides such a bound. Lemma 4. Let",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_da26422e",
+                        "type": "paragraph",
+                        "text": "where p(\u03c4 |\u03b8) is a log-concave function of \u03b8. Then u v (\u03c4 |\u03b8) is a convex function of \u03b8 and we have:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ccb07431",
+                        "type": "paragraph",
+                        "text": "Proof. Both equalities can be verified by setting \u03b8 = \u03bd. Since u \u03bd is the exponential of a linear function in its argument, it is convex. Finally, using the concavity of log p, we have:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eba231be",
+                        "type": "paragraph",
+                        "text": "\u03b8=\u03bd . This concludes the proof.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c112221c",
+                        "type": "paragraph",
+                        "text": "We may now combine the two bounds to get the following lower bound on \u0134(\u03b8) without any constraint on the rewards:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d935eec6",
+                        "type": "paragraph",
+                        "text": "This allows us to deal with positive and negative rewards, which means that the choice of control variate is now free, which can help both in reducing the variance and improving the lower bound and thus the convergence.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e96366cd",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_38528554",
+                        "type": "paragraph",
+                        "text": "To demonstrate the effectiveness of Iterative PoWER, we provide results obtained on the Cartpole benchmark using the Gym d toolkit. We also show experiments on real online advertising data where we try to maximize advertisers' revenue while keeping our costs constant.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_94c38c5b",
+                "title": "CARTPOLE BENCHMARK",
+                "blocks": [
+                    {
+                        "block_id": "b_98cca2a4",
+                        "type": "paragraph",
+                        "text": "To show how we can achieve good performance with limited rollouts, we ran our experiments on the Cartpole benchmark, which is solved by the PoWER method. We used a stochastic linear policy with a 4-dimensional state (positions and velocities of the cart and the pole) where, at each time step, the cart moves right with probability \u03c3(s \u03b8) where s is the vector representation of the state. Each experiment was 250 rollouts, in 10 batches of 25 rollouts, of length 400. In between each batch, we retrained the parameters of the model. The average performance over 350 repetitions was computed every batch, varying the number T of iterations of PoWER e . We capped the importance weights at 20.  Figure 3 : Dashed blue: improvement in expected merchant value as a function of the number of iterations (arbitrary linear scale). The optimization is very slow at the beginning and the improvement is close to linear for the first 50 iterations. Solid green: Relative change of the expected cost as a function of the number of iterations. The expected spend increased up to 0.0086% but reached 0.0001% when we stopped the optimization.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2be8bc8c",
+                        "type": "paragraph",
+                        "text": "We also evaluated the impact of using control variates on the convergence. To that effect, at each iteration, we computed the control variate minimizing the variance of the total estimator. We then used as control variate fractions of that value. For instance, cv = 0.5 means that the control variate used was half of the \"optimal\" control variate found by minimizing the variance of the estimator.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2adee27f",
+                        "type": "paragraph",
+                        "text": "The results can be seen in Fig. 2 and Fig. 1 . We see that doing several iterations of PoWER leads to an increase in performance, up to a point where the variance is too high.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dd08d59c",
+                        "type": "paragraph",
+                        "text": "We can also see that, without using control variates (cv = 0), it is not beneficial to do too several iterations. The stagnation in performance for cv = 0.25 and cv = 0.5 might be due to the poorer quality of the upper bound compared to the lower bound. Thus, to get the full benefit of the control variate, we need to use larger values, such as cv = 0.99, which yields the highest performance for any value of T .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d80aaf56",
+                "title": "REAL WORLD DATA -ONLINE ADVERTISING",
+                "blocks": [
+                    {
+                        "block_id": "b_56ee4e24",
+                        "type": "paragraph",
+                        "text": "We also tested Iterative PoWER using real data gathered from a production system. In this system, every time a user lands on a webpage, an auction is run to determine who gets to display an ad to that user. Each participant to the auction chooses in real-time how much to bid for the right to display that ad. If the ad is clicked and then the user buys an item on the merchant's website, a reward equal to the value of the item is observed. Otherwise, a reward of 0 is observed. The cost of displaying an ad depends on the bid in a way unknown to us as we do not have access to the type of auction nor to the bids of the other participants.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_acc3141c",
+                        "type": "paragraph",
+                        "text": "We gathered data for over 1.3 billion displays over a period of 2 weeks in April 2016. This data was comprised of information available at the time of the bid, for instance the history of the user, the current URL, or the size of the ad to display. The aggregation of all this data represented the states.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cb42c140",
+                        "type": "paragraph",
+                        "text": "When we won the auction, we also logged our bid, which are our actions, the cost of the display and the value generated if there was a sale, both of which are used for the reward.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_493a0af1",
+                        "type": "paragraph",
+                        "text": "Rather than learning a full bidding strategy mapping from states to a bid, we used our production system as baseline and learnt a small modifier to account for the non-truthfulness of the auctions. Thus, only a few thousand parameters were learnt, a small number compared to the number of training samples. This allowed us to run many iterations of PoWER without fear of high variance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ad09cc08",
+                        "type": "paragraph",
+                        "text": "Since our aim was to maximize the value generated, this could lead to the undesirable solution where all ads are bought regardless of their price. Thus, we included the constraint that the total cost of buying the ads had to remain constant. The details of iPoWER with added constraints are in section 7.1 Fig. 3 shows the relative improvement in advertiser value generated as a function of the number T of iterations. We can readily see that the final improvement obtained by Iterative Power is far greater than that obtained after one iteration of PoWER (about 60 times greater). The green curve shows the change in total cost. Since we also used a lower bound for the constraint, it is initially not satisfied, but running the algorithm to convergence leads to a solution in the feasible set. The final improvement represents an increase of the net gain by several percentage points.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_071ec3ed",
+                "title": "APPLICATION TO CONSTRAINED OPTIMIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_f90e8cbd",
+                        "type": "paragraph",
+                        "text": "There are cases where one wishes to maximize the expected reward while satisfying a constraint on another quantity. In online advertising, for instance, it is interesting to maximize the number of clicks (or sales) while keeping the number of ads displayed constant as this reduces the potential long-term effects on user behaviour, something not captured at the scale of a rollout. To maximize the expected reward E \u03b8 [R] while satisfying the constraint E \u03b8 [S] = S 0 , we may add a Lagrangian term to \u0134\u03bd (\u03b8) and iteratively solve the following problem:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ffa664c7",
+                        "type": "paragraph",
+                        "text": "where \u03b1 is the Lagrange multiplier associated with the constraint. Due to the approximation, the constraint will not be exactly satisfied for the first few iterations but the convergence of this algorithm guarantees that the constraint will eventually be satisfied.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f1968e34",
+                "title": "EXTENSION TO NON LOG-CONCAVE POLICIES",
+                "blocks": [
+                    {
+                        "block_id": "b_24d1505c",
+                        "type": "paragraph",
+                        "text": "The results of this paper rely on a log-concavity assumption on the policy which can be too strong a constraint. Indeed, in many cases, the policy depends in a complex manner on the state, for instance through a deep network. However, most of these policies can still be written as a log-concave policy on a non-linear transformation of the states, for instance when the last layer of the deep network uses a softmax. iPoWER can then be used to transform the optimization problem into a simpler, albeit still not concave, maximization problem where the non-concavity of the output of the network has been removed and only remains the non-concavity of the nonlinear transformation of the state.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_10e557d9",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_76be08a9",
+                        "type": "paragraph",
+                        "text": "We proposed a modification to the PoWER algorithm which allows to improve a policy with a reduced number of rollouts. This method is particularly interesting when there are constraints on the number of rollouts, for instance in a robotic environment or when each policy has to be deployed in an industrial production system. We also proposed an extension to existing EM-based methods which allows for the use of control variates, a potentially useful tool to reduce the variance of the estimator. However, several questions remain. In particular, experiments on the Cartpole benchmark indicate that, despite the use of capped importance weights and control variates, as we do more iterations, we might end up in regions of the space with high variance. It is thus important to use additional regularizers, such as normalized weights or penalizing the standard deviation of the estimator. To maintain the simplicity of the overall algorithm, concave lower bounds of these regularizers must also be found, which is still an open problem.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Natural gradient works efficiently in learning Shun-Ichi Amari Neural Computation 10 2 February 1998",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Using expectation-maximization for reinforcement learning Peter Dayan Geoffrey E Hinton Neural Computation 9 2 1997",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Maximum likelihood from incomplete data via the em algorithm Arthur P Dempster Nan M Laird Donald B Rubin Journal of the royal statistical society. Series B 1977",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Doubly robust policy evaluation and learning Miroslav Dud\u00edk John Langford Lihong Li CoRR, abs:1103.4601 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Continuous deep q-learning with model-based acceleration Shixiang Gu Timothy P Lillicrap Ilya Sutskever Sergey Levine CoRR, abs/1603.00748 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "On a connection between importance sampling and the likelihood ratio policy gradient Tang Jie Pieter Abbeel Advances in Neural Information Processing Systems 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "A natural policy gradient Sham Kakade NIPS 2001 14",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Learning motor skills: from algorithms to robot experiments. it-Information Technology Jens Kober 2014 56",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Policy search for motor primitives in robotics Jens Kober Jan R Peters Advances in neural information processing systems 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Continuous control with deep reinforcement learning Timothy P Lillicrap Jonathan J Hunt Alexander Pritzel Nicolas Heess Tom Erez Yuval Tassa David Silver Daan Wierstra CoRR, abs/1509.02971 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "On the limited memory bfgs method for large scale optimization C Dong Jorge Liu Nocedal Mathematical programming 45 1-3 1989",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Expectation-maximization as lower bound maximization Thomas Minka",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Playing atari with deep reinforcement learning Volodymyr Mnih Koray Kavukcuoglu David Silver Alex Graves Ioannis Antonoglou Daan Wierstra Martin A Riedmiller CoRR, abs/1312.5602 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Variational inference for policy search in changing situations Gerhard Neumann Proceedings of the 28th international conference on machine learning (ICML-11) the 28th international conference on machine learning (ICML-11) 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Reinforcement learning by reward-weighted regression for operational space control Jan Peters Stefan Schaal Proceedings of the 24th international conference on Machine learning the 24th international conference on Machine learning ACM 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Natural actor-critic Jan Peters Stefan Schaal Neurocomputing 71 7 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Gradient estimation using stochastic computation graphs John Schulman Nicolas Heess Theophane Weber Pieter Abbeel CoRR, abs/1506.05254 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Highdimensional continuous control using generalized advantage estimation John Schulman Philipp Moritz Sergey Levine Michael I Jordan Pieter Abbeel CoRR, abs/1506.02438 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Mastering the game of go with deep neural networks and tree search David Silver Nature 529 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Reinforcement learning: An introduction S Richard Andrew G Sutton Barto 1998 MIT press Cambridge 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Policy gradient methods for reinforcement learning with function approximation David A Richard S Sutton Mcallester P Satinder Yishay Singh Mansour NIPS 1999 99",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Counterfactual risk minimization: Learning from logged bandit feedback Adith Swaminathan Thorsten Joachims abs:1502.02362 CoRR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Graphical models, exponential families, and variational inference J Martin Michael I Wainwright Jordan Foundations and Trends R in Machine Learning 1 1-2 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Simple statistical gradient-following algorithms for connectionist reinforcement learning Williams Ronald Machine learning 8 3-4 1992",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.4443,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper presents iterative PoWER, an off-policy variation on PoWER, a policy gradient algorithm in the reward-weighted family.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "I'm not familiar enough with this type lower bound scheme to comment on it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "It looks like the end result is less conservative step sizes in policy parameter space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "All expectation-based algorithms (and their KL-regularized cousins a-la TRPO) take smallish steps, and this might be a sensible way to accelerate them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "The description of the experiments in Section VI is insufficient for reproducibility.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Is \"The cart moved right\" supposed to be \"a positive force is applied to the cart\"?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "How is negative force applied?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "What is the representation of the state?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "What is the distribution of initial states?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "A linear policy is insufficient for swing up and balance of a cart-pole.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "Are you only doing balancing?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "What is the noise magnitude of the policy?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "How was it chosen?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "How long were the episodes?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "The footnote at the bottom of page 8 threw me off.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "If you're using Newton's method, where is the discussion of gradients and Hessians?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "I thought the argmax_theta operator was a stand-in for an EM-style step, which I how I read Eq (8) in the Kober paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0684,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The reviewers generally agreed that exploring policy search methods of this type is interesting, but the results presented in the paper are not at the standard required for publication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "There are no comparisons of any sort, and the only task that is tested is trivially simple, so it's impossible to conclude anything about the effectiveness of the method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Despite the author promising to add additional experiments, nothing was added in the current draft.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "Besides this, reviewers raised concerns about the relevance of this approach to ICLR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "The crucial point here is that it's unclear if the method will scale -- while there is nothing wrong in principle in proposing a general policy search method, there isn't really a compelling argument that can be made that it is suitable for learning representations if there is no plausible story for how it will scale to sufficiently complex policy classes that can actually learn representations.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.4443,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper presents iterative PoWER, an off-policy variation on PoWER, a policy gradient algorithm in the reward-weighted family.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "I'm not familiar enough with this type lower bound scheme to comment on it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "It looks like the end result is less conservative step sizes in policy parameter space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "All expectation-based algorithms (and their KL-regularized cousins a-la TRPO) take smallish steps, and this might be a sensible way to accelerate them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "The description of the experiments in Section VI is insufficient for reproducibility.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Is \"The cart moved right\" supposed to be \"a positive force is applied to the cart\"?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "How is negative force applied?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "What is the representation of the state?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "What is the distribution of initial states?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "A linear policy is insufficient for swing up and balance of a cart-pole.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "Are you only doing balancing?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "What is the noise magnitude of the policy?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "How was it chosen?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "How long were the episodes?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "The footnote at the bottom of page 8 threw me off.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "If you're using Newton's method, where is the discussion of gradients and Hessians?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "I thought the argmax_theta operator was a stand-in for an EM-style step, which I how I read Eq (8) in the Kober paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.2938,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "The paper presents an interesting modification to PoWER algorithm that is well motivated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "The main limitation of this paper is the lack of comparison with other methods and on richer problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "The experiments haven't given confidence to show its claimed benefits, generality and scalability over prior methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "Giving this confidence doesn\u2019t necessarily require running your method on all large-scale domains or doing exhaustic hyper-parameter search, but for example it could go beyond current domains.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "Cartpole only optimizes 5 parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_5",
+                    "text": "Ad targeting task lacks comparison with alternative methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_6",
+                    "text": "Since this method is built on PoWER and closely connected with RWR, it is likely there are limits to performance which may become apparent when the method is tried on other domains and with other benchmark methods, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_7",
+                    "text": "even standard ones like importance sampling-based off-policy learning is known to suffer in high-dimensional or continuous action space; limits of RWR/PoWER-like methods based on their connection with entropy-regularized RL.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_6",
+            "type": "Human",
+            "liang_alpha_score": 0.4443,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_6_s_0",
+                    "text": "This paper presents iterative PoWER, an off-policy variation on PoWER, a policy gradient algorithm in the reward-weighted family.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_1",
+                    "text": "I'm not familiar enough with this type lower bound scheme to comment on it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_2",
+                    "text": "It looks like the end result is less conservative step sizes in policy parameter space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_3",
+                    "text": "All expectation-based algorithms (and their KL-regularized cousins a-la TRPO) take smallish steps, and this might be a sensible way to accelerate them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_4",
+                    "text": "The description of the experiments in Section VI is insufficient for reproducibility.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_5",
+                    "text": "Is \"The cart moved right\" supposed to be \"a positive force is applied to the cart\"?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_6",
+                    "text": "How is negative force applied?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_7",
+                    "text": "What is the representation of the state?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_8",
+                    "text": "What is the distribution of initial states?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_9",
+                    "text": "A linear policy is insufficient for swing up and balance of a cart-pole.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_10",
+                    "text": "Are you only doing balancing?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_11",
+                    "text": "What is the noise magnitude of the policy?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_12",
+                    "text": "How was it chosen?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_13",
+                    "text": "How long were the episodes?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_14",
+                    "text": "The footnote at the bottom of page 8 threw me off.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_15",
+                    "text": "If you're using Newton's method, where is the discussion of gradients and Hessians?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_16",
+                    "text": "I thought the argmax_theta operator was a stand-in for an EM-style step, which I how I read Eq (8) in the Kober paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_7",
+            "type": "Human",
+            "liang_alpha_score": 0.0684,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_7_s_0",
+                    "text": "The reviewers generally agreed that exploring policy search methods of this type is interesting, but the results presented in the paper are not at the standard required for publication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_1",
+                    "text": "There are no comparisons of any sort, and the only task that is tested is trivially simple, so it's impossible to conclude anything about the effectiveness of the method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_2",
+                    "text": "Despite the author promising to add additional experiments, nothing was added in the current draft.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_3",
+                    "text": "Besides this, reviewers raised concerns about the relevance of this approach to ICLR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_4",
+                    "text": "The crucial point here is that it's unclear if the method will scale -- while there is nothing wrong in principle in proposing a general policy search method, there isn't really a compelling argument that can be made that it is suitable for learning representations if there is no plausible story for how it will scale to sufficiently complex policy classes that can actually learn representations.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_8",
+            "type": "Human",
+            "liang_alpha_score": 0.4443,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_8_s_0",
+                    "text": "This paper presents iterative PoWER, an off-policy variation on PoWER, a policy gradient algorithm in the reward-weighted family.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_1",
+                    "text": "I'm not familiar enough with this type lower bound scheme to comment on it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_2",
+                    "text": "It looks like the end result is less conservative step sizes in policy parameter space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_3",
+                    "text": "All expectation-based algorithms (and their KL-regularized cousins a-la TRPO) take smallish steps, and this might be a sensible way to accelerate them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_4",
+                    "text": "The description of the experiments in Section VI is insufficient for reproducibility.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_5",
+                    "text": "Is \"The cart moved right\" supposed to be \"a positive force is applied to the cart\"?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_6",
+                    "text": "How is negative force applied?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_7",
+                    "text": "What is the representation of the state?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_8",
+                    "text": "What is the distribution of initial states?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_9",
+                    "text": "A linear policy is insufficient for swing up and balance of a cart-pole.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_10",
+                    "text": "Are you only doing balancing?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_11",
+                    "text": "What is the noise magnitude of the policy?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_12",
+                    "text": "How was it chosen?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_13",
+                    "text": "How long were the episodes?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_14",
+                    "text": "The footnote at the bottom of page 8 threw me off.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_15",
+                    "text": "If you're using Newton's method, where is the discussion of gradients and Hessians?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_16",
+                    "text": "I thought the argmax_theta operator was a stand-in for an EM-style step, which I how I read Eq (8) in the Kober paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_10",
+            "type": "Human",
+            "liang_alpha_score": 0.2938,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_10_s_0",
+                    "text": "The paper presents an interesting modification to PoWER algorithm that is well motivated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_1",
+                    "text": "The main limitation of this paper is the lack of comparison with other methods and on richer problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_2",
+                    "text": "The experiments haven't given confidence to show its claimed benefits, generality and scalability over prior methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_3",
+                    "text": "Giving this confidence doesn\u2019t necessarily require running your method on all large-scale domains or doing exhaustic hyper-parameter search, but for example it could go beyond current domains.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_4",
+                    "text": "Cartpole only optimizes 5 parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_5",
+                    "text": "Ad targeting task lacks comparison with alternative methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_6",
+                    "text": "Since this method is built on PoWER and closely connected with RWR, it is likely there are limits to performance which may become apparent when the method is tried on other domains and with other benchmark methods, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_7",
+                    "text": "even standard ones like importance sampling-based off-policy learning is known to suffer in high-dimensional or continuous action space; limits of RWR/PoWER-like methods based on their connection with entropy-regularized RL.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_2a391bea",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_32cc5ab0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2a391bea"
+        },
+        {
+            "source": "b_d52da849",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_32cc5ab0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d52da849"
+        },
+        {
+            "source": "sec_32cc5ab0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c01ebbf2"
+        },
+        {
+            "source": "sec_32cc5ab0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2c19c9af"
+        },
+        {
+            "source": "sec_32cc5ab0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_81ff5f46"
+        },
+        {
+            "source": "sec_32cc5ab0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_35a3cd23"
+        },
+        {
+            "source": "sec_f3c46f0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_befab7e6"
+        },
+        {
+            "source": "sec_f3c46f0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8cc68d8e"
+        },
+        {
+            "source": "b_d9a71f50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_d9a71f50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_d9a71f50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_f3c46f0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d9a71f50"
+        },
+        {
+            "source": "sec_f3c46f0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e9ece945"
+        },
+        {
+            "source": "sec_f3c46f0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_17a0cb51"
+        },
+        {
+            "source": "sec_f3c46f0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e54ce704"
+        },
+        {
+            "source": "sec_f3c46f0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_67e309ad"
+        },
+        {
+            "source": "sec_a8bd921d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dd0feed0"
+        },
+        {
+            "source": "b_fd29a4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_fd29a4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_fd29a4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_fd29a4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_a8bd921d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fd29a4ad"
+        },
+        {
+            "source": "b_122536db",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_122536db",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_122536db",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_122536db",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_122536db",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_122536db",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_a8bd921d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_122536db"
+        },
+        {
+            "source": "sec_a8bd921d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_affc0441"
+        },
+        {
+            "source": "sec_a8bd921d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5594b370"
+        },
+        {
+            "source": "b_f05bc8de",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_a8bd921d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f05bc8de"
+        },
+        {
+            "source": "b_18605c3c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18605c3c"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_68d71e39"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e32b8f55"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4518719b"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6c55cea"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0447b213"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a856af6b"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e2b864c5"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fc49d638"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_13ad3552"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b1f6cf41"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4ca3626c"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5f8f3dd5"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5af5862e"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_debed4bb"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_64c599e9"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_128907e1"
+        },
+        {
+            "source": "b_a9caf1c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_a9caf1c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_a9caf1c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a9caf1c9"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9770d8ed"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_01960aec"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0bfc19ec"
+        },
+        {
+            "source": "sec_8d5c3529",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_442f034e"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d1ff1110"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fcefd0aa"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_25fb5c50"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_89c97fd0"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_61991e19"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_73f15044"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_da26422e"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ccb07431"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eba231be"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c112221c"
+        },
+        {
+            "source": "sec_9bf87678",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d935eec6"
+        },
+        {
+            "source": "sec_e96366cd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_38528554"
+        },
+        {
+            "source": "sec_94c38c5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_98cca2a4"
+        },
+        {
+            "source": "sec_94c38c5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2be8bc8c"
+        },
+        {
+            "source": "sec_94c38c5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2adee27f"
+        },
+        {
+            "source": "sec_94c38c5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dd08d59c"
+        },
+        {
+            "source": "sec_d80aaf56",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_56ee4e24"
+        },
+        {
+            "source": "sec_d80aaf56",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_acc3141c"
+        },
+        {
+            "source": "sec_d80aaf56",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cb42c140"
+        },
+        {
+            "source": "sec_d80aaf56",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_493a0af1"
+        },
+        {
+            "source": "sec_d80aaf56",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ad09cc08"
+        },
+        {
+            "source": "sec_071ec3ed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f90e8cbd"
+        },
+        {
+            "source": "sec_071ec3ed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ffa664c7"
+        },
+        {
+            "source": "sec_f1968e34",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_24d1505c"
+        },
+        {
+            "source": "sec_10e557d9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_76be08a9"
+        }
+    ]
+}

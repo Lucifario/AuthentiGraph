@@ -1,0 +1,1449 @@
+{
+    "paper_metadata": {
+        "paper_id": "rkEfPeZRb",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_6bb33b8f",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_17dd277a",
+                        "type": "paragraph",
+                        "text": "Deep neural networks are attracting attention because of their outstanding prediction power in many application fields such as image recognition, natural language processing, and speech recognition. In addition, software frameworks are publicly available, making it easier to apply deep learning. However, their crucial drawback is the substantial computational cost on training. For example, it takes over a week to train ResNet-50 on the ImageNet dataset if using a single GPU. Such long training time limits the number of trials possible when creating models. Therefore, we must conduct distributed training using multiple computation workers (e.g., multiple GPUs in different nodes). However, by nature, workers need to frequently communicate gradients, which yields a severe bottleneck for scalability, especially when using lower bandwidth connections. For example, when using 1000BASE-T Ethernet, communication takes at least ten times longer than forward and backward computation for ResNet-50, making multiple nodes impractical. High performance interconnections such as InfiniBand and Omni-Path are an order of magnitude more expensive than commodity interconnections, which limits research and development of deep learning using large-scale datasets to a small number of researchers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2617d843",
+                        "type": "paragraph",
+                        "text": "Although several methods have been proposed to compress gradient for efficient communication, they either suffer a low compression ratio or significantly harm the resulting model accuracy, particularly when applied to convolutional neural networks. There are mainly two lines of research: quantization and sparsification. Quantization-based methods include 1-bit SGD (Seide et al., 2014) and TernGrad (Wen et al., 2017) . Though they achieve small loss of accuracy by using at least one bit for each parameter, the compression ratio is limited. Sparsification-based methods include Strom (2015) and QSGD (Alistarh et al., 2017) . While they can achieve high compression ratio, as we will see in our experiments, they harm the resulting model accuracy or suffer a low compression ratio, particularly when applied to convolutional neural networks.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b17",
+                            "Citation_b11",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5a337888",
+                        "type": "paragraph",
+                        "text": "To address these issues, we propose a new gradient compression algorithm to reduce the communication overhead of distributed deep learning. The proposed method belongs to the sparsification approaches. Our key observation is that the variance of the gradient for each parameter point over iterations is a useful signal for compression. As almost all previous approaches of both sparsification and quantization only look at the magnitude of gradient, we believe that we are opening a new door for this field. In addition, we also show that our method can be combined with previous compression methods to further boost performance. We also present an efficient algorithm to compute the variance and prove that it can be obtained with negligible additional cost.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6e41c11c",
+                        "type": "paragraph",
+                        "text": "We experimentally demonstrate that our method can achieve a high compression ratio while maintaining result model accuracy. We also analyze the efficiency using computation and communication cost models and provide evidence that our method enables distributed deep learning for many scenarios with commodity environments.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bbf4ed62",
+                        "type": "paragraph",
+                        "text": "Organization. The remainder of this paper is organized as follows: Section 2 provides the definitions and notations used in this paper. Section 3 reviews related work in this field. Section 4 presents the proposed method. Section 5 analyzes performance. Section 6 shows our experimental results, and we conclude in Section 7.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8ef1ee9f",
+                "title": "PRELIMINARIES",
+                "blocks": [
+                    {
+                        "block_id": "b_83c30396",
+                        "type": "paragraph",
+                        "text": "In this section, we describe an overview of distributed deep learning and parameter updates with compressed gradients.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3d3fbf12",
+                "title": "CHALLENGES IN DATA PARALLEL STOCHASTIC GRADIENT DESCENT",
+                "blocks": [
+                    {
+                        "block_id": "b_36f8c203",
+                        "type": "paragraph",
+                        "text": "In data parallel distributed Stochastic Gradient Descent (SGD), all workers have identical copies of the same model and calculate gradients using different subsets of training data. Gradients are shared across all workers, and each worker updates its local model using the shared gradients.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_69617152",
+                        "type": "paragraph",
+                        "text": "There are two well-known approaches to communication of gradients: synchronous and asynchronous. Even though our method can be applied to both of them, we focus on the synchronous approach in this paper. Each worker computes gradients and shares them with other workers using a synchronized group communication routine in every single training iteration, typically using a communication routine known as allreduce.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d4962d94",
+                        "type": "paragraph",
+                        "text": "The challenge is that the communication is possibly a severe bottleneck in a training process. Gradients typically consist of tens of millions of floating point values so the total size of exchanged data can be large. For example, the model size of ResNet-50 (He et al. (2016) ) is over 110 MB, and the size of gradients becomes large accordingly. Thus, the communication time has a significant effect on the total training time in environments equipped with a commodity interconnect hardware, such as 1Gb Ethernet. Also, in the synchronous approach, workers have to wait for completion of communication and their computing resources including GPUs are idle, which is a significant performance loss.",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_47ed0ab2",
+                "title": "PROBLEM FORMULATION",
+                "blocks": [
+                    {
+                        "block_id": "b_c52f29d4",
+                        "type": "paragraph",
+                        "text": "In basic procedures of SGD, model parameters are updated as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_144c5acd",
+                        "type": "paragraph",
+                        "text": "where x t and \u2207f t (x t ) are model parameters and calculated gradients in time step t, respectively. f t is a loss function and it differs between samples used in a mini-batch. \u03b3 is a step size.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b68c8209",
+                        "type": "paragraph",
+                        "text": "To reduce an amount of data to be exchanged over a network, either quantization or sparsification or both are used as explained in Sec. 3.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8bd7af4a",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_148618ca",
+                        "type": "paragraph",
+                        "text": "There are two main approaches to gradient compression: quantization-based approaches and sparsification-based approaches. Quantization-based approaches reduce communication cost by expressing each gradient with fewer bits. If a baseline uses 32-bit floating points in communication, then it can reduce the amount of communication by up to 32 times. Seide et al. (2014) showed that neural networks can be trained using only one sign bit per parameter. There are two key techniques in their algorithm. First, they use different threshold to encode and decode gradient elements for each column of weight matrix. Second, quantization errors are added to the gradients calculated in the next step. Its effectiveness has been experimentally verified through speech models. Wen et al. (2017) proposed TernGrad to encode gradients with 2 bits per parameter. The algorithm is characterized by its theoretically-guaranteed convergence and reported that it can successfully train GoogLeNet (Szegedy et al., 2015) on ImageNet with an average loss of accuracy of less than 2%.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b17",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9d224199",
+                        "type": "paragraph",
+                        "text": "As a second approach, sparsification-based approaches reduce communication cost by sending only a small fraction of gradients. Even though they require sending not only the values of gradients but also parameters' indexes, their strong sparsification reduces transmission requirements significantly. Strom (2015) proposed sending only gradients whose absolute values are greater than a user-defined threshold. The algorithm sends only sign bits and encoded indexes of parameters. Gradients are decoded up to the threshold and quantization errors are added to the gradients calculated in the next step as 1-bit stochastic gradients. Its effectiveness has also been experimentally verified on speech applications. Dryden et al. (2016) extended Strom's method. They proposed to use an adaptive threshold instead of using a user-defined threshold. They also introduced repeated sparsification of gradients in order to combine the algorithm with an efficient communication algorithm. Alistarh et al. (2017) proposed QSGD. QSGD stochastically rounds gradients to linearly quantized values, which are calculated in the algorithm. Their work enjoys strong theoretical properties in convex optimizations. Furthermore, they can control the trade-off between accuracy and compression. On the other hand, Strom's method does not work with small or large thresholds.",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b4",
+                            "Citation_b1"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6649cf94",
+                "title": "PROPOSED METHODS",
+                "blocks": [
+                    {
+                        "block_id": "b_99723ff2",
+                        "type": "paragraph",
+                        "text": "In this section, we describe the proposed method. An efficient implementation and combination with other compression methods are also explained.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2a90ed63",
+                        "type": "paragraph",
+                        "text": "Our work belongs to the sparsification-based approaches. In this section, we explicitly denote a gradient vector (\u2207f (x)) and a gradient element (\u2207 i f (x)) for clarity. Previous works in this direction have focused on gradient elements with small magnitudes, and they rounded them to zero to sparsify. Our work diverges at this point. We propose using approximated variances of gradient elements instead of magnitudes. Our method do not transmit ambiguous elements until additional data reduce their ambiguity and significantly reduces communication while maintaining accuracy. This method enables shifting the balance between accuracy and compression, as necessary. Furthermore, we can combine our work with sparsity-promoting quantization like QSGD and Strom's method. We show the way of combination with the Strom's method later.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_bc4362eb",
+                "title": "KEY CONCEPTS",
+                "blocks": [
+                    {
+                        "block_id": "b_eac67d02",
+                        "type": "paragraph",
+                        "text": "The key idea of our method is delaying sending ambiguously estimated gradient elements. We consider a gradient element to be ambiguous when its amplitude is small compared to its variance over the data points. We extend the standard updating method to the following:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fb35ef00",
+                        "type": "paragraph",
+                        "text": "This extension follows Seide et al. (2014) and Strom (2015) .",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_bc0f042e",
+                        "type": "paragraph",
+                        "text": "In previous works, the approximation errors are accumulated in r t and used in future updates. In each step, parameters are updated only with approximated gradient elements represented by less number of bits. In our work, we interpret r t as a delayed update, not approximation errors.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0ba77987",
+                        "type": "paragraph",
+                        "text": "We send the gradient element corresponding to the i-th parameter only when it satisfies the following criterion,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7746cf2a",
+                        "type": "paragraph",
+                        "text": "where |B| is a size of the mini-batch and \u03b1 \u2032 is a hyper parameter representing required estimation accuracy. z is a each sample and B is a mini-batch, respectively and f z and f B are corresponding",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_39aade25",
+                        "type": "paragraph",
+                        "text": "is the sample variance of the gradient element corresponding to the i-th parameter over a mini-batch B.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2e5e4a99",
+                        "type": "paragraph",
+                        "text": "If we do not send some gradient elements, we add them to the next batch and recalculate (1) with increased batch size. For example, if we postpone sending a gradient element nine times consecutively, the criterion ( 1 ) is calculated as if ten times larger batch than usual mini-batch in the next step. Note that even though the criterion ( 1 ) is calculated as if we used a larger batch, what is used for an update is not the mean of the mini-batches across steps but the sum of them.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e4eb8bd5",
+                        "type": "paragraph",
+                        "text": "Following lemma supports our formulation. Lemma 4.1. (De et al., 2017) A sufficient condition that a vector -g is a descent direction is",
+                        "extracted_citations": [
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d74360ee",
+                        "type": "paragraph",
+                        "text": "We are interested in the case of g = \u2207f B (x), the gradient vector of the loss function over B. By the weak law of large numbers, when |B| > 1, the left hand side of Eq. 2 with g = \u2207f B (x) can be estimated as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5e6701f4",
+                        "type": "paragraph",
+                        "text": "Thus our formulation with \u03b1 \u2032 \u2265 1 corresponds to an elementwise estimation of the sufficient condition (2) that a gradient vector decreases the loss function. Gradient elements become more likely to be sent as sample size increases. However, if once gradient elements are estimated with too high variances, it takes too long for the elements to be sent. Thus, we decay variance at every step. Details are described in subsection 4.4. In the combination with optimization methods like Momentum SGD, gradient elements not sent are assumed to be equal to zero.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_838f2258",
+                "title": "QUANTIZATION AND PARAMETER ENCODING",
+                "blocks": [
+                    {
+                        "block_id": "b_925b88fb",
+                        "type": "paragraph",
+                        "text": "To allow for comparison with other compression methods, we propose a basic quantization process.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_83a728cd",
+                        "type": "paragraph",
+                        "text": "In this section, we refer to a gradient as an accumulated gradient. After deciding which gradient elements to send, each worker sends pairs of a value of a gradient element and its parameter index as Strom (2015) and Alistarh et al. (2017) . We quantize each element to 4-bit so that we can represent each pair in 32-bit as per Strom (2015) . The 4-bit consists of one sign bit and three exponent bits.",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b1",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_267deca1",
+                        "type": "paragraph",
+                        "text": "Our quantization except for the sign bit is as follows. For a weight matrix W k (or a weight tensor in CNN), there is a group of gradient elements corresponding to the matrix. Let M k be the maximum absolute value in the group. First, for each element g i in the k-th group, if",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e3b754d6",
+                        "type": "paragraph",
+                        "text": "If d i > 7 then we do not send the value, otherwise, encode the integer from 0 to 7 using 3 bits. \u230alog 2 M k \u230b is also sent for every weight matrix. An efficient implementation is presented in subsection 4.4. We do not adopt stochastic rounding like Alistarh et al. (2017) nor accumulate rounding error g i -g \u2032 i for the next batch because this simple rounding does not harm accuracy empirically. Appendix B has a running example of this quantization.",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b0ea0d25",
+                        "type": "paragraph",
+                        "text": "Because the variance-based sparsification method described in subsection 4.1 is orthogonal to the quantization shown above, we can reduce communication cost further using sparsity promoting quantization methods such as QSGD instead. However, we used the quantization to show that enough level of sparsity is gained solely by our variance-based sparsification because the quantization rounds only a small fraction of gradient elements to zero. We show how to combine our method with a method in Strom (2015) later in this paper because the way of the combination is less obvious. We use a naive encoding for parameter indexes because the rest 28-bits are enough. We can further reduce the number of bits by compressing parameter indexes (Strom, 2015; Alistarh et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b11",
+                            "Citation_b1"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fc251b3e",
+                "title": "COMMUNICATION BETWEEN WORKERS",
+                "blocks": [
+                    {
+                        "block_id": "b_c0bbe2a0",
+                        "type": "paragraph",
+                        "text": "In distributed deep learning, the most important operation is to take the global mean of the gradient elements calculated in each worker. The operation is referred to as \"allreduce.\" It consists of three steps: (1) collects all local arrays in each worker, (2) reduce them using a given arithmetic operator, which is summation in this case, and (3) broadcast the result back to all workers so that all workers obtain the identical copies of the array.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4102b747",
+                        "type": "paragraph",
+                        "text": "Conventional data parallel deep learning applications can enjoy the benefit of highly optimized allreduce implementations thanks to the fact that only the sum of the values has to be kept during the communication. However, after applying the proposed method to the local gradient elements, they are converted to a sparse data structure so the allreduce operation can no longer apply. Dryden et al. (2016) and Aji & Heafield (2017) proposed sparsifying gradient elements multiple times to utilize a kind of allreduce for sparsification-based compressions. However, the accuracy is possibly degraded when the elements are highly compressed through repetitive compressions. Instead, we adopt allgatherv for communication, where each worker just sends the calculated elements to other workers. We avoid to encode and decode elements multiple times by allgatherv. In allgatherv communication cost hardly increase from a kind of allreduce because index overlap, which is needed for summation, rarely occur if the compression ratio is sufficiently higher than the number of workers. Thanks to the high compression ratio possible with this algorithm and its combination with other compression methods, even large numbers of workers can be supported. Some optimization methods, such as ADAM (Ba & Kingma, 2015) , require parameter updates and postprocessing. They are calculated locally after the communication.",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b0",
+                            "Citation_b2"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b047b067",
+                "title": "EFFICIENT IMPLEMENTATION",
+                "blocks": [
+                    {
+                        "block_id": "b_0389581a",
+                        "type": "paragraph",
+                        "text": "We first describe the efficient computation of the criterion (1) and second how to quantize gradient elements without additional floating points operations. We can efficiently compare squared mean and variance in the criterion (1) by just comparing squared mean of gradient elements and sum of squared gradient elements. That is,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bb0f42a7",
+                        "type": "paragraph",
+                        "text": "achieves our goal. Thus, we have to maintain only the sum of gradient elements and sum of squared gradient elements. Details are described in Appendix A. Decay of variance, described in subsection 4.1, is accomplished by multiplying hyperparameter \u03b6(< 1) to the sum of squared gradient elements at every step. Alpha in Eq. 3 controls how much unambiguity the algorithm require. The algorithm compress more aggressively with larger alpha. A range from one to two is good for alpha from its derivation. Fig. 1 shows the final algorithm.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a012aa70",
+                        "type": "paragraph",
+                        "text": "The quantization of parameters described in subsection 4.2 can also be efficiently implemented with the standard binary floating point representation using only binary operations and integer arithmetic as follows. We can calculate 2 \u230alog 2 x\u230b by truncating the mantissa. We can also round values by adding one to the most significant bit of mantissa as if x is an unsigned integer and then masking mantissa to 0.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a50cdfa2",
+                "title": "HYBRID ALGORITHM",
+                "blocks": [
+                    {
+                        "block_id": "b_43ec2657",
+                        "type": "paragraph",
+                        "text": "We describe the way to combine our method with Strom's method. It becomes problematic how to modify variance when only parts of gradient elements are exchanged. We solve the issue simply by modifying a 2 to (a-b) 2 . Let S be the value sent in a step (i.e. threshold, -threshold or 0). We correct squared gradient elements",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7d5f81e2",
+                        "type": "paragraph",
+                        "text": ". Fig. 2 shows the algorithm. We show the effictiveness of this combined algorithm by experiments in Sec. 6. Combinations with other works like QSGD and TernGrad are rather straightforward and we do not explore further in this paper.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_21f81ade",
+                "title": "PERFORMANCE ANALYSIS",
+                "blocks": [
+                    {
+                        "block_id": "b_d181fe2a",
+                        "type": "paragraph",
+                        "text": "Because common deep learning libraries do not currently support access to gradients of each sample, it is difficult to contrast practical performance of an efficient implementation in the commonly used software environment. In light of this, we estimate speedup of each iteration by gradient compression with a performance model of communication and computation. The total speed up of the whole training process is just the summation of each iteration because we adopt a synchronized approach.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_67358f09",
+                        "type": "paragraph",
+                        "text": "Algorithm 1: Basic hyperparam: B = batch size, \u03b6, \u03b1 foreach parameters: r i = 0; v i = 0; while not converged:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e03b5e66",
+                        "type": "paragraph",
+                        "text": "CalcGrad(); foreach parameters: CalcGrad(); foreach parameters: In the communication part, the pairs of the quantized values and the parameter indexes in each node are broadcast to all nodes. The i-th node's input data size n i (i = 1, ..., p) may be different among nodes, where p denotes the number of nodes. An MPI function called allgatherv realizes such an operation. Because recent successful image recognition neural network models like VGG (Simonyan & Zisserman, 2015) or ResNet (He et al., 2016) have a large number of parameters, the latency term in communication cost can be ignored even if we achieve very high compression ratio such as c > 1, 000. In such cases, a type of collective communication algorithms called the ring algorithm is efficient (Thakur et al., 2005) . Its bandwidth term is relatively small even though its latency term is proportional to p. Although the naive ring allgatherv algorithm costs unacceptable O(max i n i \u2022 p) time, Tr\u00e4ff et al. (2008) proposed a method to mitigate it by dividing large input data, which is called pipelined ring algorithm. For example, an allgatherv implementation in MVAPICH adopts a pipelined ring algorithm for large input data.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b6",
+                            "Citation_b14",
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7de0440a",
+                        "type": "paragraph",
+                        "text": "The calculation of variance of gradients dominates in the additional cost for the computation part of the proposed method. The leading term of the number of multiply-add operations in it is 2N |B|, where N and |B| are the number of parameters and the local batch size, respectively. Other terms such as determination of sent indexes and application of decay are at most O(N ). Therefore hereafter we ignore the additional cost for the computation part and concentrate to the communication part.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b43f9735",
+                        "type": "paragraph",
+                        "text": "We discuss the relationship between the compression ratio and the speedup of the communication part. As stated above, we ignore the latency term. The baseline is ring allreduce for uncompressed gradients. Its elapsed time is T r = 2(p -1)N s\u03b2/p, where s and \u03b2 are the bit size of each parameter and the transfer time per bit, respectively. On the other hand, elapsed time of pipelined ring allgatherv is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c4c57edb",
+                        "type": "paragraph",
+                        "text": "where m is the block size of pipelining. Defining c as the averaged compression ratio including change of the number of bits per parameter, T v is evaluated as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0d2aae39",
+                        "type": "paragraph",
+                        "text": "If we set m small enough, relative speedup is T r /T v \u2265 2(p -1)c/p 2 . Therefore we expect linear speedup in c > p/2 range.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d7760eb2",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_f16f1ac2",
+                        "type": "paragraph",
+                        "text": "In this section, we experimentally evaluate the proposed method. Specifically, we demonstrate that our method can significantly reduce the communication cost while maintaining test accuracy. We also show that it can reduce communication cost further when combined with other sparsification methods, and even improves test accuracy in some settings.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9d59ce9a",
+                        "type": "paragraph",
+                        "text": "We used CIFAR-10 (Krizhevsky, 2009) and ImageNet (Russakovsky et al., 2015) , the two most popular benchmark datasets of image classification. We fixed the hyperparameter \u03b6 in Fig. 1 and Fig. 2 to 0.999 in all experiments. We evaluated gradient compression algorithms from the following two viewpoints: accuracy and compression ratio. The accuracy is defined as the test accuracy at the last epoch, and the compression ratio is defined as the number of the total parameters of networks divided by the average number of parameters sent. We do not consider the size of other non-essential information required for the communication, because they are negligible. In addition, we can ignore the number of bits to express each gradient because we assume that both a gradient and a parameter index are enclosed in a 32 bit word as Strom (2015) in all algorithms. Please note that, as all methods use allgatherv for communication, communication cost increases in proportion to the number of workers. Thus, high compression ratio is required to achieve sufficient speed up when using tens or hundreds of workers. We have visualization of results in Appendix C.",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b11"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f141ce32",
+                "title": "CIFAR-10",
+                "blocks": [
+                    {
+                        "block_id": "b_09a282f4",
+                        "type": "paragraph",
+                        "text": "For experiments on CIFAR-10, we used a convolutional neural network similar to VGG (Simonyan & Zisserman, 2015) . The details of the network architecture are described in Appendix D. We trained the network for 300 epochs with weight decay of 0.0005. A total number of workers was 8 and batch size was 64 for each worker. We applied no data augmentation to training images and center-cropped both training and test images into 32x32. We used two different optimization methods: Adam (Ba & Kingma, 2015) and momentum SGD (Sutskever et al., 2013) . For Adam, we used Adam's default parameter described in Ba & Kingma (2015) . For momentum SGD, we set the initial learning rate to 0.05 \u00d7 8 and halved it at every 25 epochs. We used two's complement in implementation of QSGD and \"bit\" represents the number of bits used to represent each element of gradients. \"d\" represents a bucket size. For each configuration, we report the median of the accuracy from five independent runs. Compression ratios are calculated based on the execution that achieved the reported accuracy.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b2",
+                            "Citation_b12",
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6658b32c",
+                        "type": "paragraph",
+                        "text": "Table 1 summarizes the results. Our method successfully trained the network with slight accuracy gain for the Adam setting and 2 to 3 % of accuracy degradation for the Momentum SGD setting. Compression ratios were also sufficiently high, and our method reduced communication cost beyond quantization-based approaches described in section 3. The hybrid algorithm's compression ratio is several orders higher than existing compression methods with a low reduction in accuracy. This indicates the algorithm can make computation with a large number of nodes feasible on commodity level infrastructure that would have previously required high-end interconnections. Even though QSGD achieved higher accuracy than our method, its compression power is limited and our algorithm can reduce communication cost more aggressively. On the other hand, Strom's method caused significant accuracy degradation. Counter-intuitively, the hybrid algorithm improved its accuracy, in addition to the further reduction of communication.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_92893422",
+                        "type": "paragraph",
+                        "text": "Our hypothesis for this phenomena is as follows. In Strom's algorithm, when a large positive gradient appears, it has no choice but send positive values for consequent steps even if calculated gradients in following mini-batches have negative values. On the other hand, in the hybrid algorithm, if following gradients have a different sign with a residual, the residual is not likely to be sent. We assume that this effect helped the training procedure and led to better accuracy. We also would like to mention the difficulty of hyperparameter tuning in Strom's method. As Table 1 shows, using lower threshold does not necessarily always lead to higher accuracy. This is because the hyperparameter controls both its sparsification and quantization. Thus, users do not know whether to use a larger or smaller value as a threshold to maintain accuracy. We note that we observed unstable behaviors Table 1 : Training of a VGG-like network on CIFAR-10. \u03c4 denotes the threshold in Strom's method. \u03b1 is the hyperparameter of our method described in the criterion (3). The number of bits of QSGD refers the number of bits to express gradients except for the sign bits. For each configuration, the median of the accuracy from five independent runs is reported. The compression column lists the compression ratio defined at the beginning of Sec. 6. Moreover, when we know good threshold for Strom's algorithm, we can just combine it with ours to get further compression.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cf6e2080",
+                "title": "IMAGENET",
+                "blocks": [
+                    {
+                        "block_id": "b_13c3e7b5",
+                        "type": "paragraph",
+                        "text": "As larger scale experiments, we trained ResNet-50 (He et al., 2016) on ImageNet. We followed training procedure of Goyal et al. (2017) including optimizer, hyperparameters and data augmentation. We also evaluated algorithms with replacing MomentumSGD and its learning rate scheduling to Adam with its default hyperparameter. We used batch size 32 for each worker and used 16 workers.",
+                        "extracted_citations": [
+                            "Citation_b6",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7d40fa16",
+                        "type": "paragraph",
+                        "text": "Table 2 summarizes the results. In this example as well as the previous CIFAR10 example, Variancebased Gradient Compression shows a significantly high compression ratio, with comparable accuracy. While in this case, Strom's method's accuracy was comparable with no compression, given the significant accuracy degradation with Strom's method on CIFAR10, it appears Variance-based Gradient Compression provides a more robust solution. Note that the training configuration with MomentumSGD is highly optimized to training without any compression. For reference, the original paper of ResNet-50 reports its accuracy as 75.3% (He et al., 2016) . Wen et al. (2017) reports that it caused up to 2% accuracy degradation in training with GoogLeNet (Szegedy et al., 2015) on ImageNet and our method causes no more degradation compared to quantization-based approaches.",
+                        "extracted_citations": [
+                            "Citation_b6",
+                            "Citation_b17",
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1c810658",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_319fec39",
+                        "type": "paragraph",
+                        "text": "We proposed a novel method for gradient compression. Our method can reduce communication cost significantly with no or only slight accuracy degradation. Contributions of our work can be summarized in the following three points. First, we proposed a novel measurement of ambiguity (high variance, low amplitude) to determine when a gradient update is required. Second, we showed the application of this measurement as a threshold for updates significantly reduces update requirements, while providing comparable accuracy. Third, we demonstrated this method can be combined with other efficient gradient compression approaches to further reduce communication cost.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f971c674",
+                "title": "A A SIMPLIFIED VIEW OF THE VARIANCE-BASED CRITERION",
+                "blocks": [
+                    {
+                        "block_id": "b_2679b623",
+                        "type": "paragraph",
+                        "text": "We derive that the criterion (3) corresponds to the criterion (1).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eeb74837",
+                        "type": "paragraph",
+                        "text": "V B [\u2207 i f z (x)]/|B| is an estimated variance of the means of gradients in mini-batches with size |B|.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ee797a37",
+                        "type": "paragraph",
+                        "text": "For \u03b1 = 1, the above criterion reduces to",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a5806547",
+                        "type": "paragraph",
+                        "text": "which is an estimated version of the sufficient condition (2). The term (|B| -1)/(|B| -\u03b1) is approximately 1 in most settings.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_64cbfacb",
+                        "type": "paragraph",
+                        "text": "B RUNNING EXAMPLE OF QUANTIZATION Let (0.04, 0.31, 22.25, ) be a part of gradient elements corresponding to a matrix. Sign bits are separately processed and we consider their absolute values here: (0. 04, 0.31, 6.25, 22.25, 35.75) . Now, M k is the max of the elements: 35.75. 2 \u230alog 2 M k \u230b is 32. After rounding, g i \u2032 of each element become 0.03125, 0.25, 8, 16, 32 and d i for each element become 10, 7, 2, 1, 0. Note that higher d i corresponds to smaller g \u2032 i . We can use only 3 bits and thus we cannot represent 10 and it will not be sent, which means it will not be sent. Finally, we send them with \u230alog 2 M k \u230b, sign bits and index: {\u230alog 2 M k \u230b : 5, ((+7, index : 1), (-2, index : 2), (+1, index : 2), (-0, index : 3))}.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_314ab8ce",
+                "title": "C VISUAL REPRESENTATION OF EXPERIMENTAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_ff4102b7",
+                        "type": "paragraph",
+                        "text": "Figure 3 are scatter plots of Table 1 and 2",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_de0d280a",
+                "title": "D ARCHITECTURE OF VGG-LIKE NETWORK USED ON CIFAR-10",
+                "blocks": [
+                    {
+                        "block_id": "b_70c66907",
+                        "type": "paragraph",
+                        "text": "Table 3 shows the network architecture used for experiments on CIFAR-10. All convolutional layers are followed by batch normalization and ReLU activation. The code is available in examples of Chainer (Tokui et al., 2015) on GitHub.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Sparse communication for distributed gradient descent A F Aji K Heafield Proceedings of the 2017 Conference on Empirical Methods in Natural Language Processing the 2017 Conference on Empirical Methods in Natural Language Processing 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Communication-efficient stochastic gradient descent, with applications to neural networks D Alistarh D Grubic J Li R Tomioka M Vojnovic Advances in Neural Information Processing Systems 2017 31 to appear",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Adam: A method for stochastic optimization J Ba D Kingma 3rd International Conference on Learning Representations (ICLR) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Automated inference with adaptive batches S De A Yadav D Jacobs T Goldstein Proceedings of the 20th International Conference on Artificial Intelligence and Statistics (AISTATS) the 20th International Conference on Artificial Intelligence and Statistics (AISTATS) 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Communication quantization for data-parallel training of deep neural networks N Dryden S A Jacobs T Moon B Van Essen Proceedings of the Workshop on Machine Learning in High Performance Computing Environments (MLHPC '16) the Workshop on Machine Learning in High Performance Computing Environments (MLHPC '16) 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "P Goyal P Doll\u00e1r R B Girshick P Noordhuis L Wesolowski A Kyrola A Tulloch Y Jia K He arXiv:1706.02677 Accurate, large minibatch SGD: training imagenet in 1 hour 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Deep residual learning for image recognition K He X Zhang S Ren J Sun IEEE Conference on Computer Vision and Pattern Recognition (CVPR) 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Learning multiple layers of features from tiny images A Krizhevsky 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Imagenet large scale visual recognition challenge O Russakovsky J Deng H Su J Krause S Satheesh S Ma Z Huang A Karpathy A Khosla M Bernstein A C Berg L Fei-Fei International Journal of Computer Vision 115 3 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "1-bit stochastic gradient descent and application to data-parallel distributed training of speech DNNs F Seide H Fu J Droppo G Li D Yu INTERSPEECH 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Very deep convolutional networks for large-scale image recognition K Simonyan A Zisserman 3rd International Conference on Learning Representations (ICLR) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Scalable distributed DNN training using commodity GPU cloud computing N Strom INTER-SPEECH 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "On the importance of initialization and momentum in deep learning I Sutskever J Martens G Dahl G Hinton Proceedings of the 30th International Conference on International Conference on Machine Learning (ICML) the 30th International Conference on International Conference on Machine Learning (ICML) 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Going deeper with convolutions C Szegedy W Liu Y Jia P Sermanet S Reed D Anguelov D Erhan V Vanhoucke A Rabinovich IEEE Conference on Computer Vision and Pattern Recognition (CVPR) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Optimization of collective communication operations in MPICH R Thakur R Rabenseifner W Gropp The International Journal of High Performance Computing Applications 19 1 2005",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Chainer: a next-generation open source framework for deep learning S Tokui K Oono S Hido J Clayton Proceedings of Workshop on Machine Learning Systems (LearningSys) in The Twenty-ninth Annual Conference on Neural Information Processing Systems (NIPS) Workshop on Machine Learning Systems (LearningSys) in The Twenty-ninth Annual Conference on Neural Information Processing Systems (NIPS) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "A simple, pipelined algorithm for large, irregular all-gather problems J L Tr\u00e4ff A Ripke C Siebert P Balaji R Thakur W Gropp Recent Advances in Parallel Virtual Machine and Message Passing Interface: 15th European PVM/MPI Users' Group Meeting 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "TernGrad: Ternary gradients to reduce communication in distributed deep learning W Wen C Xu F Yan C Wu Y Wang Y Chen H Li Advances in Neural Information Processing Systems 2017 31 to appear",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.6415,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper proposes a variance-based gradient compression method to reduce the communication overhead of distributed deep learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Experiments on real datasets are used for evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The idea to adopt approximated variances of gradients to reduce communication cost seems to be interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "However, there also exist several major issues in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Firstly, the authors propose to combine two components to reduce communication cost, one being variance-based gradient compression and the other being quantization and parameter encoding.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "But the contributions of these two components are not separately analyzed or empirically verified.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "Secondly, the experimental results are unconvincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "The accuracy of Momentum SGD for \u2018Strom, \\tau=0.01\u2019 on CIFAR-10 is only 10.6%.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Obviously, the learning procedure is not convergent.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "It is highly possible that the authors do not choose a good hyper-parameter.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "Furthermore, the proposed method (not the hybrid) is not necessarily better than Strom except for the case of Momentum SGD on CIFAR-10.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "Please note that the case of Momentum SGD on CIFAR-10 may have a problematic experimental setting for Strom.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "In addition, it is weird that the experiment on ImageNet does not adopt the same setting as that on CIFAR-10 to evaluate both Adam and Momentum SGD.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0716,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The authors propose a new gradient compression method for efficient distributed training of neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The authors propose a novel way of measuring ambiguity based on the variance of the gradients.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "In the experiment, the proposed method shows no or slight degradation of accuracy with big savings in communication cost.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "The proposed method can easily be combined with other existing method, i.e., Storm (2015), based on the absolute value of the gradient and shows further efficiency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "The paper is well written: clear and easy to understand.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "The proposed method is simple yet powerful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "Particularly, I found it interesting to re-evaluate the variance with (virtually) increasing larger batch size.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "The performance shown in the experiments is also impressive.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "I found it would have also been interesting and helpful to define and show a new metric that incorporates both accuracy and compression rate into a single metric, e.g., how much accuracy is lost (or gained) per compression rate relatively to the baseline of no compression.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "With this metric, the comparison would be easier and more intuitive.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.3933,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "The paper proposes a novel way of compressing gradient updates for distributed SGD, in order to speed up overall execution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "While the technique is novel as far as I know (eq.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "(1) in particular), many details in the paper are poorly explained (I am unable to understand) and experimental results do not demonstrate that the problem targeted is actually alleviated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "More detailed remarks:\n1: Motivating with ImageNet taking over a week to train seems misplaced when we have papers claiming to train ImageNet in 1 hour, 24 mins, 15 mins...",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "4.1: Lemma 4.1 seems like you want B > 1, or clarify definition of V_B.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "4.2: This section is not fully comprehensible to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "- It seems you are confusingly overloading the term gradient and words derived (also in other parts or the paper).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "What is \"maximum value of gradients in a matrix\"?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Make sure to use something else, when talking about individual elements of a vector (which is constructed as an average of gradients), etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "- Rounding: do you use deterministic or random rounding?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "Do you then again store the inaccuracy?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "- I don't understand definition of d.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "It seems you subtract logarithm of a gradient from a scalar.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "- In total, I really don't know what is the object that actually gets communicated, and consequently when you remark that this can be combined with QSGD and the more below it, I don't understand it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "This section has to be thoroughly explained, perhaps with some illustrative examples.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "4.3: allgatherv remark: does that mean that this approach would not scale well to higher number of workers?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "4.4: Remarks about quantization and mantissa manipulation are not clear to me again, or what is the point in doing so.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "Possible because the problems above.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "5: I think this section is not too useful unless you can accompany it with actual efficient implementation and contrast the practical performance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "6: Given that I don't understand how you compress the information being communicated, it is hard to believe the utility of the method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "The objective was to speed up training time because communication is bottleneck.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "If you provide 12,000x compression, is it any more practically useful than providing 120x compression?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "What would be the difference in runtime?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_23",
+                    "text": "Such questions are never discussed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_24",
+                    "text": "Further, if in the implementation you discuss masking mantissa, I have serious concern about whether the compression protocol is feasible to implement efficiently, without writing some extremely low-level code.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_25",
+                    "text": "I think the soundness of work addressing this particular problem is damaged if not implemented properly (compared to other kinds of works in current ML related research).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_26",
+                    "text": "Therefore I highly recommend including proper time comparison with a baseline in the future.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_27",
+                    "text": "Further, I don't understand 2 things about the Tables.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_28",
+                    "text": "a) how do you combine the proposed method with Momentum in SGD?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_29",
+                    "text": "This is not discussed as far as I can see.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_30",
+                    "text": "b) What is \"QSGD, 2bit\" If I remember QSGD protocol correctly, there's no natural mapping of 2bit to its parameters.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_6bb33b8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_17dd277a"
+        },
+        {
+            "source": "b_2617d843",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_2617d843",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_2617d843",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_2617d843",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_6bb33b8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2617d843"
+        },
+        {
+            "source": "sec_6bb33b8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5a337888"
+        },
+        {
+            "source": "sec_6bb33b8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6e41c11c"
+        },
+        {
+            "source": "sec_6bb33b8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bbf4ed62"
+        },
+        {
+            "source": "sec_8ef1ee9f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_83c30396"
+        },
+        {
+            "source": "sec_3d3fbf12",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36f8c203"
+        },
+        {
+            "source": "sec_3d3fbf12",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_69617152"
+        },
+        {
+            "source": "b_d4962d94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_3d3fbf12",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d4962d94"
+        },
+        {
+            "source": "sec_47ed0ab2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c52f29d4"
+        },
+        {
+            "source": "sec_47ed0ab2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_144c5acd"
+        },
+        {
+            "source": "sec_47ed0ab2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b68c8209"
+        },
+        {
+            "source": "b_148618ca",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_148618ca",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_148618ca",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_8bd7af4a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_148618ca"
+        },
+        {
+            "source": "b_9d224199",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_9d224199",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_9d224199",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_8bd7af4a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d224199"
+        },
+        {
+            "source": "sec_6649cf94",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_99723ff2"
+        },
+        {
+            "source": "sec_6649cf94",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2a90ed63"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eac67d02"
+        },
+        {
+            "source": "b_fb35ef00",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_fb35ef00",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fb35ef00"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bc0f042e"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ba77987"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7746cf2a"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_39aade25"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2e5e4a99"
+        },
+        {
+            "source": "b_e4eb8bd5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4eb8bd5"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d74360ee"
+        },
+        {
+            "source": "sec_bc4362eb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e6701f4"
+        },
+        {
+            "source": "sec_838f2258",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_925b88fb"
+        },
+        {
+            "source": "b_83a728cd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_83a728cd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_83a728cd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_838f2258",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_83a728cd"
+        },
+        {
+            "source": "sec_838f2258",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_267deca1"
+        },
+        {
+            "source": "b_e3b754d6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_838f2258",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e3b754d6"
+        },
+        {
+            "source": "b_b0ea0d25",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_b0ea0d25",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_b0ea0d25",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_838f2258",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b0ea0d25"
+        },
+        {
+            "source": "sec_fc251b3e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c0bbe2a0"
+        },
+        {
+            "source": "b_4102b747",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_4102b747",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_4102b747",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_fc251b3e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4102b747"
+        },
+        {
+            "source": "sec_b047b067",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0389581a"
+        },
+        {
+            "source": "sec_b047b067",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bb0f42a7"
+        },
+        {
+            "source": "sec_b047b067",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a012aa70"
+        },
+        {
+            "source": "sec_a50cdfa2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_43ec2657"
+        },
+        {
+            "source": "sec_a50cdfa2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7d5f81e2"
+        },
+        {
+            "source": "sec_21f81ade",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d181fe2a"
+        },
+        {
+            "source": "sec_21f81ade",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_67358f09"
+        },
+        {
+            "source": "b_e03b5e66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_e03b5e66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_e03b5e66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_e03b5e66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_21f81ade",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e03b5e66"
+        },
+        {
+            "source": "sec_21f81ade",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7de0440a"
+        },
+        {
+            "source": "sec_21f81ade",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b43f9735"
+        },
+        {
+            "source": "sec_21f81ade",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c4c57edb"
+        },
+        {
+            "source": "sec_21f81ade",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0d2aae39"
+        },
+        {
+            "source": "sec_d7760eb2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f16f1ac2"
+        },
+        {
+            "source": "b_9d59ce9a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_9d59ce9a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_d7760eb2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d59ce9a"
+        },
+        {
+            "source": "b_09a282f4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_09a282f4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_09a282f4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_09a282f4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_f141ce32",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09a282f4"
+        },
+        {
+            "source": "sec_f141ce32",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6658b32c"
+        },
+        {
+            "source": "sec_f141ce32",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_92893422"
+        },
+        {
+            "source": "b_13c3e7b5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_13c3e7b5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_cf6e2080",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_13c3e7b5"
+        },
+        {
+            "source": "b_7d40fa16",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_7d40fa16",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_7d40fa16",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_cf6e2080",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7d40fa16"
+        },
+        {
+            "source": "sec_1c810658",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_319fec39"
+        },
+        {
+            "source": "sec_f971c674",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2679b623"
+        },
+        {
+            "source": "sec_f971c674",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eeb74837"
+        },
+        {
+            "source": "sec_f971c674",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee797a37"
+        },
+        {
+            "source": "sec_f971c674",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a5806547"
+        },
+        {
+            "source": "sec_f971c674",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_64cbfacb"
+        },
+        {
+            "source": "sec_314ab8ce",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff4102b7"
+        },
+        {
+            "source": "b_70c66907",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_de0d280a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_70c66907"
+        }
+    ]
+}

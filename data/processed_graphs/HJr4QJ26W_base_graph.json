@@ -1,0 +1,1414 @@
+{
+    "paper_metadata": {
+        "paper_id": "HJr4QJ26W",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_d37e164f",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_df83d11d",
+                        "type": "paragraph",
+                        "text": "Generative image models have improved rapidly in the past few years, in part because of the success of Generative Adversarial Networks, or GANs (Goodfellow et al., 2014) . GANs attempt to train a \"generator\" to create images which mimic real images, by training it to fool an adversarial \"discriminator,\" which attempts to discern whether images are real or fake. This is one solution to the difficult problem of learning when we don't know how to write down an objective function for image quality: take an empirical distribution of \"good\" images, and try to match it.",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_50b85262",
+                        "type": "paragraph",
+                        "text": "Often, we want to impose additional constraints on our goal distribution besides simply matching empirical data. If we can write down an objective which reflects our goals (even approximately), we can often simply incorporate this into the loss function to achieve our goals. For example, when trying to generate art, we would like our network to be creative and innovative rather than just imitating previous styles, and including a penalty in the loss for producing recognized styles appears to make GANs more creative (Elgammal et al., 2017) . Conditioning on image content class, training the discriminator to classify image content as well as making real/fake judgements, and including a loss term for fooling the discriminator on class both allows for targeted image generation and improves overall performance (Odena et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0ba6a267",
+                        "type": "paragraph",
+                        "text": "However, sometimes it is not easy to write an explicit objective that reflects our goals. Often the only effective way to evaluate machine learning systems on complex tasks is by asking humans to determine the quality of their results (Christiano et al., 2017, e.g.) or by actually trying them out in the real world. Can we incorporate this kind of feedback to efficiently guide a generative model toward producing better results? Can we do so without a prohibitively expensive and slow amount of data collection? In this paper, we tackle a specific problem of this kind: generating images that cause more positive user interactions. We imagine interactions are measured by a generic Positive Interaction Rate (PIR), which could come from a wide variety of sources.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e290adf3",
+                        "type": "paragraph",
+                        "text": "For example, users might be asked to rate how aesthetically pleasing an image is from 1 to 5 stars. The PIR could be computed as a weighted sum of how frequently different ratings were chosen. Alternatively, these images could be used in the background of web pages. We can assess user interactions with a webpage in a variety of ways (time on page, clicks, shares, etc.), and summarize these interactions as the PIR. In both of these tasks, we don't know exactly what features will affect the PIR, and we certainly don't know how to explicitly compute the PIR for an image. However, we can empirically determine the quality of an image by actually showing it to users, and in this paper we show how to use a small amount of this data (results on 1000 images) to efficiently tune a generative model to produce images which increase PIR. In this work we focus on simulated PIR values as a proof of concept, but in future work we will investigate PIR values from real interactions.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f472b039",
+                "title": "APPROACH",
+                "blocks": [
+                    {
+                        "block_id": "b_76ffc0d0",
+                        "type": "paragraph",
+                        "text": "The most straight-forward way to improve an image GAN might be to evaluate the images the model produces with real users at each training step. However, this process is far too slow. Instead, we want to be able to collect a batch of PIR data on a batch of images, and then use this batch of data to improve the generative model for many gradient steps; we want to do this despite the fact that the images the generator is producing may evolve to be very different from the original images we collected PIR data on. In order to do this, we use the batch of image and PIR data to train a \"PIR Estimator Model\" which predicts PIRs on images. We then use these estimated PIRs at each step as a loss.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d87e2673",
+                        "type": "paragraph",
+                        "text": "Our approach is inspired by the work of Christiano and colleagues (Christiano et al., 2017) , who integrated human preference ratings between action sequences into training of a reinforcement learning model by using the preference data to estimate a reward function. However, our problem and approach differ in several key ways. First, we are optimizing a generative image model rather than a RL model. This is more difficult in some ways, since the output space is much higher-dimensional than typical RL problems, which means that scalar feedback (like a PIR) may be harder for the system to learn from. This difficulty is partially offset by the fact that we assume we get \"reward\" (PIR) information for an image when we evaluate, instead of just getting preferences which we have to map to rewards. Perhaps most importantly, we use our PIR estimation model as a fully-differentiable loss function for training, instead of just using its estimated rewards. This allows us to more effectively exploit its knowledge of the objective function (but risks overfitting).",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_354a5e99",
+                        "type": "paragraph",
+                        "text": "Our system consists of three components: A generative image model, users who interact with the generated images in some way, and a PIR estimator that models user interactions given an image. See Fig. 1 for a diagram of the system's general operation. The generative model produces images, which are served to users. Using interaction data from these users, we train the PIR estimator model, which predicts PIRs given a background image, and then incorporate this estimated PIR into the loss of the generative model to tune it to produce higher quality images. Below, we discuss each of these components in more detail.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4eb86a3b",
+                "title": "GENERATIVE MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_4481b20f",
+                        "type": "paragraph",
+                        "text": "We begin with a GAN 1 (Goodfellow et al., 2014) which we pre-trained to produce images from a target distribution (specifically, landscapes of mountains and coasts). Let D source be the source estimated by the discriminator, G the generator, and z a noise input to the generator sampled from a multivariate standard normal distribution N (0, I), and I be the set of real images shown to the discriminator. Define:",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fd82ca93",
+                        "type": "paragraph",
+                        "text": "Then the discriminator and generator are trained to maximize the following losses (respectively), where the w * are weights set as hyperparameters:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ad95ff53",
+                        "type": "paragraph",
+                        "text": "Note that there is a difference between these losses and the standard GAN formulation given in (Goodfellow et al., 2014) -we maximize L fake image fools = log P (classified real) rather than minimizing log (1 -P (classified real)). This seems to result in the generation of slightly better images in practice.",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5b99cfe9",
+                        "type": "paragraph",
+                        "text": "This GAN was trained on a dataset consisting of landscape images of mountains and coastlines (see Appendix C.2 for details of the architecture and training). It is worth noting that this generative model is not photorealistic (see Fig. 3a for some samples). Its expressive capacity is limited, and it has clear output modes with limited intra-mode variability. However, for our purposes this may not matter. Indeed, it is in some ways more interesting if we can tweak this model to optimize for many objective functions, since its limited expressive capacity will make it more difficult for us to estimate and pursue the real objective -a limited set of images will effectively give us fewer points to estimate the PIR function from, and will reduce the space in which the model can easily produce images, thus reducing the possibility of getting very optimal images from the model. For example, a model which produces images of birds may not produce data points which provide good estimates of a PIR based on how much the image looks like a car, and even if it could, it may not be able to produce images which are \"more car-like.\" If we are able to succeed in improving PIRs with this generative model, it is likely that a better generative model would yield even better results.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_38b74206",
+                "title": "USER INTERACTIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_5857398e",
+                        "type": "paragraph",
+                        "text": "We will show these images to users in a variety of ways, depending on our target domain. For the purposes of this paper, however, we will use simulated interaction data (see Section 3 for details).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3891d3ad",
+                        "type": "paragraph",
+                        "text": "Of course, since showing images to users is an expensive prospect, we wanted to limit the size of the datasets we used to train the model. Typical datasets used to train vision models are on the order of millions of images, (e.g. ImageNet (Russakovsky et al., 2015) ), but it is completely infeasible to collect user data on this number of images. We estimated that we could show 1000 images each 1000 times to generate our datasets. We used these dataset sizes and number of impressions for all experiments discussed here, and added noise to the PIRs that was binomially distributed according to the number of times each image was shown and the \"true\" PIR simulate from the objective.",
+                        "extracted_citations": [
+                            "Citation_b11"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1f54b5e8",
+                "title": "PIR ESTIMATOR MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_08d02e09",
+                        "type": "paragraph",
+                        "text": "The final component of our system is the PIR estimator model, which learns to predict PIR from a background image. We denote this model by R : image \u2192 [0, 1]. We parameterize this model as a deep neural network. Specifically, we take the Inception v2 architecture (Szegedy et al., 2016) , remove the output layer, and replace it with a fully-connected layer to PIR estimates. We initialize the Inception v2 parameters from a version of the model trained on [dataset redacted for blind review]. See Appendix C.3 for more details.",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_17545d7f",
+                        "type": "paragraph",
+                        "text": "Why did we not make estimated PIR simply another auxiliary output from the discriminator, like class in the ACGAN (Appendix C.1)? Because the PIR estimator needs to be held constant in order to provide an accurate training objective. If the PIR estimates were produced by the discriminator, then as the discriminator changed to accurately discriminate the evolving generator images, the PIR estimates would tend to drift without a ground-truth to train them on. Separating the discriminator and the PIR estimator allows us to freeze the PIR estimator while still letting the discriminator adapt.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2eeb8f4f",
+                "title": "INTEGRATION",
+                "blocks": [
+                    {
+                        "block_id": "b_a3b45ff7",
+                        "type": "paragraph",
+                        "text": "Once we have trained a PIR estimator model, we have to use it to improve the GAN. We do this as follows. Let R denote the PIR estimator model, as above. Define L PIR to be the expectation of the estimated PIR produced over images sampled from the generator:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5c0640b2",
+                        "type": "paragraph",
+                        "text": "Then we simply supplement the generator loss by adding this term times a weight w P IR , set as a hyperparameter:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4012496e",
+                        "type": "paragraph",
+                        "text": "L Generator = L fake image fools + w P IR L P IR",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6d866d4a",
+                        "type": "paragraph",
+                        "text": "We set w P IR = 1000 as this made the magnitude of the PIR loss and the other loss terms roughly comparable. Otherwise we used the same parameters as in the GAN training above, except that we reduced the learning rate to 10 -6 to allow the system to adapt more smoothly to the multiple objectives, and we trained for 50,000 steps.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_292e3fca",
+                "title": "DATA",
+                "blocks": [
+                    {
+                        "block_id": "b_743b1fa1",
+                        "type": "paragraph",
+                        "text": "In this paper, we use simulated interaction data as proof of concept. This raises an issue: what functions should we use to simulate user interactions? Human behavior is complex, and if we already knew precisely what guided user interactions, there would be no need to actually collect human behavioral data at all. Since we don't know what features will guide human behavior, the next best thing we can do is to ensure that our system is able to alter the image generation model in a broad variety of ways, ranging from low level features (like making the images more colorful) to altering complex semantic features (such as including more plants in outdoor scenery). We also want to avoid hand-engineering tasks to the greatest extent possible. We present an overview of our approaches to simulating PIR data below, see Appendix C.4 for more details.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_710bb2cf",
+                "title": "VGG FEATURES",
+                "blocks": [
+                    {
+                        "block_id": "b_55e0474e",
+                        "type": "paragraph",
+                        "text": "The first approach we took to evaluating our system's ability to train for different features was to use activity from hidden layers of a computer vision model, specifically VGG 16 (Simonyan & Zisserman, 2014) trained on ImageNet (Russakovsky et al., 2015) . In particular, we took the activity of a single filter in a layer of VGG relative to the overall activity of that layer. This approach to simulating PIRs has several benefits. First, it gives a wide variety of complex objectives that can nevertheless be easily computed to simulate data. Second, models like VGG exhibit hierarchical organization, where lower levels generally respond to lower-level features such as edges and colors, while higher levels respond to higher-level semantic features such as faces (Zeiler & Fergus, 2014) , and the represented features relate to those in human and macaque visual cortex (Yamins et al., 2014) . Thus VGG features give a wide range of objectives which we may relate to the human perception we wish to target.",
+                        "extracted_citations": [
+                            "Citation_b12",
+                            "Citation_b11",
+                            "Citation_b15",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b2589146",
+                        "type": "paragraph",
+                        "text": "There are some caveats to this approach, however. First, although the higher layers of CNNs are somewhat selective for \"abstract\" object categories, they are also fooled by adversarial images that humans would not be, and directly optimizing inputs for these high level features does not actually produce semantically meaningful images (Nguyen et al., 2014) . Thus, even if our system succeeds in increasing activity in a targeted layer which is semantically selective, it will likely do so by adversarially exploiting particulars of VGG 16's parameterization of the classification problem (although the fact that we are not backpropagating through the true objective will make this harder).",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_380568be",
+                        "type": "paragraph",
+                        "text": "It is not necessarily a failure of the system if it exploits simple features of the objective it is given to increase PIRs -indeed, it should be seen as a success, as long as it is generalizes to novel images. However, success on this task does not necessarily guarantee success on modifying semantic content when interacting with actual humans. It may be easier for the PIR estimator model (which is based on a CNN) to learn objectives which come from another CNN than more general possible objectives. The fact that adversarial examples can sometimes transfer between networks with different architectures (Liu et al., 2016) suggests that the computations being performed by these networks are somewhat architecture invariant. Thus CNN objectives may be easier for our estimator than human ones.",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ee78d366",
+                        "type": "paragraph",
+                        "text": "We have tried to minimize these problems to the greatest extent possible by using different network architectures (Inception V2 and VGG 16, respectively) trained on different datasets ([hidden] and ImageNet (Russakovsky et al., 2015) , respectively) for the estimator and the objective. However, we cannot be certain that the network is not \"cheating\" in some way on the VGG 16 tasks, so our results must be considered with this qualification in mind. Despite this, we think that evaluating our system's ability to optimize for objectives generated from various layers of VGG will show its ability to optimize for a variety of complex objectives, and thus will serve as a useful indicator of its potential to improve PIRs from real users.",
+                        "extracted_citations": [
+                            "Citation_b11"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_be6cd68a",
+                "title": "MULTIPLE FILTERS",
+                "blocks": [
+                    {
+                        "block_id": "b_16c3cc13",
+                        "type": "paragraph",
+                        "text": "After using our system on the tasks above, we noted that its performance was quite poor at layers 5, 6, and 7 of VGG compared to other tasks (see Fig. 2 ). This could suggest that our system was unable to capture the complex features represented at the higher levels of VGG. However, we also noticed that the feature representations at these layers tended to be quite sparse, so many of the simulated PIRs we generated were actually zero to within the bin width of our PIR estimator (see Appendix B Fig. 8 for a plot of how this affected learning). In order to evaluate whether the poor performance of our system at the higher layers of VGG was due to the number of zeros or to the complexity of the features, we created less sparse features from these layers by simply targeting a set of k filters sampled without replacement from the layer, rather than a single filter. The single filter cases above can be thought of as a special case of this, where k = 1. To complement these, we also tried k = 20.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_003755ef",
+                        "type": "paragraph",
+                        "text": "This can also be thought of as perhaps a more realistic simulation of human behavior, in the sense that it is highly unlikely that there is a single feature which influences human PIRs. Rather, there are probably many related features which influence PIR in various ways. Thus it is important to evaluate our system's ability to target these types of features as well.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0ab8580e",
+                "title": "COLORS",
+                "blocks": [
+                    {
+                        "block_id": "b_47fca65e",
+                        "type": "paragraph",
+                        "text": "Finally, we also considered some simpler objectives based on targeting specific colors in the output images, or targeting vertical bands of two different colors, one in each half of the image, or three colors, one in each third of the image. These objectives provide a useful complement to the VGG objectives above. Although the single color objectives may be relevant to the classification task VGG 16 performs, the split color tasks are less likely to be relevant to classification. Note that it is important that we split the images along the width instead of the height dimension, as there may well be semantically relevant features corresponding to color divisions along the height dimension, e.g. a blue upper half and green lower half likely correlates with outdoor images, which would provide useful class information. By contrast, it is harder to imagine circumstances where different colors on the left and right halves of the image are semantically predictive, especially since flipping left to right is usually included in the data augmentation for computer vision systems. Thus success on optimizing for these objectives would increase our confidence in the generality of our system.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_90455685",
+                "title": "RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_ed11ab70",
+                        "type": "paragraph",
+                        "text": "We present our results in terms of the change in mean PIR from 1000 images produced by the GAN before tuning to 1000 images produced after tuning, or in terms of the effect size of this change (Cohen's d, i.e. the change in mean PIR standardized by the standard deviation of the PIRs in the pre-and post-tuning image sets). We assess whether these changes are significant by performing a Welch's t-test (with a significance threshold of \u03b1 = 0.001) between the pre-and post-tuning PIRs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0569c9ea",
+                        "type": "paragraph",
+                        "text": "Overall, our system was quite successful at improving PIRs across a range of simulated objective functions (see Fig. 2 ). Below, we discuss these results in more detail.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f3bcae31",
+                "title": "VGG OBJECTIVES",
+                "blocks": [
+                    {
+                        "block_id": "b_e732c237",
+                        "type": "paragraph",
+                        "text": "Our system largely succeed at increasing PIRs on a variety of VGG objectives (see Fig. 2 ). However, there are several interesting patterns to note. First, the system is not particularly successful at targeting single filters from the pool5, fc6, and fc7 layers. However, we believe this is due to the fact that filters in these layers produce relatively sparse activation, see section 3.2. Indeed, the performance of the system seems much more consistent when it is optimizing for sets of 20 filters than for single filters.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f8c6f1cb",
+                        "type": "paragraph",
+                        "text": "Even when using 20 filters, however, there is a noticeable decline in the effect size of the improvement the system is able to make at higher layers of VGG (\u03b2 = -0.13 per layer, t = -7.8, p < 10 -10 in a linear model controlling for initial standard deviation and percent zeros). This suggests that as the objectives grow more complex, the system may be finding less accurate approximations to them. However, the system's continuing (if diminished) success at the higher layers of VGG suggests that our model is capable of at least partially capturing complex objective functions.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1eb2cb2e",
+                "title": "COLOR OBJECTIVES",
+                "blocks": [
+                    {
+                        "block_id": "b_f60987ea",
+                        "type": "paragraph",
+                        "text": "Overall, the system performed quite well at optimizing for the color objectives, particularly the single and two-color results (see Fig. 2 ). It had more difficulty optimizing for the three-color results, and indeed had produced only very small improvements after the usual 50,000 tuning steps for the generative model, but after 500,000 steps it was able to produce significant improvements for two out of the three objectives (these longer training results are the ones included here).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b8445fdb",
+                        "type": "paragraph",
+                        "text": "Because the color objectives are easiest to assess visually, we have included results for a variety of these objectives in Fig. 3 . For the single color objectives, the improvement is quite clear, for example the images in Fig. 3d appear much more blue than the pre-training ones. For the two color objectives, it appears that the system found the \"trick\" of reducing the third color, for example the red-green split images in Fig. 3e appear much less blue than the pre-training images. Even on the three-color images where the system struggled, there are some visible signs of improvement, for example on the green-blue-red task the system has started producing a number of images with a blue streak in the middle.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7f3ec90d",
+                "title": "SUPPLEMENTAL ANALYSES",
+                "blocks": [
+                    {
+                        "block_id": "b_5b6d867f",
+                        "type": "paragraph",
+                        "text": "We also conducted several supplemental analyses which can be found in detail Appendix A. In summary, the initial variability in the PIR of the images used to train the system is strongly correlated with the amount of improvement the system makes in the PIR, the system fairly consistently underestimates the performance it achieves (because of a detail of training procedure, see the Appendix), and iterating the process of improving PIRs yields better results for objectives from a lower layer of VGG but not a higher.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7a72e52d",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_0c59505b",
+                        "type": "paragraph",
+                        "text": "Overall, our system appears to be relatively successful. It can optimize a generative model to produce images which target a wide variety of objectives, ranging from low-level visual features such as colors and early features of VGG to features computed at the top layers of VGG. This success across a wide variety of objective functions allows us to be somewhat confident that our system will be able to achieve success in optimizing for real human interactions. Furthermore, the system did not require an inordinate amount of training data. In fact, we were able to successfully estimate many different objective functions from only 1000 images, several orders of magnitude fewer than is typically used to train CNNs for vision tasks. Furthermore, these images came from a very biased and narrow distribution (samples from our generative model) which is reflective of neither the images that were used to pre-train the Inception model in the PIR estimator, nor the images the VGG model (which produced the simulated objectives) was trained on. Our success from this small amount of data suggests that not only will our system be able to optimize for real human interactions, it will be able to do so from a feasible number of training points.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f0a253bb",
+                        "type": "paragraph",
+                        "text": "These results are exciting -the model is able to approximate apparently complex objective functions from a small amount of data, even though this data comes from a very biased distribution that is unrelated to most the objectives in question. But what is really being learned? In the case of the color images, it's clear that the model is doing something close to correct. However, for the objectives derived from VGG we have no way to really assess whether the model is making the images better or just more adversarial. For instance, when we are optimizing for the logit for \"magpie,\" it's almost certainly the case that the result of this optimization will not look more like a magpie to a human, even if VGG does rate the images as more \"magpie-like.\" On the other hand, this is not necessarily a failure of the system -it is accurately capturing the objective function it is given. What remains to be seen is whether it can capture how background images influence human behavior as well as it can capture the vagaries of deep vision architectures.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fa5b73be",
+                        "type": "paragraph",
+                        "text": "We believe there are many domains where a system similar to ours could be useful. We mentioned producing better webpage backgrounds and making more aesthetic images above, but there are many potential applications for improving GANs with a limited amount of human feedback. For example, a model could be trained to produce better music (e.g. song skip rates on streaming generated music could be treated as inverse PIRs).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_06fc8e94",
+                "title": "TRADING IMAGE DIVERSITY FOR PIR",
+                "blocks": [
+                    {
+                        "block_id": "b_79c55bfc",
+                        "type": "paragraph",
+                        "text": "When tuning the GAN, the decrease in the PIR loss is usually accompanied by an increase in the generator loss, and often by a partial collapse of the generator output (for example, the optimized images generally seem to have fewer output modes than the pre-training images in Fig. 3 ). This is not especially surprising -because we weighted the PIR loss very highly, the model is rewarded for trading some image diversity for image optimality. Depending on the desired application, the weight on the PIR loss could be adjusted as necessary to trade off between producing images close to the data distribution and optimizing PIR. At its most extreme, one could down-weight the generator loss entirely, and train until the model just produces a single optimal image. However, the generator likely provides some regularization by constraining the images to be somewhat close to the real images, which will reduce overfitting to an imperfect estimate of the PIR function. Furthermore, in many settings we will want to generate a variety of images (e.g. backgrounds for different websites). For these reasons, we chose to keep the generator loss when tuning the GAN.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ba5cc876",
+                "title": "FUTURE DIRECTIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_9955a0f5",
+                        "type": "paragraph",
+                        "text": "There are a number of future directions suggested by this work. A number of possible improvements are discussed in Appendix C.5. However, we also think this work has potential applications from the perspective of distillation or imitation approaches, which attempt to train one network to emulate another (Hinton et al., 2015; Parisotto et al., 2015, e.g) , as well as from the perspective of understanding the computations that these vision architectures perform. As far as we are aware, these results are the first to show that a deep vision model can be tuned rapidly from relatively little data to produce outputs which accurately emulate the behavior of hidden layers of another deep vision architecture trained on a different dataset. This suggests both that the inductive biases shared among these architectures are causing them to find similar solutions (which is also supported by work on transferable adversarial examples (Liu et al., 2016, e.g.) ), and that these networks final layers represent the computations of earlier hidden layers in a way that is somewhat accessible. It's possible that using our system with objectives from CNN layers as we did here might help to understand the features those layers are attending to, by analyzing the distribution of images that are produced. In this sense, our system can be thought of as offering a new approach to multifaceted feature visualization (Nguyen et al., 2016) , because our system attempts to optimize a distribution of images for an objective and encourages diversity in the distribution produced, rather than just optimizing a single image.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b7"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_90530ebd",
+                "title": "CONCLUSIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_ea6c6a6d",
+                        "type": "paragraph",
+                        "text": "We have described a system for efficiently tuning a generative image model according to a slow-toevaluate objective function. We have demonstrated the success of this system at targeting a variety of objective functions simulated from different layers of a deep vision model, as well as from low-level visual features of the images, and have shown that it can do so from a small amount of data. We have quantified some of the features that affect its performance, including the variability of the training PIR data and the number of zeros it contains. Our system's success on a wide variety of objectives suggests that it will be able to improve real user interactions, or other objectives which are slow and expensive to evaluate. This may have many exciting applications, such as improving machine-generated images, music, or art.  A OTHER ANALYSES",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1384fb4f",
+                "title": "A.1 INTROSPECTION",
+                "blocks": [
+                    {
+                        "block_id": "b_8470a269",
+                        "type": "paragraph",
+                        "text": "Because L P IR is just the expected value of the PIR, by looking at L P IR before and after tuning the generative model, we can tell how well the system thinks it is doing, i.e. how much it estimates that it improved PIR. This comparison reveals the interesting pattern that the system is overly pessimistic about its performance. In fact, it tends to underestimate its performance by a factor of more than 1.5 (\u03b2 = 1.67 when regressing change in mean PIR on predicted change in mean PIR, see Fig. 4 ). However, it does so fairly consistently. This effect appears to be driven by the system consistently underestimating the (absolute) PIRs, which is probably caused by our change in the softmax temperature between training the PIR estimator and tuning the generative model (which we empirically found improves performance, as noted above). This is in contrast to the possible a priori expectation that the model would systematically overestimate its performance, because it is overfitting to an imperfectly estimated objective function.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9b90cb49",
+                        "type": "paragraph",
+                        "text": "Although decreasing the softmax temperature between training and using the PIR obscures this effect, we do see some evidence of this; the more complex objectives (which the system produced lower effect sizes on) seem to both have lower estimated changes in mean PIR and true changes in PIR which are even lower than the estimated ones (see Fig. 4 ). Thus although the system is somewhat aware of its reduced effectiveness with these objectives (as evidenced by the lower estimates of change in mean PIR), it is not reducing its estimates sufficiently to account for the true difficulty of the objectives (as evidenced by the fact that the true change in PIR is even lower than the estimates). However, the system was generally still able to obtain positive results on these objectives (see Fig. 2 ).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_095d99c0",
+                "title": "A.2 INITIAL VARIABILITY",
+                "blocks": [
+                    {
+                        "block_id": "b_ed5a51a3",
+                        "type": "paragraph",
+                        "text": "There is a general trend (see Fig. 5 ) that the variability in PIR in the initial dataset is strongly positively related with the change in PIR the system is able to produce (\u03b2 = 0.99, t = 10.6, p < 10 -10 , in a linear model controlling for initial mean PIR and initial percent of values that are zero). In fact, initial standard deviation explains about 50% of the variance in the change in mean PIR. This is perhaps not too surprising -more variability means that the generative model has capacity to produce higher PIR images without too much tweaking, and that the PIR estimator model gets a wider range of values to Figure 6 : Effect size evolution over two iterations learn from. Still, when attempting to use this system in practice, it is important to keep in mind that starting with a sufficiently expressive generative model will more likely produce better results than starting with a more limited model.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_70ed4f96",
+                "title": "A.3 ITERATION",
+                "blocks": [
+                    {
+                        "block_id": "b_2ae8d51e",
+                        "type": "paragraph",
+                        "text": "Given that our model improves PIRs, an obvious question is whether we can iterate the process.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_31896e48",
+                        "type": "paragraph",
+                        "text": "Once we have increased PIRs, can we train a new PIR estimator on samples from our new generative model, and use that to increase PIRs again? If we could iterate this many times, we might be able to create much larger improvements in PIR than we can on a single step. On the other hand, it is possible that after a single step of optimization we will effectively have saturated the easily achievable improvement in the model, and further steps will not result in much improvement.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0564ff2e",
+                        "type": "paragraph",
+                        "text": "To evaluate this, we took the subset of models trained on single filters from VGG layers pool2 and fc8, and used the set of images generated from the post-tuning model along with the original set of images to tune their PIR estimators for another 25,000 steps, and then tuned the generative model using this updated PIR estimator for another 50,000 steps. We then evaluated them as before, see Fig. 6 for the results. The second iteration results were mixed, while the pool2 models all improved from the first step to the second, none of them improved as much as they had on the first step, and many of the fc8 models actually performed worse after the second step. However, it is possible that further hyperparameter tuning could improve these results, and it is certainly the case that running multiple steps of iteration and selecting the best model by experimentation could yield better results, so this is worth investigating further.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ebeedf86",
+                "title": "C.1 ACGAN",
+                "blocks": [
+                    {
+                        "block_id": "b_87335c78",
+                        "type": "paragraph",
+                        "text": "We describe our results using the standard GAN framework for clarity, but we actually used an ACGAN (Odena et al., 2016) , which allows for conditioning for various user-specific features. This requires the following adjustments. Defining C to be the set of possible classes and I c to be the set of real images corresponding to a class c \u2208 C:",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b6aa53ad",
+                        "type": "paragraph",
+                        "text": "Then the discriminator and generator losses are modified as follows (letting w f akeclass = 1.5 and w realclass = 1.0):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dc93e32e",
+                        "type": "paragraph",
+                        "text": "L fake image fools + w f akeclass L fake class Note that unlike the standard ACGAN formulation given in (Odena et al., 2016) , we do not include L fake class in the discriminator's loss, to keep the discriminator from cooperating with the generator on the classification task. that the feature representations at these layers tended to be quite sparse, so many of the simulated PIRs we generated were actually zero to within the bin width of our PIR estimator. Respectively, these layers had only 20%, 25%, and 24% non-zero PIRs (collapsing across filters), and around half the filters in each (resp. 6, 4, and 5) were producing > 90% zero PIRs. (By contrast, the layer with the next greatest number of zero PIRs, fc8, still had 69% nonzero PIRs overall, and had no filters in which 90% or more of the PIRs were zero.) In a few cases on layers 5, 6, and 7, all of the generated PIRs were zero. This clearly makes learning infeasible, and indeed we noted that there was a strong relationship between number of non-zero simulated PIRs in the training dataset and the ability of our system to improve PIR (see Fig. 8 ). This is somewhat troubling, since probably most images in the real world will not produce a PIR that is truly zero.",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9eeb0e32",
+                        "type": "paragraph",
+                        "text": "in order to evaluate whether the poor performance of our system at the higher layers of VGG was due to the number of zeros or to the complexity of the features, we created less sparse features from these layers by simply targeting a set of k filters sampled without replacement from the layer, rather than a single filter. We did this by taking the norm across the k target filters, or equivalently by summing the squared norms of the k filters before taking the square root, and then normalizing by the activity in the layer as before. Formally, letting a 1 , ..., a k be a set of k filter indices sampled without replacement from {0, ..., number of filters in layer}, we computed the PIR for an image as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cc42fb45",
+                        "type": "paragraph",
+                        "text": "The single filter cases above can be thought of as a special case of this, where k = 1. To complement these, we also tried k = 20. As above, we also added binomially distributed noise to these PIRs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2223a568",
+                        "type": "paragraph",
+                        "text": "This can also be thought of as perhaps a more realistic simulation of human behavior, in the sense that it is highly unlikely that there is a single feature which influences human PIRs. Rather, there are probably many related features which influence PIR in various ways. Thus it is important to evaluate our system's ability to target these types of features as well.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7466ef05",
+                "title": "C.4.3 COLORS",
+                "blocks": [
+                    {
+                        "block_id": "b_f04d164b",
+                        "type": "paragraph",
+                        "text": "Finally, we also considered some simpler objectives based on targeting specific colors in the output images. Analogously to the VGG features, we computed the PIRs from the vector norm of a given image in the targeted color, normalized by the total image value. We considered several objectives of this type:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f660ad8c",
+                        "type": "paragraph",
+                        "text": "Single color: Optimizing for a single color of output image, e.g., for red the objective would be. Three color: Similar to two color, but split the image into thirds, and computed PIR from a different color in each third.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_20b67570",
+                        "type": "paragraph",
+                        "text": "(As above, we also added binomially distributed noise to these PIRs.) These objectives provide a useful complement to the VGG objectives discussed in section 3.1. Although the single color objectives may be relevant to the classification task VGG 16 performs, the split color tasks are less likely to be relevant to classification. Note that it is important that we split the images along the width instead of the height dimension, as there may well be semantically relevant features corresponding to color divisions along the height dimension, e.g. a blue upper half and green lower half likely correlates with outdoor images, which would provide useful class information. By contrast, it is harder to imagine circumstances where different colors on the left and right halves of the image are semantically predictive, especially since flipping left to right is usually included in the data augmentation for computer vision systems. Thus success on optimizing for these objectives would increase our confidence in the generality of our system.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d894dbf4",
+                "title": "C.5 POSSIBLE IMPROVEMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_0bdc4c8d",
+                        "type": "paragraph",
+                        "text": "There are a number of techniques that could be explored to improve our system. As we mentioned above, iterating for multiple steps of PIR collection and generative model tuning is worth exploring further. Also, some form of data scaling might allow the system to perform better on tasks with low variance. We briefly tried normalizing all data for an objective to have mean 0.5 and standard deviation 0.25, but did not achieve particularly good results from this, possibly because there were many outliers getting clipped to 0 or 1. Still, there are many other possibilities for scaling data that could potentially result in some improvement in performance. Also, one alternative approach to training a GAN to produce high-PIR images would be to use the PIR estimator objective in the Plug & Play Generative Networks framework (Nguyen et al., 2017) instead of using it to tune the GAN. This could be an interesting direction to explore, but its success would probably depend on expressiveness of the initial generative model. With the mediocre model we started with, it's probably better to actually tune the model itself, which may allow it to explore parts of image space which it had not previously.",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Deep reinforcement learning from human preferences Paul Christiano Jan Leike Miljan Tom B Brown Shane Martic Dario Legg Amodei 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "CAN: Creative Adversarial Networks Generating Ahmed Elgammal Bingchen Liu Mohamed Elhoseiny Marian Mazzone Learning About Styles and Deviating from Style Norms. arXiv 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Ij Goodfellow J Pouget-Abadie Mehdi Mirza 10.1001/jamainternmed.2016.8245 Generative Adversarial Networks. arXiv 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Distilling the Knowledge in a Neural Network Geoffrey Hinton Oriol Vinyals Jeff Dean 10.1063/1.4931082 arXiv 0022-2488 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Adam: A Method for Stochastic Optimization. Iclr P Diederik Jimmy Kingma Ba 10.1145/1830483.1830503 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Delving into Transferable Adversarial Examples and Black-box Attacks Yanpei Liu Xinyun Chen Chang Liu Dawn Song arXiv 2 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Anh Nguyen Jason Yosinski Jeff Clune 10.1109/CVPR.2015.7298640 Deep Neural Networks are Easily Fooled: High Confidence Predictions for Unrecognizable Images 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Multifaceted Feature Visualization: Uncovering the Different Types of Features Learned By Each Neuron in Deep Neural Networks Anh Nguyen Jason Yosinski Jeff Clune 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Plug {&} Play Generative Networks: Conditional Iterative Generation of Images in Latent Space Anh Nguyen Jason Yosinski Yoshua Bengio Alexey Dosovitskiy Jeff Clune 10.1109/CVPR.2017.374 ICCV 3 33 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Augustus Odena Christopher Olah Jonathon Shlens Conditional Image Synthesis With Auxiliary Classifier GANs. arXiv 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Actor-Mimic: Deep Multitask and Transfer Reinforcement Learning Emilio Parisotto Jimmy Lei Ba Ruslan Salakhutdinov arXiv 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "ImageNet Large Scale Visual Recognition Challenge Olga Russakovsky Jia Deng Hao Su Jonathan Krause Sanjeev Satheesh Sean Ma Zhiheng Huang Andrej Karpathy Aditya Khosla Michael Bernstein Alexander C Berg Li Fei-Fei 10.1007/s11263-015-0816-y International Journal of Computer Vision 115 3 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Very Deep Convolutional Networks for Large-Scale Image Recognition Karen Simonyan Andrew Zisserman 10.1016/j.infsof.2008.09.005 arXiv 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Rethinking the Inception Architecture for Computer Vision Christian Szegedy Vincent Vanhoucke Sergey Ioffe Jonathon Shlens Zbigniew Wojna 10.1002/2014GB005021 Proceedings of the IEEE Computer Society Conference on Computer Vision and Pattern Recognition (CVPR) the IEEE Computer Society Conference on Computer Vision and Pattern Recognition (CVPR) 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Performance-optimized hierarchical models predict neural responses in higher visual cortex L K Daniel Ha Yamins Charles F Hong Ethan A Cadieu Darren Solomon James J Seibert Dicarlo 10.1073/pnas.1403112111 Proceedings of the National Academy of Sciences of the United States of America 1091-6490 111 23 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Visualizing and Understanding Convolutional Networks D Matthew Rob Zeiler Fergus 10.1007/978-3-319-10590-153 arXiv:1311.2901v3[cs.CV]28 Computer Vision-ECCV 2014 Nov 2013. 2014 8689",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "Summary:\nThis paper proposes an approach to generate images which are more aesthetically pleasing, considering the feedback of users via user interaction.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "However, instead of user interaction, it models it by a simulated measure of the quality of user interaction and then feeds it to a Gan architecture.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "Pros:\n+ The paper is well-written and has just a few typos: 2.1: \u201can Gan\u201d.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "+ The idea is very interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Cons:\n\n- Page 2- section 2- The reasoning that a deep-RL could not be more successful is not supported by any references and it is not convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "- Page 3- para 3 - mathematically the statement does not sound since the 2 expressions are exactly equivalent.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "The slight improvement may be achieved only by chance and be due to computational inefficiency, or changing a seed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "- Page 3- 2.2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Using a crowd-sourcing technique, developing a similarly small dataset (1000 images with 100 annotations) would normally cost less than 1k$.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "- Page 3- 2.2.It is highly motivating to use users feedback in the loop but it is poorly explained how actually the user's' feedback is involved if it is involved at all.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "- Page 4- sec 3 \"..",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "it should be seen as a success\"; the claim is not supported well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "- Page 4- sec 3.2- last paragraph.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "This claim lacks scientific support, otherwise please cite proper references.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "The claim seems like a subjective understanding of conscious perception and unconscious perception of affective stimuli is totally disregarded.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "The experimental setup is not convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "3.3) \"Note that..",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "outdoor images\" this is implicitly adding the designers' bias to the results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "The statement lacks scientific support.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "3.3) the importance of texture and shape is disregarded.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "\u201cIn the Eye of the Beholder: Employing Statistical Analysis and Eye Tracking for Analyzing Abstract Paintings, Yanulevskaya et al\u201d\nThe architecture may lead in overfitting to users' feedback (being over-fit on the data with PIR measures)\n\n- Page 6-Sec 4.2) \" It had more difficulty optimizing for the three-color result\" why?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "please discuss it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "- The expectation which is set in the abstract and the introduction of the paper is higher than the experiments shown in the Experimental setup.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.502,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper proposes a technique to improve the output of GANs by maximising a separate score that aims to mimic human interactions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "Summary:\nThe goal of the technique to involve human interaction in generative processes is interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The proposed addition of a new loss function for this purpose is an obvious choice, not particularly involved.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "It is unclear to me whether the paper has value in its current form, that is without experimental results for the task it achieves.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "It feels to premature for publication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "More comments:\nThe main problem with this paper is that the proposed systems is designed for a human interaction setting but no such experiment is done or presented.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "The title is misleading, this may be the direction where the authors of the submission want to go, but the title  \u201c..",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "with human interactions\u201d is clearly misleading.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "\u201cModel of human interactions\u201d may be more appropriate.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "The technical idea of this paper is to introduce a separate score in the GAN training process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "This modifies the generator objective.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "Besides \u201cfooling\u201d the discriminator, the generator objective is to maximise user interaction with the generated batch of images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "This is an interesting objective but since no interactive experiments presented in this paper, the rest of the experiments hinges on the definition of \u201cPIR\u201d (positive interaction rate)using a model of human interaction.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "Instead of real interactions, the submission proposes to maximise the activations of hidden units in a separate neural network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "By choosing the hierarchy level and type of filter the results of the GAN differ.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "I could not appreciate the results in Figure 2 since I was missing the definition of PIR, how it is drawn in the training setup.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "Further I found it not surprising that the PIR changes when a highly parameterised model is trained for this task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "The PIR value comes from a separate network not directly accessible during training time, nonetheless I would have been surprised to not see an increase.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "Please comment in the rebuttal and I would appreciate if the details of the synthetic PIR values on the training set could be explained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "- Technically it was a bit unclear to me how the objective is defined.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "There is a PIR per level and filter (as defined in C4) but in the setup the L_{PIR} was mentioned to be a scalar function, how are the values then summarized?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "There is a PIR per level and feature defined in C4.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_22",
+                    "text": "- What does the PIR with the model in Section 3 stand for?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_23",
+                    "text": "Shouldn\u2019t be something like \u201cuniqueness\u201d, that is how unique is an image in a batch of images be a better indicator?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_24",
+                    "text": "Besides, the intent of what possibly interesting PIR examples will be was unclear.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_25",
+                    "text": "E.g., the statement at the end of 2.1 is unclear at that point in the document.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_26",
+                    "text": "How is the PIR drawn exactly?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_27",
+                    "text": "What does it represent?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_28",
+                    "text": "Is there a PIR per image?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_29",
+                    "text": "It becomes clear later, but I suggest to revisit this description in a new version.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_30",
+                    "text": "- Also I suggest to move more details from Section C4 into the main text in Section 3.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_31",
+                    "text": "The high level description in Section 3.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.1167,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "+ Quality:\nThe paper discusses an interesting direction of incorporating humans in the training of a generative adversarial networks in the hope of improving generated samples.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "I personally find this exciting/refreshing and will be useful in the future of machine learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "However, the paper shows only preliminary results in which the generator trained to maximize the PIR score (computed based on VGG features to simulate human aesthetics evaluation) indeed is able to do so.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "However, the paper lacks discussion / evidence of how hard it is to optimize for this VGG-based PIR score.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "In addition, if this was challenging to optimize, it'd be useful to include lessons for how the authors manage to train their model successfully.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "In my opinion, this result is not too surprising given the existing power of deep learning to fit large datasets and generalize well to test sets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Also, it is not clear whether the GAN samples indeed are improved qualitatively (with the incorporation of the PIR objective score maximization objective) vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "when there is no PIR objective.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "The paper also did not report sample quantitative measures e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Inception scores / MS-SSIM.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "I'd be interested in how their proposed VGG-based PIR actually correlates with human evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "+ Clarity: \n- Yosinski et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "2014 citation should be Nguyen et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "2015 instead (wrong author order / year).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "- In the abstract, the authors should emphasize that the PIR model used in this paper is based on VGG features.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "+ Originality: \n- The main direction of incorporating human feedback in the loop is original.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "+ Significance: \n- I think the paper contribution is lighter vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "ICLR standard.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "Results are preliminary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "Overall, I find this direction exciting and hope the authors would keep pushing in this direction!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "However, the current manuscript is not ready for publication.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_df83d11d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_d37e164f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_df83d11d"
+        },
+        {
+            "source": "b_50b85262",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_50b85262",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_d37e164f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_50b85262"
+        },
+        {
+            "source": "sec_d37e164f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ba6a267"
+        },
+        {
+            "source": "sec_d37e164f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e290adf3"
+        },
+        {
+            "source": "sec_f472b039",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_76ffc0d0"
+        },
+        {
+            "source": "b_d87e2673",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_f472b039",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d87e2673"
+        },
+        {
+            "source": "sec_f472b039",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_354a5e99"
+        },
+        {
+            "source": "b_4481b20f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_4eb86a3b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4481b20f"
+        },
+        {
+            "source": "sec_4eb86a3b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fd82ca93"
+        },
+        {
+            "source": "b_ad95ff53",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_4eb86a3b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ad95ff53"
+        },
+        {
+            "source": "sec_4eb86a3b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5b99cfe9"
+        },
+        {
+            "source": "sec_38b74206",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5857398e"
+        },
+        {
+            "source": "b_3891d3ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_38b74206",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3891d3ad"
+        },
+        {
+            "source": "b_08d02e09",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_1f54b5e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08d02e09"
+        },
+        {
+            "source": "sec_1f54b5e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_17545d7f"
+        },
+        {
+            "source": "sec_2eeb8f4f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a3b45ff7"
+        },
+        {
+            "source": "sec_2eeb8f4f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5c0640b2"
+        },
+        {
+            "source": "sec_2eeb8f4f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4012496e"
+        },
+        {
+            "source": "sec_2eeb8f4f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6d866d4a"
+        },
+        {
+            "source": "sec_292e3fca",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_743b1fa1"
+        },
+        {
+            "source": "b_55e0474e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_55e0474e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_55e0474e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_55e0474e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_710bb2cf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_55e0474e"
+        },
+        {
+            "source": "b_b2589146",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_710bb2cf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b2589146"
+        },
+        {
+            "source": "b_380568be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_710bb2cf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_380568be"
+        },
+        {
+            "source": "b_ee78d366",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_710bb2cf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee78d366"
+        },
+        {
+            "source": "sec_be6cd68a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_16c3cc13"
+        },
+        {
+            "source": "sec_be6cd68a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_003755ef"
+        },
+        {
+            "source": "sec_0ab8580e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47fca65e"
+        },
+        {
+            "source": "sec_90455685",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ed11ab70"
+        },
+        {
+            "source": "sec_90455685",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0569c9ea"
+        },
+        {
+            "source": "sec_f3bcae31",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e732c237"
+        },
+        {
+            "source": "sec_f3bcae31",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f8c6f1cb"
+        },
+        {
+            "source": "sec_1eb2cb2e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f60987ea"
+        },
+        {
+            "source": "sec_1eb2cb2e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b8445fdb"
+        },
+        {
+            "source": "sec_7f3ec90d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5b6d867f"
+        },
+        {
+            "source": "sec_7a72e52d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0c59505b"
+        },
+        {
+            "source": "sec_7a72e52d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0a253bb"
+        },
+        {
+            "source": "sec_7a72e52d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fa5b73be"
+        },
+        {
+            "source": "sec_06fc8e94",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_79c55bfc"
+        },
+        {
+            "source": "b_9955a0f5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_9955a0f5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_ba5cc876",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9955a0f5"
+        },
+        {
+            "source": "sec_90530ebd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ea6c6a6d"
+        },
+        {
+            "source": "sec_1384fb4f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8470a269"
+        },
+        {
+            "source": "sec_1384fb4f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9b90cb49"
+        },
+        {
+            "source": "sec_095d99c0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ed5a51a3"
+        },
+        {
+            "source": "sec_70ed4f96",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2ae8d51e"
+        },
+        {
+            "source": "sec_70ed4f96",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_31896e48"
+        },
+        {
+            "source": "sec_70ed4f96",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0564ff2e"
+        },
+        {
+            "source": "b_87335c78",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_ebeedf86",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_87335c78"
+        },
+        {
+            "source": "sec_ebeedf86",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b6aa53ad"
+        },
+        {
+            "source": "b_dc93e32e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_ebeedf86",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dc93e32e"
+        },
+        {
+            "source": "sec_ebeedf86",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9eeb0e32"
+        },
+        {
+            "source": "sec_ebeedf86",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cc42fb45"
+        },
+        {
+            "source": "sec_ebeedf86",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2223a568"
+        },
+        {
+            "source": "sec_7466ef05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f04d164b"
+        },
+        {
+            "source": "sec_7466ef05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f660ad8c"
+        },
+        {
+            "source": "sec_7466ef05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_20b67570"
+        },
+        {
+            "source": "b_0bdc4c8d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_d894dbf4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0bdc4c8d"
+        }
+    ]
+}

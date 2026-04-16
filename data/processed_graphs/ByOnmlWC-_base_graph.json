@@ -1,0 +1,1430 @@
+{
+    "paper_metadata": {
+        "paper_id": "ByOnmlWC-",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Accepted",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_d03f6168",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_d11dac15",
+                        "type": "paragraph",
+                        "text": "Reinforcement learning (RL) has recently demonstrated significant progress and achieves state-ofthe-art performance in games (Mnih et al., 2015; Silver et al., 2016) , locomotion control (Lillicrap et al., 2015 ), visual-navigation (Zhu et al., 2017) , and robotics (Levine et al., 2016) . Among these successes, deep neural networks (DNNs) are widely used as powerful functional approximators to enable signal perception, feature extraction and complex decision making. For example, in continuous control tasks, the policy that determines which action to take is often parameterized by a deep neural network that takes the current state observation or sensor measurements as input. In order to optimize such policies, various policy gradient methods (Mnih et al., 2016; Schulman et al., 2015; 2017; Heess et al., 2017) have been proposed to estimate gradients approximately from rollout trajectories. The core idea of these policy gradient methods is to take advantage of the temporal structure in the rollout trajectories to construct a Monte Carlo estimator of the gradient of the expected return.",
+                        "extracted_citations": [
+                            "Citation_b14",
+                            "Citation_b22",
+                            "Citation_b12",
+                            "Citation_b11",
+                            "Citation_b15",
+                            "Citation_b19",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_992553c3",
+                        "type": "paragraph",
+                        "text": "In addition to the popular policy gradient methods, other alternative solutions, such as those for black-box optimization or stochastic optimization, have been recently studied for policy optimization. Evolution strategies (ES) is a class of stochastic optimization techniques that can search the policy space without relying on the backpropagation of gradients. At each iteration, ES samples a candidate population of parameter vectors (\"genotypes\") from a probability distribution over the parameter space, evaluates the objective function (\"fitness\") on these candidates, and constructs a new probability distribution over the parameter space using the candidates with the high fitness. This process is repeated iteratively until the objective is maximized. Covariance matrix adaptation evolution strategy (CMA-ES; Hansen & Ostermeier (2001) ) and recent work from Salimans et al. (2017) are examples of this procedure. These ES algorithms have also shown promising results on continuous control tasks and Atari games, but their sample efficiency is often not comparable to the advanced policy gradient methods, because ES is black-box and thus does not fully exploit the policy network architectures or the temporal structure of the RL problems.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0afc3df8",
+                        "type": "paragraph",
+                        "text": "Very similar to ES, genetic algorithms (GAs) are a heuristic search technique for search and optimization. Inspired by the process of natural selection, GAs evolve an initial population of genotypes by repeated application of three genetic operators -mutation, crossover and selection. One of the main differences between GA and ES is the use of the crossover operator in GA, which is able to provide higher diversity of good candidates in the population. However, the crossover operator is often performed on the parameter representations of two parents, thus making it unsuitable for nonlinear neural networks. The straightforward crossover of two neural networks by exchanging their parameters can often destroy the hierarchical relationship of the networks and thus cause a catastrophic drop in performance. NeuroEvolution of Augmenting Topologies (NEAT; Stanley & Miikkulainen (2002b; a) ), which evolves neural networks through evolutionary algorithms such as GA, provides a solution to exchange and augment neurons but has found limited success when used as a method of policy search in deep RL for high-dimensional tasks. A major challenge to making GAs work for policy optimization is to design a good crossover operator which efficiently combines two parent policies represented by neural networks and generates an offspring that takes advantage of both parents. In addition, a good mutation operator is needed as random perturbations are often inefficient for high-dimensional policies.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_48090048",
+                        "type": "paragraph",
+                        "text": "In this paper, we present Genetic Policy Optimization (GPO), a new genetic algorithm for sampleefficient deep policy optimization. There are two major technical advances in GPO. First, instead of using parameter crossover, GPO applies imitation learning for policy crossovers in the state space. The state-space crossover effectively combines two parent policies into an offspring or child policy that tries to mimic its best parent in generating similar state visitation distributions. Second, GPO applies advanced policy gradient methods for mutation. By randomly rolling out trajectories and performing gradient descent updates, this mutation operator is more efficient than random parameter perturbations and also maintains sufficient genetic diversity. Our experiments on several continuous control tasks show that GPO as a genetic algorithm is able to provide superior performance over the state-of-the-art policy gradient methods and achieves comparable or higher sample efficiency.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7e1c7d5f",
+                "title": "REINFORCEMENT LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_5e5586a4",
+                        "type": "paragraph",
+                        "text": "In the standard RL setting, an agent interacts with an environment E modeled as a Markov Decision Process (MDP). At each discrete time step t, the agent observes a state s t and choose an action a t \u2208 A using a policy \u03c0(a t |s t ), which is a mapping from states to a distribution over possible actions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2a632e7b",
+                        "type": "paragraph",
+                        "text": "Here we consider high-dimensional, continuous state and action spaces. After performing the action a t , the agent collects a scalar reward r(s t , a t ) \u2208 R at each time step. The goal in reinforcement learning is to learn a policy which maximizes the expected sum of (discounted) rewards starting from the initial state. Formally, the objective is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_80b80a95",
+                        "type": "paragraph",
+                        "text": "where the states s t are sampled from the environment E using an unknown system dynamics model p(s t+1 |s t , a t ) and an initial state distribution p(s 0 ), the actions a t are sampled from the policy \u03c0(a t |s t ) and \u03b3 \u2208 (0, 1] is the discount factor.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4c7ef4b5",
+                "title": "POLICY GRADIENT METHODS",
+                "blocks": [
+                    {
+                        "block_id": "b_24f777a2",
+                        "type": "paragraph",
+                        "text": "Policy-based RL methods search for an optimum policy directly in the policy space. One popular approach is to parameterize the policy \u03c0(a t |s t ; \u03b8) with \u03b8, express the objective J(\u03c0(a t |s t ; \u03b8)) as a function of \u03b8 and perform gradient descent methods to optimize it. The REINFORCE algorithm (Williams, 1992) calculates an unbiased estimation of the gradient \u2207 \u03b8 J(\u03b8) using the likelihood ratio trick. Specifically, REINFORCE updates the policy parameters in the direction of the following approximation to policy gradient",
+                        "extracted_citations": [
+                            "Citation_b27"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7573d46a",
+                        "type": "paragraph",
+                        "text": "based on a single rollout trajectory, where R t = \u221e i=0 \u03b3 i r(s t+i , a t+i ) is the discounted sum of rewards from time step t. The advantage actor-critic (A2C) algorithm (Sutton & Barto; Mnih et al., 2016) uses the state value function (or critic) to reduce the variance in the above gradient estimation. The contribution to the gradient at time step t is \u2207 \u03b8 log \u03c0(a t |s t ; \u03b8)(R t -V \u03c0 (s t )). R t -V \u03c0 (s t ) is an estimate of the advantage function A \u03c0 (s t , a t ) = Q \u03c0 (s t , a t ) -V \u03c0 (s t ). In practice, multiple rollouts are performed to get the policy gradient, and V \u03c0 (s t ) is learned using a function approximator.",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_df4025d5",
+                        "type": "paragraph",
+                        "text": "High variance in policy gradient estimates can sometimes lead to large, destructive updates to the policy parameters. Trust-region methods such as TRPO (Schulman et al., 2015) avoid this by restricting the amount by which an update is allowed to change the policy. TRPO is a second order algorithm that solves an approximation to a constrained optimization problem using conjugate gradient. Proximal policy optimization (PPO) algorithm (Schulman et al., 2017) is an approximation to TRPO that relies only on first order gradients. The PPO objective penalizes the Kullback-Leibler (KL) divergence change between the policy before the update (\u03c0 \u03b8 old ) and the policy at the current step (\u03c0 \u03b8 ). The penalty weight \u03b2 is adaptive and adjusted based on observed change in KL divergence after multiple policy update steps have been performed using the same batch of data.",
+                        "extracted_citations": [
+                            "Citation_b19",
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_15b15cd5",
+                        "type": "paragraph",
+                        "text": "where \u00cat [...] indicates the empirical average over a finite batch of samples, and \u00c2t is the advantage estimation. Schulman et al. (2017) propose another objective based on clipping of the likelihood ratio, but we use the adaptive-KL objective due to its better empirical performance (Heess et al., 2017; Hafner et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b7",
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_eacf7257",
+                "title": "EVOLUTIONARY ALGORITHMS",
+                "blocks": [
+                    {
+                        "block_id": "b_41c8d178",
+                        "type": "paragraph",
+                        "text": "There is growing interest in using evolutionary algorithms as a policy search procedure in RL. We provide a brief summary; a detailed survey is provided by Whiteson (2012) . Neuroevolution is the process of using evolutionary algorithms to generate neural network weights and topology. Among early applications of neuroevolution algorithms to control tasks are SANE (Moriarty & Mikkulainen, 1996) and ESP (Gomez & Miikkulainen, 1999) . NEAT has also been successfully applied for policy optimization (Stanley & Miikkulainen, 2002a) . NEAT provides a rich representation for genotypes, and tracks the historical origin of every gene to allow for principled crossover between networks of disparate topologies. In Gomez et al. (2008) , the authors introduce an algorithm based on cooperative co-evolution (CoSyNE) and compare it favorably against Q-learning and policy-gradient based RL algorithms. They do crossover between fixed topology networks using a multi-point strategy at the granularity of network layers (weight segments). HyperNEAT (D'Ambrosio & Stanley, 2007) , which extends on NEAT and uses CPPN-based indirect encoding, has been used to learn to play Atari games from raw game pixels (Hausknecht et al., 2014) .",
+                        "extracted_citations": [
+                            "Citation_b26",
+                            "Citation_b16",
+                            "Citation_b3",
+                            "Citation_b2",
+                            "Citation_b0",
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_07180589",
+                        "type": "paragraph",
+                        "text": "Recently, Salimans et al. (2017) proposed a version of Evolution Strategies (ES) for black-box policy optimization. At each iteration k, the algorithm samples candidate parameter vectors (policies) using a fixed covariance Gaussian N (0, \u03c3 2 I) perturbation on the mean vector m (k) . The mean vector is then updated in the direction of the weighted average of the perturbations, where weight is proportional to the fitness of the candidate. CMA-ES has been used to learn neural network policies for reinforcement learning (CMA-NeuroES, Heidrich-Meisner & Igel (2009) ; Igel (2003) ). CMA-ES samples candidate parameter vectors using a Gaussian N (0, C (k) ) perturbation on the mean vector m (k) . The covariance matrix and the mean vector for the next iteration are then calculated using the candidates with high fitness. Cross-Entropy methods use similar ideas and have been found to work reasonably well in simple environments (Szita & L\u00f6rincz, 2006) .",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b8",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1f0a2470",
+                        "type": "paragraph",
+                        "text": "In this work, we consider policy networks of fixed topology. Existing neuroevolution algorithms perform crossover between parents by copying segments-single weight or layer(s)-of DNN parameters from either of the parents. Also, mutation is generally done by random perturbations of the weights, although more rigorous approaches have been proposed (Hansen & Ostermeier, 2001; Sehnke et al., 2010; Lehman et al., 2017) . In this work, we use policy gradient algorithms for efficient mutation of high-dimensional policies, and also depart from prior work in implementing the crossover operator.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b21",
+                            "Citation_b10"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_364a83ee",
+                "title": "GENETIC POLICY OPTIMIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_effb7c4d",
+                        "type": "paragraph",
+                        "text": "3.1 OVERALL ALGORITHM Our procedure for policy optimization proceeds by evolving the policies (genotypes) through a series of selection, crossover and mutation operators (Algorithm 1). We start with an ensemble of policies initialized with random parameters. In line 3, we mutate each of the policies separately by performing a few iterations of updates on the policy parameters. Any standard policy gradient method, such as PPO or A2C, can be used for mutation. In line 4, we create a set of parents using a selection procedure guided by a fitness function. Each element of this set is a policy-pair (\u03c0 x , \u03c0 y ) that is used in the reproduction (crossover) step to produce a new child policy (\u03c0 c ). This is done in line 7 by mixing the policies of the parents. In line 10, we obtain the population for the next generation by collecting all the newly created children. The algorithm terminates after k rounds of optimization.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f75cea9f",
+                "title": "GPO CROSSOVER AND MUTATION",
+                "blocks": [
+                    {
+                        "block_id": "b_afd40354",
+                        "type": "paragraph",
+                        "text": "We consider policies that are parameterized using deep neural networks of fixed architectures. If the policy is Gaussian, as is common for many robotics and locomotion tasks (Duan et al., 2016) , then the network outputs the mean and the standard-deviation of each action in the action-space. Combining two DNN policies such that the final child policy possibly absorbs the best traits of both the parents is non-trivial. Figure 1 illustrates different crossover strategies. The figure includes neural network policies along with the state-visitation distribution plots (in a 2D space) corresponding to some high return rollouts using that policy. The two parent networks are shown in the top half of the figure. The state-visitation distributions are made non-overlapping to indicate that the parents policies have good state-to-action mapping for disparate local regions of the state-space.",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_134001ef",
+                        "type": "paragraph",
+                        "text": "A na\u00efve approach is to do crossover in the parameter space (bottom-right in figure). In this approach, a DNN child policy is created by copying over certain edge weights from either of the parents. The crossover could be at the granularity of multiple DNN layers, a single layer of edges or even a single edge (e.g. NEAT(Stanley & Miikkulainen, 2002b) ). However, this type of crossover is expected to yield a low-performance composition due to the complex non-linear interactions between policyparameters and the expected policy return. For the same reason, the state-visitation distribution of the child doesn't hold any semblance to that of either of the parents. The bottom-left part of the figure shows the outcome of an ideal crossover in state-space. The state-visitation distribution of the child includes regions from both the parents, leading to better performance (in expectation) than either of them. In this work, we propose a new crossover operator that utilizes imitation learning to combine the best traits from both parents and generate a high-performance child or offspring policy. So this crossover is not done directly in the parameter space but in the behavior or the state visitation space. We quantify the effect of these two types of crossovers in Section 4 by mixing several DNN pairs and measuring the policy performance in a simulated environment. Imitation learning can broadly be categorized into behavioral cloning, where the agent is trained to match the action of the expert in a given state using supervised learning, and inverse reinforcement learning, where the agent infers a cost function for the environment using expert demonstrations and then learns an optimal policy for that cost function. We use behavioral cloning in this paper, and all our references to imitation learning should be taken to mean that.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ef673998",
+                        "type": "paragraph",
+                        "text": "Our second contribution is in utilizing policy gradient algorithms for mutation of neural network weights in lieu of the Gaussian perturbations used in prior work on evolutionary algorithms for policy search. Because of the randomness in rollout samples, the policy-gradient mutation operator also maintains sufficient genetic diversity in the population. This helps our overall genetic algorithm achieve similar or higher sample efficiency compared to the state-of-the-art policy gradient methods.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_597ceca8",
+                "title": "GENETIC OPERATORS",
+                "blocks": [
+                    {
+                        "block_id": "b_9beda95d",
+                        "type": "paragraph",
+                        "text": "This section details the three genetic operators. We use different subscripts for different policies. The corresponding parameters of the neural network are sub-scripted with the same letter (e.g. \u03b8 x for \u03c0 x ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6ea50769",
+                        "type": "paragraph",
+                        "text": "We also use \u03c0 x and \u03c0 \u03b8x interchangeably. This operator mixes two input policies \u03c0 x and \u03c0 y in statespace and produces a new child policy \u03c0 c . The three policies have identical network architecture. The child policy is learned using a two-step procedure. A schematic of the methodology is shown in Figure 2 . Firstly, we train a two-level policy \u03c0 H (a|s) = \u03c0 S (parent = x|s)\u03c0 x (a|s) + \u03c0 S (parent = y|s)\u03c0 y (a|s) which, given an observation, first chooses between \u03c0 x and \u03c0 y , and then outputs the action distribution of the chosen parent. \u03c0 S is a binary policy which is trained using trajectories from the parents involved in the crossover. In our implementation, we reuse the trajectories from the parents' previous mutation phase rather than generating new samples. The training objective for \u03c0 S is weighted maximum likelihood, where normalized trajectory returns are used as weights. For-mally, given two parents \u03c0 x and \u03c0 y , the log loss is given by:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_704f1526",
+                        "type": "paragraph",
+                        "text": "where p x := \u03c0 S (parent = x|s), w s is the weight assigned to the trajectory which contained the state s, and D is the set of parent trajectories. This hierarchical reinforcement learning step acts a medium of knowledge transfer from the parents to the child. We use only high-reward trajectories from \u03c0 x and \u03c0 y as data samples for training \u03c0 S to avoid transfer of negative behavior. It is possible to further refine \u03c0 S by running a few iterations of any policy-gradient algorithm, but we find that the maximum likelihood approach works well in practice and can also avoid extra rollout samples.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ec9ddf4d",
+                        "type": "paragraph",
+                        "text": "Next, to distill the information from \u03c0 H into a policy with the same architecture as the parents, we use imitation learning to train a child policy \u03c0 c . We use trajectories from \u03c0 H (expert) as supervised data and train \u03c0 c to predict the expert action under the state distribution induced by the expert. The surrogate loss for imitation learning is:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_789ef86a",
+                        "type": "paragraph",
+                        "text": "where d * is the state-visitation distribution induced by \u03c0 H . To avoid compounding errors due to state distribution mismatch between the expert and the student, we adopt the Dataset Aggregation (DAgger) algorithm (Ross et al., 2011) . Our training dataset D is initialized with trajectories from the expert. After iteration i of training, we sample some trajectories from the current student (\u03c0",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_badc2147",
+                        "type": "paragraph",
+                        "text": "), label the actions in these trajectories using the expert and form a dataset D i . Training for iteration i + 1 then uses {D \u222a D 1 . . . \u222a D i } to minimize the KL-divergence loss. This helps to achieve a policy that performs well under its own induced state distribution. The direction of KL-divergence in Equation 2 encourages high entropy in \u03c0 c , and empirically, we found this to be marginally better than the reverse direction. For policies with Gaussian actions, the KL has a closed form and therefore the surrogate loss is easily optimized using a first order method. In experiments, we found that this crossover operator is very efficient in terms of sample complexity, as it requires only a small size of rollout samples. More implementation details can be found in Appendix 6.3.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fd152e20",
+                "title": "MUTATE(",
+                "blocks": [
+                    {
+                        "block_id": "b_8ad440f6",
+                        "type": "paragraph",
+                        "text": "This operator modifies (in parallel) each policy of the input policy ensemble by running some iterations of a policy gradient algorithm. The policies have different initial parameters and are updated with high-variance gradients estimated using rollout trajectories. This leads to sufficient genetic diversity and good exploration of the state-space, especially in the initial rounds of GPO. For two popular policy gradient algorithms-PPO and A2C-the gradients for policy \u03c0 i are calculated as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a2e50d5d",
+                        "type": "paragraph",
+                        "text": "where \u00cai,t [...] indicates the empirical average over a finite batch of samples from \u03c0 i , and \u00c2t is the advantage. We use an MLP to model the critic baseline V \u03c0 (s t ) for advantage estimation. PPO does multiple updates on the policy \u03c0 \u03b8i using the same batch of data collected using \u03c0 \u03b8 (old) i , whereas A2C does only a single update.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_28ebed47",
+                        "type": "paragraph",
+                        "text": "During mutation, a policy \u03c0 i can also use data samples from other similar policies in the ensemble for off-policy learning. A larger data-batch (generally) leads to a better estimate of the gradient and stabilizes learning in policy gradient methods. When using data-sharing, the gradients for \u03c0 i are",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f28f6f63",
+                        "type": "paragraph",
+                        "text": "where S i \u2261 {j | KL[\u03c0 i , \u03c0 j ] < before the start of current round of mutation} contains similar policies to \u03c0 i (including \u03c0 i ).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2889a631",
+                "title": "SELECT(",
+                "blocks": [
+                    {
+                        "block_id": "b_2b7b5fdd",
+                        "type": "paragraph",
+                        "text": "Given a set of m policies and a fitness function, this operator returns a set of policy-couples for use in the crossover step. From all possible m 2 couples, the ones with maximum fitness are selected. The fitness function f (\u03c0 x , \u03c0 y ) can be defined according two criteria, as below.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bdb9f4e8",
+                        "type": "paragraph",
+                        "text": "\u2022 Performance fitness as sum of expected returns of both policies, i.e. f (\u03c0 x , \u03c0 y )",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7e9cb51b",
+                        "type": "paragraph",
+                        "text": "\u2022 Diversity fitness as KL-divergence between policies, i.e. f (\u03c0 x , \u03c0 y )",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f20ac6f3",
+                        "type": "paragraph",
+                        "text": "While the first variant favors couples with high cumulative performance, the second variant explicitly encourages crossover between diverse (high KL divergence) parents. A linear combination provides a trade-off of these two measures of fitness that can vary during the genetic optimization process. In the early rounds, a relatively higher weight could be provided to KL-driven fitness to encourage exploration of the state-space. The weight could be annealed with rounds of Algorithm 1 for encouraging high-performance policies. For our experiments, we use a simple variant where we put all the weight on the performance fitness for all rounds, and rely on the randomness in the starting seed for different policies in the ensemble for diversity in the initial rounds.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3b9ff78f",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_e576af5f",
+                        "type": "paragraph",
+                        "text": "In this section, we conduct experiments to measure the efficacy and robustness of the proposed GPO algorithm on a set of continuous control benchmarks. We begin by describing the experimental setup and our policy representation. We then analyze the effect of our crossover operator. This is followed by learning curves for the simulated environments, comparison with baselines and ablations. We conclude with a discussion on the quality of policies learned by GPO and scalability issues.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_138e178c",
+                "title": "SETUP",
+                "blocks": [
+                    {
+                        "block_id": "b_eb4c7626",
+                        "type": "paragraph",
+                        "text": "All our experiments are done using the OpenAI rllab framework (Duan et al., 2016) . We benchmark 9 continuous-control locomotion tasks based on the MuJoCo physics simulator 1 . All our control policies are Gaussian, with the mean parameterized by a neural network of two hidden layers (64 hidden units each), and linear units for the final output layer. The diagonal co-variance matrix is learnt as a parameter, independent of the input observation, similar to (Schulman et al., 2015; 2017) . The binary policy (\u03c0 S ) used for crossover has two hidden layers (32 hidden units each), followed by a softmax. The value-function baseline used for advantage estimation also has two hidden layers (32 hidden units each). All neural networks use tanh as the non-linearity at the hidden units. We show results with PPO and A2C as policy gradient algorithms for mutation. PPO performs 10 steps of full-batch gradient descent on the policy parameters using the same collected batch of simulation data, while A2C does a single descent step. Other hyperparameters are in Appendix 6.3.",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b19"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_56451416",
+                "title": "CROSSOVER PERFORMANCE",
+                "blocks": [
+                    {
+                        "block_id": "b_45326b67",
+                        "type": "paragraph",
+                        "text": "To measure the efficacy of our crossover operator, we run GPO on the HalfCheetah environment, and plot the performance of all the policies involved in 8 different crossovers that occur in the first 1 HalfCheetah, Walker2d, Hopper, InvertedDoublePendulum, Swimmer, Ant, HalfCheetah-Hilly, Walker2d-Hilly, Hopper-Hilly. The \"Hilly\" variants are more difficult versions of the original environments (https: //github.com/rll/rllab/pull/121). We set difficulty to 1.0 (a) Average episode reward for the child policies after state-space crossover (left) and parameter-space crossover (right), compared to the performance of the parents. All bars are normalized to the first parent in each crossover. Policies are trained on the HalfCheetah environment.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dceb299c",
+                        "type": "paragraph",
+                        "text": "(b) State visitation distribution for high reward rollouts from policies trained on the HalfCheetah environment. From left to right -first parent, second parent, child policy using state-space crossover, child policy using parameter-space crossover. The number above each subplot is the average episode reward for 100 rollouts from the corresponding policy.  round of Algorithm 1. Figure 3a shows the average episode reward for the parent policies and their corresponding child. All bars are normalized to the first parent in each crossover. The left subplot depicts state-space crossover. We observe that in many cases, the child either maintains or improves on the better parent. This is in contrast to the right subplot where parameter-space crossover breaks the information structure contained in either of the parents to create a child with very low performance. To visualize the state-space crossover better, in Figure 3b we plot the state-visitation distribution for high reward rollouts from all policies involved in one of the crossovers. All states are projected from a 20 dimensional space (for HalfCheetah) into a 2D space by t-SNE (Maaten & Hinton, 2008) . Notwithstanding artifacts due to dimensionality reduction, we observe that high reward rollouts from the child policy obtained with state-space crossover visit regions frequented by both the parents, unlike the parameter-space crossover (rightmost subplot) where the policy mostly meanders in regions for which neither of the parents have strong supervision.",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_68adbbfd",
+                "title": "COMPARISON WITH POLICY GRADIENT METHODS",
+                "blocks": [
+                    {
+                        "block_id": "b_fc323181",
+                        "type": "paragraph",
+                        "text": "In this subsection, we compare the performance of policies trained using GPO with those trained with standard policy gradient algorithms. GPO is run for 12 rounds (Algorithm 1) with a population size of 8, and simulates 8 million timesteps in total for each environment (1 million steps per candidate policy). We compare with two baselines which use the same amount of data. The first baseline algorithm, Single, trains 8 independent policies with policy gradient using 1 million timesteps each, and selects the policy with the maximum performance at the end of training. Unlike GPO, these policies do not participate in state-space crossover or interact in any way. The second baseline algorithm, Joint, trains a single policy with policy gradient using 8 million timesteps.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_481624c3",
+                        "type": "paragraph",
+                        "text": "Both Joint and Single do the same number of gradient update steps on the policy parameters, but each gradient step in Joint uses 8 times the batch-size. For all methods, we replicate 8 runs with different seeds and show the mean and standard error.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b3924423",
+                        "type": "paragraph",
+                        "text": "Figure 4 plots the moving average of per-episode reward when training with PPO as the policy gradient method for all algorithms. The x-axis is the total timesteps of simulation, including the data required for DAgger imitation learning in the crossover step. We observe that GPO achieves better performance than Single is almost all environments. Joint is a more challenging baseline since each gradient step uses a larger batch-size, possibly leading to well-informed, low-variance gradient estimates. Nonetheless, GPO reaches a much better score for environments such as Walker2D and HalfCheetah, and also their more difficult (hilly) versions. We believe this is due to better exploration and exploitation by the nature of the genetic algorithm. The performance at the end of training is shown in Table 1 . Results with A2C as the policy gradient method are in Appendix 6.1. With A2C, GPO beats the baselines in all but one environments. In summary, these results indicate that, with the new crossover and mutation operators, genetic algorithms could be an alternative policy optimization approach that competes with the state-of-the-arts policy gradient methods.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_26ce38ef",
+                "title": "ABLATIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_16554e89",
+                        "type": "paragraph",
+                        "text": "Our policy optimization procedure uses crossover, select and mutate operators on an ensemble of policies over multiple rounds. In this section, we perform ablation studies to measure the impact Figure 5 : Ablation studies on two environments -Ant (left) and Walker-2D (right). Averaged over the two environments, the performance normalized to GPO in increasing order is Single (0.33), Base+C (0.47), Base+S (0.47), Base+C+S (0.5), Base+M (0.83), Base+M+S (0.86), Base+M+C (0.9), and GPO (1.0).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_60df9b83",
+                        "type": "paragraph",
+                        "text": "on performance when only certain operator(s) are applied. Figure 5 shows the results and uses the following symbols:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_945dbccd",
+                        "type": "paragraph",
+                        "text": "\u2022 Crossover (C) -Presence of the symbol indicates state-space crossover using imitation learning; otherwise a simple crossover is done by copying the parameters of the stronger parent to the offspring policy. \u2022 Select (S) -Presence of the symbol denotes use of a fitness function (herein performancefitness, Section 3.3.3) to select policy-pairs to breed; otherwise random selection is used. \u2022 Data-sharing during Mutate (M) -Mutation in GPO is done using policy-gradient, and policies in the ensemble share batch samples with other similar policies (Section 3.3.2). We use this symbol when sharing is enabled; otherwise omit it.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5c63b072",
+                        "type": "paragraph",
+                        "text": "In Figure 5 , we refer to setting where none of the components {C, S, M} are used as Base and apply components over it. We also show Single which trains an ensemble of policies that do not interact in any manner. We note that each of the components applied in isolation provide some improvement over Single, with data-sharing (M) having the highest benefit. Also, combining two components generally leads to better performance than using either of the constituents alone.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f0cc4ca3",
+                        "type": "paragraph",
+                        "text": "Finally, using all components results in GPO and it gives the best performance. The normalized numbers are mentioned in the figure caption.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4164f9f3",
+                "title": "ROBUSTNESS AND SCALABILITY",
+                "blocks": [
+                    {
+                        "block_id": "b_585b21aa",
+                        "type": "paragraph",
+                        "text": "The SELECTION operator selects high-performing individuals for crossover in every round of Algorithm 1. Natural selection weeds out poorly-performing policies during the optimization process.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_33f7d945",
+                        "type": "paragraph",
+                        "text": "In Figure 6 , we measure the average episode reward for each of the policies in the ensemble at the final round of GPO. We compare this with the final performance of the 8 policies trained using the Single baseline. We conclude that the GPO policies are more robust. In Figure 7 , we experiment with varying the population size for GPO. All the policies in this experiment use the same batch-size for the gradient steps and do the same number of gradient steps. Performance improves by increasing the population size suggesting that GPO is a scalable optimization procedure. Moreover, the MUTATE and CROSSOVER genetic operators lend themselves perfectly to multiprocessor parallelism.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_508767c3",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_443bf7fe",
+                        "type": "paragraph",
+                        "text": "We presented Genetic Policy Optimization (GPO), a new approach to deep policy optimization which combines ideas from evolutionary algorithms and reinforcement learning. First, GPO does efficient policy crossover in state space using imitation learning. Our experiments show the benefits  of crossover in state-space over parameter-space for deep neural network policies. Second, GPO mutates the policy weights by using advanced policy gradient algorithms instead of random perturbations. We conjecture that the noisy gradient estimates used by policy gradient methods offer sufficient genetic diversity, while providing a strong learning signal. Our experiments on several MuJoCo locomotion tasks show that GPO has superior performance over the state-of-the-art policy gradient methods and achieves comparable or higher sample efficiency. Future advances in policy gradient methods and imitation learning will also likely improve the performance of GPO for challenging RL tasks.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0236923b",
+                        "type": "paragraph",
+                        "text": "Yuke Zhu, Roozbeh Mottaghi, Eric Kolve, Joseph J Lim, Abhinav Gupta, Li Fei-Fei, and Ali Farhadi. Target-driven visual navigation in indoor scenes using deep reinforcement learning.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_08e0d5f7",
+                        "type": "paragraph",
+                        "text": "In Robotics and Automation (ICRA), 2017 IEEE International Conference on, pp. 3357-3364. IEEE, 2017.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a73aa1cb",
+                "title": "CROSSOVER IMPLEMENTATION DETAILS",
+                "blocks": [
+                    {
+                        "block_id": "b_ee17f0ec",
+                        "type": "paragraph",
+                        "text": "The crossover stage is divided into two phases -a) training the binary policy (\u03c0 S ) and 2) imitation learning. For training \u03c0 S , the dataset consists of trajectories from the parents involved in the crossover. We combine the trajectories from the parents' previous mutation phase, and filter based on trajectory rewards. For our experiments, we select top 60% trajectories from the pool, although we did not find the final GPO performance to be very sensitive to this hyperparameter. We do 100 epochs of supervised training with Adam (mini-batch=64, learning rate=5e-4) on the loss defined in Equation 1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_de880ebb",
+                        "type": "paragraph",
+                        "text": "After training \u03c0 S , we obtain expert trajectories (5k transitions) from \u03c0 H . Imitation learning is done in a loop which is run for 10 iterations. In each iteration i, we form the dataset D i using existing expert trajectories, plus new trajectories (500 transitions) sampled from the student (child) policy \u03c0",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_335342b3",
+                        "type": "paragraph",
+                        "text": "c with the actions labelled by the expert. Therefore, the ratio of student to expert transitions in D i is linearly increased from 0 to 1 over the 10 iterations. We then update the student by minimizing the KL divergence objective over D i . We do 10 epochs of training with Adam (mini-batch=64, learning rate=5e-4) in each iteration.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "A novel generative encoding for exploiting neural network sensor and output geometry B D' David Kenneth O Ambrosio Stanley Proceedings of the 9th annual conference on Genetic and evolutionary computation the 9th annual conference on Genetic and evolutionary computation ACM 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Benchmarking deep reinforcement learning for continuous control Yan Duan Xi Chen Rein Houthooft John Schulman Pieter Abbeel International Conference on Machine Learning 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Accelerated neural evolution through cooperatively coevolved synapses Faustino Gomez J\u00fcrgen Schmidhuber Risto Miikkulainen Journal of Machine Learning Research 9 May. 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Solving non-markovian control tasks with neuroevolution J Faustino Risto Gomez Miikkulainen IJCAI 1999 99",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Danijar Hafner James Davidson Vincent Vanhoucke arXiv:1709.02878 Tensorflow agents: Efficient batched reinforcement learning in tensorflow 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Completely derandomized self-adaptation in evolution strategies Nikolaus Hansen Andreas Ostermeier Evolutionary computation 9 2 2001",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "A neuroevolution approach to general atari game playing Matthew Hausknecht Joel Lehman Risto Miikkulainen Peter Stone IEEE Transactions on Computational Intelligence and AI in Games 6 4 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Nicolas Heess Srinivasan Sriram Jay Lemmon Josh Merel Greg Wayne Yuval Tassa Tom Erez Ziyu Wang Ali Eslami Martin Riedmiller arXiv:1707.02286 Emergence of locomotion behaviours in rich environments 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Neuroevolution strategies for episodic reinforcement learning Verena Heidrich - Meisner Christian Igel Journal of Algorithms 64 4 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Neuroevolution for reinforcement learning using evolution strategies Christian Igel Evolutionary Computation, 2003. CEC'03. The 2003 Congress on IEEE 2003 4",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Safe Mutations for Deep and Recurrent Neural Networks through Output Gradients J Lehman J Chen J Clune K O Stanley December 2017 ArXiv e-prints",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "End-to-end training of deep visuomotor policies Sergey Levine Chelsea Finn Trevor Darrell Pieter Abbeel Journal of Machine Learning Research 17 39 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Jonathan J Timothy P Lillicrap Alexander Hunt Nicolas Pritzel Tom Heess Yuval Erez David Tassa Daan Silver Wierstra arXiv:1509.02971 Continuous control with deep reinforcement learning 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Visualizing data using t-sne Laurens Van Der Maaten Geoffrey Hinton Journal of Machine Learning Research 9 Nov. 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Human-level control through deep reinforcement learning Volodymyr Mnih Koray Kavukcuoglu David Silver Andrei A Rusu Joel Veness Marc G Bellemare Alex Graves Martin Riedmiller Andreas K Fidjeland Georg Ostrovski Nature 518 7540 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Asynchronous methods for deep reinforcement learning Volodymyr Mnih Adria Puigdomenech Badia Mehdi Mirza Alex Graves Timothy Lillicrap Tim Harley David Silver Koray Kavukcuoglu International Conference on Machine Learning 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Efficient reinforcement learning through symbiotic evolution E David Risto Moriarty Mikkulainen Machine learning 22 1-3 1996",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "A reduction of imitation learning and structured prediction to no-regret online learning St\u00e9phane Ross Geoffrey J Gordon Drew Bagnell International Conference on Artificial Intelligence and Statistics 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Tim Salimans Jonathan Ho Xi Chen Ilya Sutskever arXiv:1703.03864 Evolution strategies as a scalable alternative to reinforcement learning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Trust region policy optimization John Schulman Sergey Levine Pieter Abbeel Michael Jordan Philipp Moritz Proceedings of the 32nd International Conference on Machine Learning (ICML-15) the 32nd International Conference on Machine Learning (ICML-15) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "John Schulman Filip Wolski Prafulla Dhariwal Alec Radford Oleg Klimov arXiv:1707.06347 Proximal policy optimization algorithms 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Alex Graves, Jan Peters, and J\u00fcrgen Schmidhuber. Parameter-exploring policy gradients Frank Sehnke Christian Osendorfer Thomas R\u00fcckstie\u00df Neural Networks 23 4 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Mastering the game of go with deep neural networks and tree search David Silver Aja Huang Chris J Maddison Arthur Guez Laurent Sifre George Van Den Julian Driessche Ioannis Schrittwieser Veda Antonoglou Marc Panneershelvam Lanctot Nature 529 7587 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Efficient reinforcement learning through evolving neural network topologies O Kenneth Risto Stanley Miikkulainen Proceedings of the 4th Annual Conference on Genetic and Evolutionary Computation the 4th Annual Conference on Genetic and Evolutionary Computation Morgan Kaufmann Publishers Inc 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Evolving neural networks through augmenting topologies O Kenneth Risto Stanley Miikkulainen Evolutionary computation 10 2 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Learning tetris using the noisy cross-entropy method S Richard Andrew G Sutton Barto Istv\u00e1n Szita and Andr\u00e1s L\u00f6rincz 1 12 2006 Learning",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Evolutionary computation for reinforcement learning Shimon Whiteson Reinforcement learning Springer 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Simple statistical gradient-following algorithms for connectionist reinforcement learning Williams Ronald Machine learning 8 3-4 1992",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.8939,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "The authors present an algorithm for training ensembles of policy networks that regularly mixes different policies in the ensemble together by distilling a mixture of two policies into a single policy network, adding it to the ensemble and selecting the strongest networks to remain (under certain definitions of a \"strong\" network).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The experiments compare favorably against PPO and A2C baselines on a variety of MuJoCo tasks, although I would appreciate a wall-time comparison as well, as training the \"crossover\" network is presumably time-consuming.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "It seems that for much of the paper, the authors could dispense with the genetic terminology altogether - and I mean that as a compliment.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "There are few if any valuable ideas in the field of evolutionary computing and I am glad to see the authors use sensible gradient-based learning for GPO, even if it makes it depart from what many in the field would consider \"evolutionary\" computing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Another point on terminology that is important to emphasize - the method for training the crossover network by direct supervised learning from expert trajectories is technically not imitation learning but behavioral cloning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "I would perhaps even call this a distillation network rather than a crossover network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "In many robotics tasks behavioral cloning is known for overfitting to expert trajectories, but that may not be a problem in this setting as \"expert\" trajectories can be generated in unlimited quantities.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This is a highly interesting paper that proposes a set of methods that combine ideas from imitation learning, evolutionary computation and reinforcement learning in a novel way.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "It combines the following ingredients:\na) a population-based setup for RL\nb) a pair-selection and crossover operator\nc) a policy-gradient based \u201cmutation\u201d operator\nd) filtering data by high-reward trajectories\ne) two-stage policy distillation\n\nIn its current shape it has a couple of major flaws (but those can be fixed during the revision/rebuttal period):\n\n(1) Related work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "It is presented in a somewhat ahistoric fashion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "In fact, ideas for evolutionary methods applied to RL tasks have been widely studied, and there is an entire research field called \u201cneuroevolution\u201d that specifically looks into which mutation and crossover operators work well for neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "I\u2019m listing a small selection of relevant papers below, but I\u2019d encourage the authors to read a bit more broadly, and relate their work to the myriad of related older methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "Ideally, a more reasonable form of parameter-crossover (see references) could be compared to -- the naive one is too much of a straw man in my opinion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "To clarify: I think the proposed method is genuinely novel, but a bit of context would help the reader understand which aspects are and which aspects aren\u2019t.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "(2) Ablations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "The proposed method has multiple ingredients, and some of these could be beneficial in isolation: for example a population of size 1 with an interleaved distillation phase where only the high-reward trajectories are preserved could be a good algorithm on its own.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "Or conversely, GPO without high-reward filtering during crossover.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Or a simpler genetic algorithm that just preserves the kills off the worst members of the population, and replaces them by (mutated) clones of better ones, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "(3) Reproducibility.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "There are a lot of details missing; the setup is quite complex, but only partially described.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "Examples of missing details are: how are the high-reward trajectories filtered?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "What is the total computation time of the different variants and baselines?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "The x-axis on plots, does it include the data required for crossover/Dagger?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "What are do the shaded regions on plots indicate?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "The loss on \\pi_S should be made explicit.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "An open-source release would be ideal.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "Minor points:\n- naively, the selection algorithm might not scale well with the population size (exhaustively comparing all pairs), maybe discuss that?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "- the filtering of high-reward trajectories is what estimation of distribution algorithms [2] do as well, and they have a known failure mode of premature convergence because diversity/variance shrinks too fast.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "Did you investigate this?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_22",
+                    "text": "- for Figure 2a it would be clearer to normalize such that 1 is the best and 0 is the random policy, instead of 0 being score 0.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_23",
+                    "text": "- the language at the end of section 3 is very vague and noncommittal -- maybe just state what you did, and separately give future work suggestions?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_24",
+                    "text": "- there are multiple distinct metrics that could be used on the x-axis of plots, namely: wallclock time, sample complexity, number of updates.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_25",
+                    "text": "I suspect that the results will look different when plotted in different ways, and would enjoy some extra plots in the appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_26",
+                    "text": "For example the ordering in Figure 6 would be inverted if plotting as a function of sample complexity?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_27",
+                    "text": "- the A2C results are much worse, presumably because batchsizes are different?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_28",
+                    "text": "So I\u2019m not sure how to interpret them: should they have been run for longer?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_29",
+                    "text": "Maybe they could be relegated to the appendix?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_30",
+                    "text": "References:\n[1] Gomez, F.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_31",
+                    "text": "J., & Miikkulainen, R.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_32",
+                    "text": "Solving non-Markovian control tasks with neuroevolution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_33",
+                    "text": "[2] Larranaga, P.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_34",
+                    "text": "A review on estimation of distribution algorithms.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_35",
+                    "text": "[3] Stanley, K.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_36",
+                    "text": "O., & Miikkulainen, R.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_37",
+                    "text": "Evolving neural networks through augmenting topologies.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_38",
+                    "text": "[4] Igel, C.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_39",
+                    "text": "Neuroevolution for reinforcement learning using evolution strategies.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_40",
+                    "text": "[5] Hausknecht, M., Lehman, J., Miikkulainen, R., & Stone, P.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_41",
+                    "text": "A neuroevolution approach to general atari game playing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_42",
+                    "text": "[6] Gomez, F., Schmidhuber, J., & Miikkulainen, R.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_43",
+                    "text": "Efficient nonlinear control through neuroevolution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_44",
+                    "text": "Pros:\n- results\n- novelty of idea\n- crossover visualization, analysis\n- scalability\n\nCons:\n- missing background\n- missing ablations\n- missing details\n\n[after rebuttal: revised the score from 7 to 8]",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.6315,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper proposes a genetic algorithm inspired policy optimization method, which mimics the mutation and the crossover operators over policy networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The title and the motivation about the genetic algorithm are missing leading and improper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The genetic algorithm is a black-box optimization method, however, the proposed method has nothing to do with black-box optimization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "The mutation is a method to sample individual independence of the objective function, which is very different with the gradient step.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Mimicking the mutation by a gradient step is very unreasonable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "The crossover operator is the policy mixing method employed in game context (e.g., Deep Reinforcement Learning from Self-Play in Imperfect-Information Games, https://arxiv.org/abs/1603.01121 ).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "It is straightforward if two policies are to be mixed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "Although the mixing method is more reasonable than the genetic crossover operator, it is strange to compare with that operator in a method far away from the genetic algorithm.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "It is highly suggested that the method is called as population-based method as a set of networks is maintained, instead of as \"genetic\" method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Another drawback, perhaps resulted from the \"genetic algorithm\" motivation is that the proposed method has not been well explained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "The only explanation is that this method mimics the genetic algorithm.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "However, this explanation reveals nothing about why the method could work well -- a random exploration could also waste a lot of samples with a very high probability.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "The baseline methods result in rewards much lower than those in previous experimental papers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "It is problemistic that if the baselines have bad parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Benchmarking Deep Reinforcement Learning for Continuous Control\n2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "Deep Reinforcement Learning that Matters",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_d11dac15",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_d11dac15",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_d11dac15",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_d11dac15",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_d11dac15",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_d11dac15",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_d11dac15",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_d03f6168",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d11dac15"
+        },
+        {
+            "source": "b_992553c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_992553c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_d03f6168",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_992553c3"
+        },
+        {
+            "source": "sec_d03f6168",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0afc3df8"
+        },
+        {
+            "source": "sec_d03f6168",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_48090048"
+        },
+        {
+            "source": "sec_7e1c7d5f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e5586a4"
+        },
+        {
+            "source": "sec_7e1c7d5f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2a632e7b"
+        },
+        {
+            "source": "sec_7e1c7d5f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_80b80a95"
+        },
+        {
+            "source": "b_24f777a2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "sec_4c7ef4b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_24f777a2"
+        },
+        {
+            "source": "b_7573d46a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_7573d46a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_4c7ef4b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7573d46a"
+        },
+        {
+            "source": "b_df4025d5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_df4025d5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_4c7ef4b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_df4025d5"
+        },
+        {
+            "source": "b_15b15cd5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_15b15cd5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_15b15cd5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_4c7ef4b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_15b15cd5"
+        },
+        {
+            "source": "b_41c8d178",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_41c8d178",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_41c8d178",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_41c8d178",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_41c8d178",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_41c8d178",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_eacf7257",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_41c8d178"
+        },
+        {
+            "source": "b_07180589",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_07180589",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_07180589",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_eacf7257",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07180589"
+        },
+        {
+            "source": "b_1f0a2470",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_1f0a2470",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_1f0a2470",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_eacf7257",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1f0a2470"
+        },
+        {
+            "source": "sec_364a83ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_effb7c4d"
+        },
+        {
+            "source": "b_afd40354",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_f75cea9f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_afd40354"
+        },
+        {
+            "source": "sec_f75cea9f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_134001ef"
+        },
+        {
+            "source": "sec_f75cea9f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ef673998"
+        },
+        {
+            "source": "sec_597ceca8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9beda95d"
+        },
+        {
+            "source": "sec_597ceca8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6ea50769"
+        },
+        {
+            "source": "sec_597ceca8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_704f1526"
+        },
+        {
+            "source": "sec_597ceca8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ec9ddf4d"
+        },
+        {
+            "source": "b_789ef86a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_597ceca8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_789ef86a"
+        },
+        {
+            "source": "sec_597ceca8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_badc2147"
+        },
+        {
+            "source": "sec_fd152e20",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ad440f6"
+        },
+        {
+            "source": "sec_fd152e20",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a2e50d5d"
+        },
+        {
+            "source": "sec_fd152e20",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28ebed47"
+        },
+        {
+            "source": "sec_fd152e20",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f28f6f63"
+        },
+        {
+            "source": "sec_2889a631",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b7b5fdd"
+        },
+        {
+            "source": "sec_2889a631",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bdb9f4e8"
+        },
+        {
+            "source": "sec_2889a631",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7e9cb51b"
+        },
+        {
+            "source": "sec_2889a631",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f20ac6f3"
+        },
+        {
+            "source": "sec_3b9ff78f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e576af5f"
+        },
+        {
+            "source": "b_eb4c7626",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_eb4c7626",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_138e178c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb4c7626"
+        },
+        {
+            "source": "sec_56451416",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_45326b67"
+        },
+        {
+            "source": "b_dceb299c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_56451416",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dceb299c"
+        },
+        {
+            "source": "sec_68adbbfd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fc323181"
+        },
+        {
+            "source": "sec_68adbbfd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_481624c3"
+        },
+        {
+            "source": "sec_68adbbfd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b3924423"
+        },
+        {
+            "source": "sec_26ce38ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_16554e89"
+        },
+        {
+            "source": "sec_26ce38ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_60df9b83"
+        },
+        {
+            "source": "sec_26ce38ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_945dbccd"
+        },
+        {
+            "source": "sec_26ce38ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5c63b072"
+        },
+        {
+            "source": "sec_26ce38ef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0cc4ca3"
+        },
+        {
+            "source": "sec_4164f9f3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_585b21aa"
+        },
+        {
+            "source": "sec_4164f9f3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_33f7d945"
+        },
+        {
+            "source": "sec_508767c3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_443bf7fe"
+        },
+        {
+            "source": "sec_508767c3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0236923b"
+        },
+        {
+            "source": "sec_508767c3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08e0d5f7"
+        },
+        {
+            "source": "sec_a73aa1cb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee17f0ec"
+        },
+        {
+            "source": "sec_a73aa1cb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_de880ebb"
+        },
+        {
+            "source": "sec_a73aa1cb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_335342b3"
+        }
+    ]
+}

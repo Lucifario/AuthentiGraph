@@ -1,0 +1,2037 @@
+{
+    "paper_metadata": {
+        "paper_id": "HJjvxl-Cb",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_cfb43858",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_6ada3ecb",
+                        "type": "paragraph",
+                        "text": "Model-free deep reinforcement learning (RL) algorithms have been applied in a range of challenging domains, from games (Mnih et al., 2013; Silver et al., 2016) to robotic control (Schulman et al., 2015) . The combination of RL and high-capacity function approximators such as neural networks holds the promise of automating a wide range of decision making and control tasks, but widespread adoption of these methods in real-world domains has been hampered by two major challenges. First, model-free deep RL methods are notoriously expensive in terms of their sample complexity. Even relatively simple tasks can require millions of steps of data collection, and complex behaviors with high-dimensional observations might need substantially more. Second, these methods are often brittle with respect to their hyperparameters: learning rates, exploration constants, and other settings must be set carefully for different problem settings to achieve good results. Both of these challenges severely limit the applicability of model-free deep RL to real-world tasks.",
+                        "extracted_citations": [
+                            "Citation_b12",
+                            "Citation_b24",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c8a889a4",
+                        "type": "paragraph",
+                        "text": "One cause for the poor sample efficiency of deep RL methods is on-policy learning: some of the most commonly used deep RL algorithms, such as TRPO (Schulman et al., 2015) or A3C (Mnih et al., 2016) , require new samples to be collected for each gradient step on the policy. This quickly becomes extravagantly expensive, as the number of gradient steps to learn an effective policy increases with task complexity. Off-policy algorithms instead aim to reuse past experience. This is not directly feasible with conventional policy gradient formulations (Schulman et al., 2015; Mnih et al., 2016) , but is relatively straightforward for Q-learning based methods (Mnih et al., 2015) . Unfortunately, the combination of off-policy learning and high-dimensional, nonlinear function approximation with neural networks presents a major challenge for stability and convergence (Bhatnagar et al., 2009) . This challenge is further exacerbated in continuous state and action spaces, where a separate actor network is typically required to perform the maximization in Q-learning. A commonly used algorithm in such settings, deep deterministic policy gradient (DDPG) (Lillicrap et al., 2015) , provides for sample-efficient learning, but is notoriously challenging to use due to its extreme brittleness and hyperparameter sensitivity (Duan et al., 2016; Henderson et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b21",
+                            "Citation_b14",
+                            "Citation_b21",
+                            "Citation_b14",
+                            "Citation_b13",
+                            "Citation_b1",
+                            "Citation_b11",
+                            "Citation_b3",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d4f8467d",
+                        "type": "paragraph",
+                        "text": "We explore how to design an efficient and stable model-free deep RL algorithm for continuous state and action spaces. To that end, we draw on the maximum entropy framework, which augments the standard maximum reward reinforcement learning objective with an entropy maximization term (Ziebart et al., 2008; Toussaint, 2009; Rawlik et al., 2012; Fox et al., 2016; Haarnoja et al., 2017) . Maximum entropy reinforcement learning alters the RL objective, though the original objective can be recovered by using a temperature parameter (Haarnoja et al., 2017) . More importantly, the maximum entropy formulation provides a substantial improvement in exploration and robustness: as discussed by Ziebart (2010) , maximum entropy policies are robust in the face of modeling and estimation errors, and as demonstrated by Haarnoja et al. (2017) , they improve exploration by acquiring diverse behaviors. Prior work has proposed model-free deep RL algorithms that perform on-policy learning with entropy maximization (O'Donoghue et al., 2016) , as well as off-policy methods based on soft Q-learning and its variants (Schulman et al., 2017; Nachum et al., 2017a; Haarnoja et al., 2017) . However, the on-policy variants suffer from poor sample complexity for the reasons discussed above, while the off-policy variants require complex approximate inference procedures in continuous action spaces.",
+                        "extracted_citations": [
+                            "Citation_b31",
+                            "Citation_b28",
+                            "Citation_b20",
+                            "Citation_b4",
+                            "Citation_b8",
+                            "Citation_b8",
+                            "Citation_b30",
+                            "Citation_b8",
+                            "Citation_b17",
+                            "Citation_b22",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e6e8ccc1",
+                        "type": "paragraph",
+                        "text": "In this paper, we demonstrate that we can devise an off-policy maximum entropy actor-critic algorithm, which we call soft actor-critic, which provides for both sample-efficient learning and stability. This algorithm extends readily to very complex, high-dimensional tasks, such as the 21-DoF Humanoid benchmark (Duan et al., 2016) , where off-policy methods such as DDPG typically struggle to obtain good results (Gu et al., 2016) , while avoiding the complexity and potential instability associated with approximate inference in prior off-policy maximum entropy algorithms based on soft Q-learning (Haarnoja et al., 2017) . In particular, we present a novel convergence proof for policy iteration in the maximum entropy framework. We then introduce a new algorithm based on an approximation to this procedure that can be practically implemented with deep neural networks, which we call soft actor-critic. We present empirical results that show that soft actor-critic attains a substantial improvement in both performance and sample efficiency over both off-policy and on-policy prior methods.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b6",
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_77ef3740",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_46bcaaa9",
+                        "type": "paragraph",
+                        "text": "Our soft actor-critic algorithm incorporates three key ingredients: an actor-critic architecture with separate policy and value function networks, an off-policy formulation that enables reuse of previously collected data for efficiency, and entropy maximization to enable stability and exploration. We review prior works that draw on some of these ideas in this section. Actor-critic algorithms are typically derived starting from policy iteration, which alternates between policy evaluation-computing the value function for a policy-and policy improvement-using the value function to obtain a better policy (Barto et al., 1983; Sutton & Barto, 1998) . In large-scale reinforcement learning problems, it is typically impractical to run either of these steps to convergence, and instead the value function and policy are optimized jointly. In this case, the policy is referred to as the actor, and the value function as the critic. Many actor-critic algorithms build on the standard, on-policy policy gradient formulation to update the actor (Peters & Schaal, 2008) , and many of them also consider the entropy of the policy, but instead of maximizing the entropy, they use it as an regularizer (Schulman et al., 2015; Mnih et al., 2016; Gruslys et al., 2017) . This tends to improve stability, but results in very poor sample complexity.",
+                        "extracted_citations": [
+                            "Citation_b0",
+                            "Citation_b25",
+                            "Citation_b18",
+                            "Citation_b21",
+                            "Citation_b14",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d8b7519b",
+                        "type": "paragraph",
+                        "text": "There have been efforts to increase the sample efficiency while retaining the robustness properties by incorporating off-policy samples and by using higher order variance reduction techniques (O'Donoghue et al., 2016; Gu et al., 2016) . However, fully off-policy algorithms still attain better efficiency. A particularly popular off-policy actor-critic method, DDPG Lillicrap et al. (2015) , which is a deep variant of the deterministic policy gradient (Silver et al., 2014) algorithm, uses a Q-function estimator to enable off-policy learning, and a deterministic actor that maximizes this Q-function. As such, this method can be viewed both as a deterministic actor-critic algorithm and an approximate Q-learning algorithm. Unfortunately, the interplay between the deterministic actor network and the Q-function typically makes DDPG extremely difficult to stabilize and brittle to hyperparameter settings (Duan et al., 2016; Henderson et al., 2017) . As a consequence, it is difficult to extend DDPG to very complex, high-dimensional tasks, and on-policy policy gradient methods still tend to produce the best results in such settings (Gu et al., 2016) . Our method instead combines off-policy actor-critic training with a stochastic actor, and further aims to maximize the entropy of this actor with an entropy maximization objective. We find that this actually results in a substantially more stable and scalable algorithm that, in practice, exceeds both the efficiency and final performance of DDPG.",
+                        "extracted_citations": [
+                            "Citation_b17",
+                            "Citation_b6",
+                            "Citation_b11",
+                            "Citation_b23",
+                            "Citation_b3",
+                            "Citation_b9",
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d8e49293",
+                        "type": "paragraph",
+                        "text": "Maximum entropy reinforcement learning optimizes policies to maximize both the expected return and the expected entropy of the policy. This framework has been used in many contexts, from inverse reinforcement learning (Ziebart et al., 2008) to optimal control (Todorov, 2008; Toussaint, 2009; Rawlik et al., 2012) . In guided policy search (Levine & Koltun, 2013) , maximum entropy distribution is used to guide policy learning towards high-reward regions. More recently, several papers have noted the connection between Q-learning and policy gradient methods in the framework of maximum entropy learning (O'Donoghue et al., 2016; Haarnoja et al., 2017; Nachum et al., 2017a; Schulman et al., 2017) . While most of the prior works assume a discrete action space, Nachum et al. (2017b) approximate the maximum entropy distribution with a Gaussian and Haarnoja et al. (2017) with a sampling network trained to draw samples from the optimal policy. Although the soft Q-learning algorithm proposed by Haarnoja et al. (2017) has a value function and actor network, it is not a true actor-critic algorithm: the Q-function is estimating the optimal Q-function, and the actor does not directly affect the Q-function except through the data distribution. Hence, Haarnoja et al. (2017) motivates the actor network as an approximate sampler, rather than the actor in an actor-critic algorithm. Crucially, the convergence of this method hinges on how well this sampler approximates the true posterior. In contrast, we prove that our method converges to the optimal policy from a given policy class, regardless of the policy parameterization. Furthermore, these previously proposed maximum entropy methods generally do not exceed the performance of state-of-the-art off-policy algorithms, such as DDPG, when learning from scratch, though they may have other benefits, such as improved exploration and ease of finetuning. In our experiments, we demonstrate that our soft actor-critic algorithm does in fact exceed the performance of state-of-theart off-policy deep RL methods by a wide margin.",
+                        "extracted_citations": [
+                            "Citation_b31",
+                            "Citation_b27",
+                            "Citation_b28",
+                            "Citation_b20",
+                            "Citation_b10",
+                            "Citation_b17",
+                            "Citation_b8",
+                            "Citation_b22",
+                            "Citation_b8",
+                            "Citation_b8",
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5516263d",
+                "title": "PRELIMINARIES",
+                "blocks": [
+                    {
+                        "block_id": "b_a69671e1",
+                        "type": "paragraph",
+                        "text": "In this section, we introduce notation and summarize the standard and maximum entropy reinforcement learning frameworks.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_702c2972",
+                "title": "NOTATION",
+                "blocks": [
+                    {
+                        "block_id": "b_5814f8b7",
+                        "type": "paragraph",
+                        "text": "We address policy learning in continuous action spaces. To that end, we consider infinite-horizon Markov decision processes (MDP), defined by the tuple (S, A, p s , r), where the state space S and the action space A are assumed to be continuous, and the unknown state transition probability p s : S \u00d7 S \u00d7 A \u2192 [0, \u221e) represents the probability density of the next state s t+1 \u2208 S given the current state s t \u2208 S and action a t \u2208 A. The environment emits a bounded reward r : S \u00d7 A \u2192 [r min , r max ] on each transition, which we will abbreviate as r t r(s t , a t ) to simplify notation. We will also use \u03c1 \u03c0 (s t ) and \u03c1 \u03c0 (s t , a t ) to denote the state and state-action marginals of the trajectory distribution induced by a policy \u03c0(a t |s t ).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fc38a2dd",
+                "title": "MAXIMUM ENTROPY REINFORCEMENT LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_298e0845",
+                        "type": "paragraph",
+                        "text": "The standard objective used in reinforcement learning is to maximize the expected sum of rewards t E (st,at)\u223c\u03c1\u03c0 [r t ]. We will consider a more general maximum entropy objective (see e.g. (Ziebart, 2010) ), which favors stochastic policies by augmenting the objective with the expected entropy of the policy over \u03c1 \u03c0 (s t ):",
+                        "extracted_citations": [
+                            "Citation_b30"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c07e8ec9",
+                        "type": "paragraph",
+                        "text": "The temperature parameter \u03b1 determines the relative importance of the entropy term against the reward, and thus controls the stochasticity of the optimal policy. The maximum entropy objective differs from the standard maximum expected reward objective used in conventional reinforcement learning, though the conventional objective can be recovered in the limit as \u03b1 \u2192 0. For the rest of this paper, we will omit writing the temperature explicitly, as it can always be subsumed into the reward by scaling it by \u03b1 -1 . The maximum entropy objective has a number of conceptual and practical advantages. First, the policy is incentivized to explore more widely, while giving up on clearly unpromising avenues. Second, the policy can capture multiple modes of near-optimal behavior. In particular, in problem settings where multiple actions seem equally attractive, the policy will commit equal probability mass to those actions. Lastly, prior work has observed substantially improved exploration from this objective (Haarnoja et al., 2017; Schulman et al., 2017) , and in our experiments, we observe that it considerably improves learning speed over state-of-art methods that optimize the conventional objective function. We can extend the objective to infinite horizon problems by introducing a discount factor \u03b3 to ensure that the sum of expected rewards and entropies is finite. Writing down the precise maximum entropy objective for the infinite horizon discounted case is more involved (Thomas, 2014) and is deferred to Appendix A.",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b22",
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_871ec9c9",
+                        "type": "paragraph",
+                        "text": "Prior methods have proposed directly solving for the optimal Q-function, from which the optimal policy can be recovered (Ziebart et al., 2008; Fox et al., 2016; Haarnoja et al., 2017) . In the next section, we will discuss how we can devise a soft actor-critic algorithm through a policy iteration formulation, where we instead evaluate the Q-function of the current policy and update the policy through an off-policy gradient update. Though such algorithms have previously been proposed for conventional reinforcement learning, our method is, to our knowledge, the first off-policy actor-critic method in the maximum entropy reinforcement learning framework.",
+                        "extracted_citations": [
+                            "Citation_b31",
+                            "Citation_b4",
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_58268398",
+                "title": "FROM SOFT POLICY ITERATION TO SOFT ACTOR-CRITIC",
+                "blocks": [
+                    {
+                        "block_id": "b_648be6eb",
+                        "type": "paragraph",
+                        "text": "Our off-policy soft actor-critic algorithm can be derived starting from a novel maximum entropy variant of the policy iteration method. In this section, we will first present this derivation, verify that the corresponding algorithm converges to the optimal policy from its density class, and then present a practical deep reinforcement learning algorithm based on this theory.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4be5e4fe",
+                "title": "DERIVATION OF SOFT POLICY ITERATION",
+                "blocks": [
+                    {
+                        "block_id": "b_13f80306",
+                        "type": "paragraph",
+                        "text": "We will begin by deriving soft policy iteration, a general algorithm for learning optimal maximum entropy policies that alternates between policy evaluation and policy improvement in the maximum entropy framework. Our derivation is based on a tabular setting, to enable theoretical analysis and convergence guarantees, and we extend this method into the general continuous setting in the next section. We will show that soft policy iteration converges to the optimal policy within a set of policies which might correspond, for instance, to a set of parameterized densities.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8cdb3e87",
+                        "type": "paragraph",
+                        "text": "In the policy evaluation step of soft policy iteration, we wish to compute the value of a policy \u03c0 according to the maximum entropy objective in Equation 1 . For a fixed policy, the soft Q-value can be computed iteratively, by starting from any function Q : S \u00d7 A \u2192 R and iteratively applying a modified version of the Bellman backup operator T \u03c0 defined by",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_755d5544",
+                        "type": "paragraph",
+                        "text": "(3) is the soft state value function. We can find the soft value of an arbitrary policy \u03c0 by repeatingly applying T \u03c0 as formalized in Lemma 1. Lemma 1 (Soft Policy Evaluation). Consider the soft Bellman backup operator T \u03c0 in Equation 2 and a mapping Q 0 : S \u00d7 A \u2192 R, and define",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ae35d14a",
+                        "type": "paragraph",
+                        "text": "In the policy improvement step, we update the policy towards the exponential of the new Q-function. This particular choice of update can be guaranteed to result into an improved policy in terms of its soft value, as we show in this section. Since in practice we prefer policies that are tractable, we will additionally restrict the policy to some set of policies \u03a0, which can correspond, for example, to a parameterized family of distributions such as Gaussians. To account for the constraint that \u03c0 \u2208 \u03a0, we project the improved policy into the desired set of policies. While in principle we could choose any projection, it will turn out to be convenient to use the information projection defined in terms of the Kullback-Leibler divergence. In the other words, in the policy improvement step, for each state, we update the policy according to",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_edd40840",
+                        "type": "paragraph",
+                        "text": "The partition function Z \u03c0 old (s t ) normalizes the second KL argument, and while it is intractable in general, it does not contribute to the gradient with respect to the new policy and can thus be ignored as noted in the next section. For this choice of projection, we can show that the new, projected policy has a higher value than the old policy with respect to the objective in Equation 1 . We formalize this result in Lemma 2. Lemma 2 (Soft Policy Improvement). Let \u03c0 old \u2208 \u03a0 and let \u03c0 new be the optimizer of the minimization problem defined in Equation 4 . Then Q \u03c0new (s t , a t ) \u2265 Q \u03c0 old (s t , a t ) for all (s t , a t ) \u2208 S \u00d7 A.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_febd62b7",
+                        "type": "paragraph",
+                        "text": "Proof. See Appendix B.2.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f5520e81",
+                        "type": "paragraph",
+                        "text": "The full soft policy iteration algorithm alternates between the soft policy evaluation and the soft policy improvement steps, and it will provably converge to the optimal maximum entropy policy among the policies in \u03a0 (Theorem 1). Although this algorithm will provably find the optimal solution, we can perform it in its exact form only in the tabular case. Therefore, we will next approximate the algorithm for continuous domains, where we need to rely on a function approximator to represent the Q-values, and running the two steps until convergence would be computationally too expensive.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0f6dbeb8",
+                        "type": "paragraph",
+                        "text": "The approximation gives rise to a new practical algorithm, called soft actor-critic.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_edd24b31",
+                        "type": "paragraph",
+                        "text": "Theorem 1 (Soft Policy Iteration). Repeated application of soft policy evaluation and soft policy improvement to any \u03c0 \u2208 \u03a0 converges to a policy \u03c0 * (",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1bce5a50",
+                        "type": "paragraph",
+                        "text": "Proof. See Appendix B.3.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8809e00b",
+                "title": "SOFT ACTOR-CRITIC",
+                "blocks": [
+                    {
+                        "block_id": "b_013cd42f",
+                        "type": "paragraph",
+                        "text": "As discussed above, large, continuous domains require us to derive a practical approximation to soft policy iteration. To that end, we will use function approximators for both the Q-function and policy, and instead of running evaluation and improvement to convergence, alternate between optimizing both networks with stochastic gradient descent. For the remainder of this paper, we will consider a parameterized state value function V \u03c8 (s t ), soft Q-function Q \u03b8 (s t , a t ), and a tractable policy \u03c0 \u03c6 (a t |s t ). The parameters of these networks are \u03c8, \u03b8, and \u03c6. In the following, we will derive update rules for these parameter vectors.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_03af7556",
+                        "type": "paragraph",
+                        "text": "The state value function approximates the soft value. There is no need in principle to include a separate function approximator for the state value, since it is related to the Q-function and policy according to Equation 3. This quantity can be estimated from a single action sample from the current policy without introducing a bias, but in practice, including a separate function approximator for the soft value can stabilize training-and as discussed later, can be used as a state-dependent baseline for learning the policy-and is convenient to train simultaneously with the other networks. The soft value function is trained to minimize the squared residual error",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c846c108",
+                        "type": "paragraph",
+                        "text": "where D is the distribution of previously sampled states and actions, or a replay buffer. The gradient of Equation 5 can be estimated with an unbiased estimator",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b99952cf",
+                        "type": "paragraph",
+                        "text": "where the actions are sampled according to the current policy, instead of the replay buffer. The soft Q-function parameters can be trained to minimize the soft Bellman residual",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e6cb9e14",
+                        "type": "paragraph",
+                        "text": "which again can be optimized with stochastic unbiased gradients",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_51519d66",
+                        "type": "paragraph",
+                        "text": "The update makes use of a target value network V \u03c8 where \u03c8 is an exponentially moving average of the value network weights, which has been shown to stabilize training (Mnih et al., 2015) , although we found soft actor-critic to be able to learn robustly also in the absense of a target network. Finally, the policy parameters can be learned by directly minimizing the KL-divergence in Equation 4 , which we reproduce here in parametrized form for completeness",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f8aa674d",
+                        "type": "paragraph",
+                        "text": "There are several options for minimizing J \u03c0 , depending on the choice of the policy class. For simple distributions, such as Gaussians, we can use the reparametrization trick, which allows us to backpropagate the gradient from the critic network and leads to a DDPG-style estimator. However, if the policy depends on discrete latent variables, such as is the case for mixture models, the reparametrization trick cannot be used. We therefore propose to use a likelihood ratio gradient estimator:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6abe6dc8",
+                        "type": "paragraph",
+                        "text": "where b(s t ) is a state-dependent baseline (Peters & Schaal, 2008) . We can approximately center the learning signal and eliminate the intractable log-partition function by choosing b(s t ) = V \u03c8 (s t )log Z \u03b8 (s t ) -1, which yields the final gradient estimator",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_47d6f61a",
+                        "type": "paragraph",
+                        "text": "Algorithm 1: Soft Actor-Critic",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_be176477",
+                        "type": "paragraph",
+                        "text": "The complete algorithm is described in Algorithm 1. The method alternates between collecting experience from the environment with the current policy and updating the function approximators using the stochastic gradients on batches sampled from a replay buffer. In practice we found a combination of a single environment step and multiple gradient steps to work best (see Appendix E). Using off-policy data from a replay buffer is feasible because both value estimators and the policy can be trained entirely on offpolicy data. The algorithm is agnostic to the parameterization of the policy, as long as it can be evaluated for any arbitrary state-action tuple. We will next suggest a practical parameterization for the policy, based on Gaussian mixtures.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_64b1a048",
+                "title": "SOFT ACTOR-CRITIC WITH GAUSSIAN MIXTURES",
+                "blocks": [
+                    {
+                        "block_id": "b_5c5e6381",
+                        "type": "paragraph",
+                        "text": "Although we could use a simple policy represented by a Gaussian, as is common in prior work, the maximum entropy framework aims to maximize the randomness of the learned policy. Therefore, a more expressive but still tractable distribution can endow our method with more effective exploration and robustness, which are the typically cited benefits of entropy maximization (Ziebart, 2010) . To that end, we propose a practical multimodal representation based on a mixture of K Gaussians. This can approximate any distribution to arbitrary precision as K \u2192 \u221e, but even for practical numbers of mixture elements, it can provide a very expressive distribution in medium-dimensional action spaces. Although the complexity of evaluating or sampling from the resulting distribution scales linearly in K, our experiments indicates that a relatively small number of mixture components, typically just two or four, is sufficient to achieve high performance, thus making the algorithm scalable to complex domains with high-dimensional action spaces.",
+                        "extracted_citations": [
+                            "Citation_b30"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4c4dea5e",
+                        "type": "paragraph",
+                        "text": "We define the policy as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d1513f13",
+                        "type": "paragraph",
+                        "text": "where w \u03c6 i , \u00b5 \u03c6 i , \u03a3 \u03c6 i are the unnormalized mixture weights, means, and covariances, respectively, which all can depend on s t in complex ways if expressed as neural networks. We also apply a squashing function to limit the actions to a bounded interval as explained in Appendix C. Note that, in contrast to soft Q-learning (Haarnoja et al., 2017) , our algorithm does not assume that the policy can accurately approximate the optimal exponentiated Q-function distribution. The convergence result for soft policy iteration holds even for policies that are restricted to a policy class, in contrast to prior methods of this type. tasks attaining the highest score compared to both on-policy and off-policy methods in all benchmark tasks.",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4b1e7347",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_9422fba4",
+                        "type": "paragraph",
+                        "text": "The goal of our experimental evaluation is to understand how the sample complexity and stability of our method compares with prior off-policy and on-policy deep reinforcement learning algorithms.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2e61274e",
+                        "type": "paragraph",
+                        "text": "To that end, we evaluate on a range of challenging continuous control tasks from the OpenAI gym benchmark suite (Brockman et al., 2016) . For the Swimmer and Humanoid environments, we use the rllab implementations (Duan et al., 2016) , which have more well-behaved observation spaces. Although the easier tasks in this benchmark suite can be solved by a wide range of different algorithms, the more complex benchmarks, such as the 21-dimensional Humanoid, are exceptionally difficult to solve with off-policy algorithms (Duan et al., 2016) . The stability of the algorithm also plays a large role in performance: easier tasks make it more practical to tune hyperparameters to achieve good results, while the already narrow basins of effective hyperparameters become prohibitively small for the more sensitive algorithms on the most high-dimensional benchmarks, leading to poor performance (Gu et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b3",
+                            "Citation_b3",
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9914d4ad",
+                        "type": "paragraph",
+                        "text": "In our comparisons, we compare to trust region policy optimization (TRPO) (Schulman et al., 2015) , a stable and effective on-policy policy gradient algorithm; deep deterministic policy gradient (DDGP) (Lillicrap et al., 2015) , an algorithm that is regarded as one of the more efficient off-policy deep RL methods (Duan et al., 2016) ; as well as soft Q-learning (SQL) (Haarnoja et al., 2017) , an off-policy algorithm for learning maximum entropy policies. Although DDPG is very efficient, it is also known to be more sensitive to hyperparameter settings, which limits its effectiveness on complex tasks (Gu et al., 2016; Henderson et al., 2017) . Figure 1 shows the total average reward of evaluation rollouts during training for the various methods. Exploration noise was turned off for evaluation for DDPG and TRPO. For maximum entropy algorithms, which do not explicitly inject exploration noise, we either evaluated with the exploration noise (SQL) or approximate the maximum a posteriori action by choosing the mean of the mixture component that achieves the highest Q-value (SAC).",
+                        "extracted_citations": [
+                            "Citation_b21",
+                            "Citation_b11",
+                            "Citation_b3",
+                            "Citation_b8",
+                            "Citation_b6",
+                            "Citation_b9"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_37ffa212",
+                "title": "COMPARATIVE EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_06330665",
+                        "type": "paragraph",
+                        "text": "Performance across tasks. The results show that, overall, SAC substantially outperforms DDPG on all of the benchmark tasks in terms of final performance, and learns faster than any of the baselines in most environments. The only exceptions are Swimmer, where DDPG is slightly faster, and Ant-v1, where SQL is initially faster, but plateaus at a lower final performance. On the hardest tasks, Ant-v1 and Humanoid (rllab), DDPG is unable to make any progress, a result that is corroborated by prior work (Gu et al., 2016; Duan et al., 2016) . SAC still learns substantially faster than TRPO on these tasks, likely as a consequence of improved stability. Poor stability is exacerbated by highdimensional and complex tasks. Even though TRPO does not make perceivable progress for some tasks within the range depicted in the figures, it will eventually solve all of them after substantially more iterations. The quantitative results attained by SAC in our experiments also compare very favorably to results reported by other methods in prior work (Duan et al., 2016; Gu et al., 2016; Henderson et al., 2017) , indicating that both the sample efficiency and final performance of SAC on these benchmark tasks exceeds the state of the art. All hyperparameters used in this experiment for SAC are listed in Appendix E. Sensitivity to random seeds. In Figure 2 , we show the performance for multiple individual seeds on the HalfCheetah-v1 benchmark of DDPG, TRPO, and SAC (Figure 1 shows the average over seeds).",
+                        "extracted_citations": [
+                            "Citation_b6",
+                            "Citation_b3",
+                            "Citation_b3",
+                            "Citation_b6",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f34afe46",
+                        "type": "paragraph",
+                        "text": "The individual seeds attain much more consistent performance with SAC, while DDPG exhibits very high variability across seeds, indicating substantially worse stability. TRPO is unable to make progress within the first 1000 episodes. For SAC, we performed 16 gradient steps between each environment step, which becomes prohibitively slow in terms of wall clock time for longer experiments (in Figure 1 we used we used 4 gradient steps).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c231df05",
+                "title": "ABLATION STUDY",
+                "blocks": [
+                    {
+                        "block_id": "b_85af655e",
+                        "type": "paragraph",
+                        "text": "The results in the previous section suggest that algorithms based on the maximum entropy principle can outperform conventional RL methods on challenging tasks such as the Ant and Humanoid. In this section, we further examine which particular components of SAC are important for good performance. To that end, we consider several ablations to pinpoint the most essential differences between our method and standard RL methods that do not maximize entropy. We use DDPG as the representative non-entropy-maximizing algorithm, since it is the most structurally similar to SAC. This section examines specific algorithm components, while a study of the sensitivity to hyperparameter settings-most importantly the reward scale and the number of gradient steps per environment step-is deferred to Appendix D.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4c70d8b9",
+                        "type": "paragraph",
+                        "text": "Importance of entropy maximization. The main difference of SAC and DDPG is the inclusion of entropy maximization in the objective. The entropy appears in both the policy and value function.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4efee0ca",
+                        "type": "paragraph",
+                        "text": "In the policy, it prevents premature convergence of the policy variance (Equation 9 ). In the value function, it encourages exploration by increase the value of regions of state space that lead to highentropy behavior (Equation 5 ). Figure 3a compares how inclusion of this term in the policy and value updates affects the performance, by removing the entropy from each one in turn. As evident from the figure, including the entropy in the policy objective is crucial, while maximizing the entropy as part of the value function is less important, and can even hinder learning in the beginning of training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d56cce90",
+                        "type": "paragraph",
+                        "text": "Exploration noise. Another difference is the exploration noise: the maximum entropy framework naturally gives rise to Boltzmann exploration for SAC, whereas DDPG uses external OU noise (Uhlenbeck & Ornstein, 1930; Lillicrap et al., 2015) . For the next experiment, we used a policy with single mixture component and compared Boltzmann exploration to exploration via external OU noise (Figure 3b ). We repeated the experiment with the OU noise parameters that we used with DDPG (\u03b8 = 0.15, \u03c3 = 0.3), and parameters that we found worked best for SAC without Boltzmann exploration (\u03b8 = 1, \u03c3 = 0.3). The results indicate that Boltzmann exploration outperforms external OU noise.",
+                        "extracted_citations": [
+                            "Citation_b29",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8eae957f",
+                        "type": "paragraph",
+                        "text": "Separate value network. Our method also differs from DDPG in that it uses a separate network to predict the state values, in addition to the Q-values. The value network serves two purposes: it is used to bootstrap the TD updates for learning the Q-function (Equation 7 ), and it serves as a baseline to reduce variance of the policy gradients (Equation 11 ). The results in Figure 3c indicates that the value network has an important role in the policy gradient, but only has a minor effect on the TD updates. Nevertheless, the best performance is achieved when the value network is employed for both purposes.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_99de80ea",
+                        "type": "paragraph",
+                        "text": "Figure 4 : We modified the SAC implementation to make it identical to DDPG by applying a sequence of incremental modifications.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d8510fee",
+                        "type": "paragraph",
+                        "text": "From SAC to DDPG. Soft actor-critic closely resembles DDPG with a stochastic actor. To study which of the components that differs between the two algorithms are most important, we evaluated a range of SAC variants by swapping components of SAC with their DDPG counterparts. In Figure 4 we evaluate four versions obtained through incremental modifications: 1) original SAC, 2) replaced likelihood ratio policy gradient estimator with an estimator obtained through the reparametrization trick, 3) replaced the stochastic policy with a deterministic policy and Boltzmann exploration with OU noise, and 4) eliminated the separate value network by using directly the Q-function evaluated at the mean action. The figure suggests two interesting points: First, the reparametrization trick yields somewhat faster and more stable learning compared to the use of likelihood policy gradient estimator, though this precludes the use of multimodal mixtures of Gaussians. Second, use of a deterministic policy degrades performance substantially in terms of both average return (thick line) and variance across random seeds (shaded region). This observation indicates that entropy maximization, and particularly the use of a stochastic policy, can make offpolicy deep RL significantly more robust and efficient compared to algorithms that maximizes the expected return, especially with deterministic policies.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1682feac",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_f0f856a0",
+                        "type": "paragraph",
+                        "text": "We presented soft actor-critic (SAC), an off-policy maximum entropy deep reinforcement learning algorithm that provides sample-efficient learning while retaining the benefits of entropy maximization and stability. Our theoretical results derive soft policy iteration, which we show to converge to the optimal policy. From this result, we can formulate a soft actor-critic algorithm, and we empirically show that it outperforms state-of-the-art model-free deep RL methods, including the off-policy DDPG algorithm and the on-policy TRPO algorithm. In fact, the sample efficiency of this approach actually exceeds that of DDPG by a substantial margin. Our results suggest that stochastic, entropy maximizing reinforcement learning algorithms can provide a promising avenue for improved robustness and stability, and further exploration of maximum entropy methods, including methods that incorporate second order information (e.g., trust regions (Schulman et al., 2015) ) or more expressive policy classes is an exciting avenue for future work.",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0cccd501",
+                "title": "A MAXIMUM ENTROPY OBJECTIVE",
+                "blocks": [
+                    {
+                        "block_id": "b_d525657e",
+                        "type": "paragraph",
+                        "text": "The exact definition of the discounted maximum entropy objective is complicated by the fact that, when using a discount factor for policy gradient methods, we typically do not discount the state distribution, only the rewards. In that sense, discounted policy gradients typically do not optimize the true discounted objective. Instead, they optimize average reward, with the discount serving to reduce variance, as discussed by Thomas (2014) . However, we can define the objective that is optimized under a discount factor as",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_096762e6",
+                        "type": "paragraph",
+                        "text": "This objective corresponds to maximizing the discounted expected reward and entropy for future states originating from every state-action tuple (s t , a t ) weighted by its probability \u03c1 \u03c0 under the current policy.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_41d7105b",
+                "title": "B PROOFS",
+                "blocks": [
+                    {
+                        "block_id": "b_121e4b43",
+                        "type": "paragraph",
+                        "text": "Lemma 1 (Soft Policy Evaluation). Consider the soft Bellman backup operator T \u03c0 in Equation 2 and a mapping Q 0 : S \u00d7 A \u2192 R, and define Q k+1 = T \u03c0 Q k . Then the sequence Q k will converge to the soft Q-value of \u03c0 as k \u2192 \u221e.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_33d58aa4",
+                        "type": "paragraph",
+                        "text": "Proof. Define the entropy augmented reward as r \u03c0 (s t , a t ) r(s t , a t ) + E st+1\u223cps [H (\u03c0( \u2022 |s t+1 ))] and rewrite the update rule as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d88d23be",
+                        "type": "paragraph",
+                        "text": "and apply the standard convergence results for policy evaluation (Sutton & Barto, 1998) .",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_74576262",
+                "title": "B.2 LEMMA 2",
+                "blocks": [
+                    {
+                        "block_id": "b_202ada13",
+                        "type": "paragraph",
+                        "text": "Lemma 2 (Soft Policy Improvement). Let \u03c0 old \u2208 \u03a0 and let \u03c0 new be the optimizer of the minimization problem defined in Equation 4 . Then Q \u03c0new (s t , a t ) \u2265 Q \u03c0 old (s t , a t ) for all (s t , a t ) \u2208 S \u00d7 A.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_91e9d0c9",
+                        "type": "paragraph",
+                        "text": "Proof. Let \u03c0 old \u2208 \u03a0 and let Q \u03c0 old and V \u03c0 old be the corresponding soft state-action value and soft state value, and let \u03c0 new be defined as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c8c0dc74",
+                        "type": "paragraph",
+                        "text": "It must be the case that",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dd518840",
+                        "type": "paragraph",
+                        "text": "and since partition function Z \u03c0 old depends only on the state, the inequality reduces to",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_65197b7f",
+                        "type": "paragraph",
+                        "text": "Next, consider the soft Bellman equation:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_918df37e",
+                        "type": "paragraph",
+                        "text": "where we have repeatedly expanded Q \u03c0 old on the RHS by applying the soft Bellman equation and the bound in Equation 17 . Convergence to Q \u03c0new follows from Lemma 1.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1c472547",
+                "title": "B.3 THEOREM 1",
+                "blocks": [
+                    {
+                        "block_id": "b_49e6da83",
+                        "type": "paragraph",
+                        "text": "Theorem 1 (Soft Policy Iteration). Repeated application of soft policy evaluation and soft policy improvement to any \u03c0 \u2208 \u03a0 converges to a policy \u03c0 * ( \u2022 |s t ) such that Q \u03c0 * (s t , a t ) > Q \u03c0 (s t , a t ) for all \u03c0 \u2208 \u03a0, \u03c0 = \u03c0 * and for all (s t , a t ) \u2208 S \u00d7 A.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a16c2c8a",
+                        "type": "paragraph",
+                        "text": "Proof. Let \u03c0 i be the policy at iteration i. By Lemma 2, the sequence Q \u03c0i is monotonically increasing. Since Q \u03c0 is bounded above for \u03c0 \u2208 \u03a0 (both the reward and entropy are bounded), the sequence converges to some \u03c0 * . We will still need to show that \u03c0 * is indeed optimal. At convergence, it must be case that J \u03c0 * (\u03c0 * ( \u2022 |s t )) < J \u03c0 * (\u03c0( \u2022 |s t )) for all \u03c0 \u2208 \u03a0, \u03c0 = \u03c0 * . Using the same iterative argument as in the proof of Lemma 2, we get Q \u03c0 * (s t , a t ) > Q \u03c0 (s t , a t ) for all (s t , a t ) \u2208 S \u00d7 A, that is, the soft value of any other in \u03a0 is lower than that of the converged policy. Hence \u03c0 * is optimal in \u03a0.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_03d7261c",
+                "title": "C ENFORCING ACTION BOUNDS",
+                "blocks": [
+                    {
+                        "block_id": "b_f48368ca",
+                        "type": "paragraph",
+                        "text": "We use an unbounded GMM as the action distribution. However, in practice, the actions needs to be bounded to a finite interval. To that end, we apply an invertible squashing function (tanh) to the GMM samples, and employ the change of variables formula to compute the likelihoods of the bounded actions. In the other words, let u \u2208 R D be a random variable and \u00b5(u|s) the corresponding density with infinite support. Then a = tanh(u), where tanh is applied elementwise, is a random variable with support in (-1, 1) with a density given by",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fc2f4cc7",
+                        "type": "paragraph",
+                        "text": "Since the Jacobian da /du = diag(1 -tanh 2 (u)) is diagonal, the log-likelihood has a simple form log \u03c0(a|s) = log \u00b5(u|s) -",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8ad09200",
+                        "type": "paragraph",
+                        "text": "where u i is the i th element of u.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_47cdb6ea",
+                "title": "D SENSITIVITY TO HYPERPARAMETERS",
+                "blocks": [
+                    {
+                        "block_id": "b_d68cb154",
+                        "type": "paragraph",
+                        "text": "This section discusses the sensitivity to hyperparameters. All of the following experiments are on the HalfCheetah-v1 benchmark, and although we found these results to be representative in most cases, they may differ between the environments. For other environments, we only swept over the reward scale only.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1aed44da",
+                        "type": "paragraph",
+                        "text": "Reward scale. Soft actor-critic is particularly sensitive to the reward magnitude, because it serves the role of the temperature of the energy-based optimal policy and thus controls its stochasticity. Figure 5a shows how learning performance changes when the reward scale is varied: For small reward magnitudes, the policy becomes nearly uniform, and consequently the fails to exploit the reward signal, resulting in substantial degradation of performance. For large reward magnitudes, the model learns quickly at first, but the policy quickly becomes nearly deterministic, leading to poor exploration and subsequent failure due to lack of adequate exploration. With the right reward magnitude, the model balances exploration and exploitation, leading to fast and stable learning. In practice, we found reward scale to be the only hyperparameter that requires substantial tuning, and since this parameter has a natural interpretation in the maximum entropy framework, this provides good intuition for how to adjust this parameter.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_811596eb",
+                        "type": "paragraph",
+                        "text": "Mixture components. We experimented with different numbers of mixture components in the Gaussian mixture policy (Figure 5b ). We found that the number of components did not affect the learning performance very much, though larger numbers of components consistently attained somewhat better results. Policy evaluation. Since SAC converges to stochastic policies, it is generally beneficial to make the final policy deterministic at the end for best performance. For evaluation, we approximate the maximum a posteriori action by choosing the action that maximizes the Q-function among the mixture component means. Figure 5c compares training returns to test returns obtained with this strategy. The test returns are substantially better. It should be noted that all of the training curves depict the sum of rewards, which is different from the objective optimized by SAC and SQL which both maximize also the entropy.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_826cde8f",
+                        "type": "paragraph",
+                        "text": "Target network update. In Figure 5d we varied the smoothing constant, \u03c4 , for the target value network updates. A value of one corresponds to a hard update where the weights are copied directly at every iteration, and values close to zero correspond to exponentially moving average of the network weights. Interestingly, SAC is relatively insensitive to the smoothing constant: smaller \u03c4 tends to yield higher performance at the end with the cost of marginally slower progress in the beginning, but the difference is small. In prior work, the main use of the target network was to stabilize training (Mnih et al., 2015; Lillicrap et al., 2015) , but interestingly, SAC is able to learn stably also when effectively no separate target network is used, but instead the weights are copied directly (\u03c4 = 1), although at the cost of minor degradation of performance.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b5b8fb3d",
+                        "type": "paragraph",
+                        "text": "Replay buffer size. Next, we experimented with the size of the experience replay buffer (Figure 5e ), which we found to be important for environments where the optimal policy becomes nearly deterministic at convergence, such as HalfCheetah-v1. For such environments, the exploration noise becomes negligible at the end, making the content of the replay buffer less diverse and resulting in overfitting and instability. Use of a higher capacity buffer solves this problem by allowing the method to remember the failures from the beginning of learning, but slows down learning by allocating some of the network capacity to modeling the suboptimal initial experience. Note that a return of just 4800 is considered as the threshold level for solving this benchmark task and that the performance in all cases is well beyond the threshold. We used a buffer size of 10 million samples for HalfCheetah-v1, and 1 million samples for the other environments.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_87ef4af4",
+                        "type": "paragraph",
+                        "text": "Gradient steps per time step. Finally, we experimented with the number of actor and critic gradient steps per time step of the algorithm (Figure 5f ). Prior work has observed that increasing the number of gradient steps for DDPG tends to improve sample efficiency (Gu et al., 2017; Popov et al., 2017) , but only up to a point. We found 4 gradient updates per time step to be optimal for DDPG, before we saw degradation of performance. SAC is able to effectively benefit from substantially larger numbers of gradient updates in most environments, with performance increasing steadily until 16 gradient updates per step. In some environments, such as Humanoid, we did not observe as much benefit. The ability to take multiple gradient steps without negatively affecting the algorithm is important especially for learning in the real world, where experience collection is the bottleneck, and it is typical to run the learning script asynchronously in a separate thread. In this experiment, we used a replay buffer size of 1 million samples, and therefore the performance suddenly drops after reaching a return of approximately 10 thousand due to the reason discussed in the previous section.",
+                        "extracted_citations": [
+                            "Citation_b7",
+                            "Citation_b19"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Neuronlike adaptive elements that can solve difficult learning control problems A G Barto R S Sutton C W Anderson IEEE transactions on systems, man, and cybernetics 5 1983",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Convergent temporaldifference learning with arbitrary smooth function approximation S Bhatnagar D Precup D Silver R Sutton H R Maei C Szepesv\u00e1ri Advances in Neural Information Processing Systems 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "G Brockman V Cheung L Pettersson J Schneider J Schulman J Tang W Zaremba arXiv:1606.01540 Ope-nAI gym 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Benchmarking deep reinforcement learning for continuous control Y Duan R Chen X Houthooft J Schulman P Abbeel Proceedings of the 33rd International Conference on Machine Learning (ICML) the 33rd International Conference on Machine Learning (ICML) 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Taming the noise in reinforcement learning via soft updates R Fox A Pakman N Tishby Conf. on Uncertainty in Artificial Intelligence 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "A Gruslys M G Azar M G Bellemare R Munos arXiv:1704.04651 The reactor: A sample-efficient actor-critic architecture 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "S Gu T Lillicrap Z Ghahramani R E Turner S Levine arXiv:1611.02247 Sample-efficient policy gradient with an off-policy critic 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Deep reinforcement learning for robotic manipulation with asynchronous off-policy updates S Gu E Holly T Lillicrap S Levine Robotics and Automation (ICRA), 2017 IEEE International Conference on IEEE 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "T Haarnoja H Tang P Abbeel S Levine arXiv:1702.08165 Reinforcement learning with deep energy-based policies 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "P Henderson R Islam P Bachman J Pineau D Precup D Meger arXiv:1709.06560 Deep reinforcement learning that matters 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Guided policy search S Levine V Koltun Proceedings of the 30th International Conference on Machine Learning (ICML-13) the 30th International Conference on Machine Learning (ICML-13) 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "T P Lillicrap J J Hunt A Pritzel N Heess T Erez Y Tassa D Silver D Wierstra arXiv:1509.02971 Continuous control with deep reinforcement learning 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Playing atari with deep reinforcement learning V Mnih K Kavukcuoglu D Silver A Graves I Antonoglou D Wierstra M Riedmiller arXiv:1312.5602 2013 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Human-level control through deep reinforcement learning V Mnih K Kavukcuoglu D Silver A Rusu J Veness M G Bellemare A Graves M Riedmiller A K Fidjeland G Ostrovski Nature 518 7540 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Asynchronous methods for deep reinforcement learning V Mnih A P Badia M Mirza A Graves T P Lillicrap T Harley D Silver K Kavukcuoglu Int. Conf. on Machine Learning 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "O Nachum M Norouzi K Xu D Schuurmans arXiv:1702.08892 Bridging the gap between value and policy based reinforcement learning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "O Nachum M Norouzi K Xu D Schuurmans arXiv:1707.01891 Trust-PCL: An off-policy trust region method for continuous control 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "B O'donoghue R Munos K Kavukcuoglu V Mnih arXiv:1611.01626 PGQ: Combining policy gradient and Q-learning 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Reinforcement learning of motor skills with policy gradients J Peters S Schaal Neural networks 21 4 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "I Popov N Heess T Lillicrap R Hafner G Barth-Maron M Vecerik T Lampe Y Tassa T Erez M Riedmiller arXiv:1704.03073 Data-efficient deep reinforcement learning for dexterous manipulation 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "On stochastic optimal control and reinforcement learning by approximate inference K Rawlik M Toussaint S Vijayakumar Proceedings of Robotics: Science and Systems VIII Robotics: Science and Systems VIII 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Trust region policy optimization J Schulman S Levine P Abbeel M I Jordan P Moritz Int. Conf on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "J Schulman P Abbeel X Chen arXiv:1704.06440 Equivalence between policy gradients and soft Q-learning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Deterministic policy gradient algorithms D Silver G Lever N Heess T Degris D Wierstra M Riedmiller Int. Conf on Machine Learning 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Mastering the game of go with deep neural networks and tree search D Silver A Huang C J Maddison A Guez L Sifre G Van Den Driessche J Schrittwieser I Antonoglou V Panneershelvam M Lanctot S Dieleman D Grewe J Nham N Kalchbrenner I Sutskever T Lillicrap M Leach K Kavukcuoglu T Graepel D Hassabis Nature 0028-0836. Article 529 7587 Jan 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Reinforcement learning: An introduction R S Sutton A G Barto 1998 MIT press Cambridge 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Bias in natural actor-critic algorithms P Thomas Int. Conf. on Machine Learning 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "General duality between optimal control and estimation E Todorov IEEE Conf. on Decision and Control IEEE 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Robot trajectory optimization using approximate inference M Toussaint Int. Conf. on Machine Learning ACM 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "On the theory of the Brownian motion G E Uhlenbeck L S Ornstein Physical review 36 5 823 1930",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Modeling purposeful adaptive behavior with the principle of maximum causal entropy B D Ziebart 2010 PhD thesis",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Maximum entropy inverse reinforcement learning B D Ziebart A L Maas J A Bagnell A K Dey AAAI Conference on Artificial Intelligence 2008",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.07,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper proposes a soft actor-critic method aiming at lowering sample complexity and achieving a new convergence guarantee.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "However, the current paper has some correctness issues, is missing some related work and lacks a clear statement of innovation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The first issue is that augmenting reward by adding an entropy term to the original RL objective is not clearly innovative.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The connections, and improvements upon, other approaches need to be made more clear.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "In particular, the connection to the work by Haarnoja is unclear.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "There is this statement: \u201cAlthough the soft Q-learning algorithm proposed by Haarnoja et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "(2017) has a value function and actor network, it is not a true actor-critic algorithm: the Q- function is estimating the optimal Q-function, and the actor does not directly affect the Q-function except through the data distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "Hence, Haarnoja et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "(2017) motivates the actor network as an approximate sampler, rather than the actor in an actor-critic algorithm.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Crucially, the convergence of this method hinges on how well this sampler approximates the true posterior.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "In contrast, we prove that our method converges to the optimal policy from a given policy class, regardless of the policy parameterization.\u201d The last sentence suggests that the key difference is that any policy parameterization can be used, making the previous sentences less clear.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "Is the key extension on the proof, and so on the use of the projection with the KL-divergence?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "Further, there is a missing connection to the paper \u201cGuided policy search\u201d, Levine and Koltun.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "Though it is a different framework, it clearly mentioned it uses the augmented reward to learn the sub-optimal policies (for differential dynamic program).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "The DDPG paper mentioned that DDPG can be also used within the GPS framework.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "That work is different, but a discussion should nonetheless be included about connections.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "If the key novelty in this work is an extension on the theory, to allow any policy parameterization, and empirical results demonstrating improved performance over Haarnoja et al., there appear to be correctness issues in both, as laid out below.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "The key novelty in the theory seems to be to use a projection onto the space of policies, using a KL divergence.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "There are, however, currently too many unclear or misspecified steps to verify correctness.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "The definition of pinew in Equation (6) is for one specific state s_t; shouldn\u2019t this be across all states?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "If it is for one state, then E_{pinew} makes sense, since pi is only specified as a conditional distribution (not a joint distribution); if it is supposed to be expected value across all states, then what is E_{pinew}?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "Is it with the stationary distribution of pinew?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "The proof for Lemma 1 is hard to follow, because Z is not defined.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "I mostly was able to guess, based on Haarnoja et al., but the step between (18) and (19) where E_{pinew} [Zpiold] -  E_{piold} [Zpiold] is dropped is unclear to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "Zpiold does not depend on actions, so if the expectation is only w.r.t.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "to the action, then it cancels.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_26",
+                    "text": "This goes back to point 1, where it wouldn\u2019t make much sense for the KL to only depend on actions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_27",
+                    "text": "In fact, if pinew has to be computed separately for each state, then we are really back to tabular policies.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_28",
+                    "text": "\u201cThere is no need in principle to include a separate function approximator for the state value, since it is related to the Q-function and policy according to Q\u03b8 (st , at ) \u2212 log \u03c0\u03c6 (at |st )\u201d This is not true, since you rely on the fact that you have separate network parameters to get an unbiased gradient estimate in (10).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_29",
+                    "text": "The experimental results also appear to have some correctness issues.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_30",
+                    "text": "For the claim that the algorithm does better, this is also difficult to gauge because the graphs are unclear.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_31",
+                    "text": "In particular, it is not explained why the lines end early.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_32",
+                    "text": "How were multiple gradients incorporated into the update?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_33",
+                    "text": "Did you wait 4 (or 16) steps until computing a gradient update?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_34",
+                    "text": "This might explain why the lines end early, but then invalidates how the lines are drawn.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_35",
+                    "text": "Rather, the lines should be extended, where each point is plotted each 4 (or 16) steps.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_36",
+                    "text": "Doing this would remove the effect that the lines with 4 or 16 seem to learn faster (but really are just plotted on a different x-axis).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_37",
+                    "text": "There is a lack of experimental details.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_38",
+                    "text": "This includes missing details about neural network architectures used by each algorithm, parameter tuning details, how multiple gradients are used, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_39",
+                    "text": "This omission makes the experiments not reproducible.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_40",
+                    "text": "Although DDPG is claimed to be very sensitive to parameter changes, and the proposed algorithm is more stable, there is no parameter sensitivity results showed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_41",
+                    "text": "Minor comments:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_42",
+                    "text": "Graph font is much too small.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_43",
+                    "text": "Typo in (10), should be V(s_{t+1})\n3.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_44",
+                    "text": "Because the proof of Lemma 1 is so straightforward (just redefining reward), it would be better to actually spell it out, give a definition of entropy, etc.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.3618,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The paper presents an off-policy actor-critic method for learning a stochastic policy with entropy regularization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "It is a direct extension of maximum entropy reinforcement learning for Q-learning (recently called soft-Q learning), and named soft actor-critic (SAC).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Empirically SAC is shown to outperform DDPG significantly in terms of stability and sample efficiency, and can solve relatively difficult tasks that previously only on-policy (or hybrid on-policy/off-policy) method such as TRPO/PPO can solve stably.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "Besides entropy regularization, it also introduces multi-modal policy parameterization through mixture of Gaussians that enables diverse, on-policy exploration.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "The main appeal of the paper is the strong empirical performance of this new off-policy method in continuous action benchmarks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "Several design choices could be the key, so it is encouraged to provide more ablation studies on these, which would be highly valuable for the community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "In particular,\n\n- Amortization of Q and \\pi through fitting state value function\n\n- On-policy exploration vs OU process based off-policy exploration\n\n- Mixture vs non-mixture-based stochastic policy\n\n- SAC vs soft Q-learning\n\nAnother valuable discussion to be had is the stability of off-policy algorithm comparing Q-learning versus actor-critic method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Pros:\n\n- Simple off-policy algorithm that achieves significantly better performance than existing off-policy baseline algorithms\n\n- It allows on-policy exploration in off-policy learning, partially thanks to entropy regularization that prevents variance from shrinking to 0.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "It could be considered a major success of off-policy algorithm that removes heuristic exploration noise.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "Cons:\n\n- Method is relatively simple extension from existing work in maximum entropy reinforcement learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "It is unclear what aspects lead to significant improvements in performance due to insufficient ablation studies.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "Other question:\n\n- Above Eq.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "7 it discusses that fitting a state value function wrt Q and \\pi is shown to improve the stability significantly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "Is this comparison with directly estimating state value using finite samples?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "If so, is the primary instability due to variance of the estimate, which can be avoided by drawing a lot of samples or do full integration (still reasonably tractable for finite mixture model)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "Or, is the instability from elsewhere?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "By having SGD-based fitting of state value function, it appears to simulate slowly changing target values (similar role as target networks).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "If so, could a similar technique be used with DDPG and get more stable performance?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.5572,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "Quality and clarity: \n\nIt seems that the authors can do a better job to improve the readability of the paper and its conciseness.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The current structure of paper seems a bit suboptimal to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The first 6.5 page of the paper is used to explain the idea of RL with entropy  reward and how it can be extended to the case of parametrized value function and policy and then the whole experimental results  is packed  in only 1 page.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "I think the paper could be organized in a more balanced way  by providing a more detailed description and analysis of the numerical results, especially given the fact that in my opinion this is the main strength of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Finally some of the claims made in this paper is not really justified.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "For instance \"Prior deep RL methods based on this framework have been formulated as either off-policy Q-learning, or on-policy policy gradient methods\" not true, e.g., look at  Deepmind AI recent work:  https://arxiv.org/abs/1704.04651.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Originality and novelty:\n\nI think much of the ideas considered in this paper is already explored in previous work as it is acknowledged  in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "However some of the techniques such as the way the policy is  represented  and the way the policy gradient formulation is approximated  seems to be novel in the context of Deep RL though again these ideas have been explored in the literature of control and RL extensively.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Significance:\n\nI think the improvement on baseline in control suites is very impressive the problem is that the details of the implementation of algorithm e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "architecture of neural network size of memory replay, the schedule the target network  is implemented is not sufficiently explained in the paper so it is  difficult to evaluate these results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "Also the paper only compares with the original version of the baseline algorithms.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "These algorithms are improved since then and the new more efficient algorithms such as distributional policy gradients and NAF have been developed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "So it would help to have a better understanding of this result if the paper compares with the state-of-the-art baselines.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "Minor:\nfor some reason different algorithms have ran for different number of steps which is a bit confusing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "would be great if this is fixed in the future version.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_6ada3ecb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_6ada3ecb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_6ada3ecb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_cfb43858",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6ada3ecb"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_c8a889a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_cfb43858",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c8a889a4"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_d4f8467d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_cfb43858",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d4f8467d"
+        },
+        {
+            "source": "b_e6e8ccc1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_e6e8ccc1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_e6e8ccc1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_cfb43858",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6e8ccc1"
+        },
+        {
+            "source": "b_46bcaaa9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_46bcaaa9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_46bcaaa9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_46bcaaa9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_46bcaaa9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_46bcaaa9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_77ef3740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_46bcaaa9"
+        },
+        {
+            "source": "b_d8b7519b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_d8b7519b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_d8b7519b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_d8b7519b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_d8b7519b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_d8b7519b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_d8b7519b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_77ef3740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d8b7519b"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_d8e49293",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_77ef3740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d8e49293"
+        },
+        {
+            "source": "sec_5516263d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a69671e1"
+        },
+        {
+            "source": "sec_702c2972",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5814f8b7"
+        },
+        {
+            "source": "b_298e0845",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_fc38a2dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_298e0845"
+        },
+        {
+            "source": "b_c07e8ec9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_c07e8ec9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_c07e8ec9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_fc38a2dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c07e8ec9"
+        },
+        {
+            "source": "b_871ec9c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_871ec9c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_871ec9c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_fc38a2dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_871ec9c9"
+        },
+        {
+            "source": "sec_58268398",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_648be6eb"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_13f80306"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8cdb3e87"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_755d5544"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ae35d14a"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_edd40840"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_febd62b7"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f5520e81"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0f6dbeb8"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_edd24b31"
+        },
+        {
+            "source": "sec_4be5e4fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1bce5a50"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_013cd42f"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_03af7556"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c846c108"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b99952cf"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6cb9e14"
+        },
+        {
+            "source": "b_51519d66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_51519d66"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f8aa674d"
+        },
+        {
+            "source": "b_6abe6dc8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6abe6dc8"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47d6f61a"
+        },
+        {
+            "source": "sec_8809e00b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_be176477"
+        },
+        {
+            "source": "b_5c5e6381",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_64b1a048",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5c5e6381"
+        },
+        {
+            "source": "sec_64b1a048",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4c4dea5e"
+        },
+        {
+            "source": "b_d1513f13",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_64b1a048",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d1513f13"
+        },
+        {
+            "source": "sec_4b1e7347",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9422fba4"
+        },
+        {
+            "source": "b_2e61274e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_2e61274e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_2e61274e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_2e61274e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_4b1e7347",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2e61274e"
+        },
+        {
+            "source": "b_9914d4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_9914d4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_9914d4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_9914d4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_9914d4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_9914d4ad",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_4b1e7347",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9914d4ad"
+        },
+        {
+            "source": "b_06330665",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_06330665",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_06330665",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_06330665",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_06330665",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_37ffa212",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_06330665"
+        },
+        {
+            "source": "sec_37ffa212",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f34afe46"
+        },
+        {
+            "source": "sec_c231df05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_85af655e"
+        },
+        {
+            "source": "sec_c231df05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4c70d8b9"
+        },
+        {
+            "source": "sec_c231df05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4efee0ca"
+        },
+        {
+            "source": "b_d56cce90",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_d56cce90",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_c231df05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d56cce90"
+        },
+        {
+            "source": "sec_c231df05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8eae957f"
+        },
+        {
+            "source": "sec_c231df05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_99de80ea"
+        },
+        {
+            "source": "sec_c231df05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d8510fee"
+        },
+        {
+            "source": "b_f0f856a0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_1682feac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0f856a0"
+        },
+        {
+            "source": "b_d525657e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_0cccd501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d525657e"
+        },
+        {
+            "source": "sec_0cccd501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_096762e6"
+        },
+        {
+            "source": "sec_41d7105b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_121e4b43"
+        },
+        {
+            "source": "sec_41d7105b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_33d58aa4"
+        },
+        {
+            "source": "b_d88d23be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_41d7105b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d88d23be"
+        },
+        {
+            "source": "sec_74576262",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_202ada13"
+        },
+        {
+            "source": "sec_74576262",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_91e9d0c9"
+        },
+        {
+            "source": "sec_74576262",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c8c0dc74"
+        },
+        {
+            "source": "sec_74576262",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dd518840"
+        },
+        {
+            "source": "sec_74576262",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_65197b7f"
+        },
+        {
+            "source": "sec_74576262",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_918df37e"
+        },
+        {
+            "source": "sec_1c472547",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_49e6da83"
+        },
+        {
+            "source": "sec_1c472547",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a16c2c8a"
+        },
+        {
+            "source": "sec_03d7261c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f48368ca"
+        },
+        {
+            "source": "sec_03d7261c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fc2f4cc7"
+        },
+        {
+            "source": "sec_03d7261c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ad09200"
+        },
+        {
+            "source": "sec_47cdb6ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d68cb154"
+        },
+        {
+            "source": "sec_47cdb6ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1aed44da"
+        },
+        {
+            "source": "sec_47cdb6ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_811596eb"
+        },
+        {
+            "source": "b_826cde8f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_826cde8f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_47cdb6ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_826cde8f"
+        },
+        {
+            "source": "sec_47cdb6ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b5b8fb3d"
+        },
+        {
+            "source": "b_87ef4af4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_87ef4af4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_47cdb6ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_87ef4af4"
+        }
+    ]
+}

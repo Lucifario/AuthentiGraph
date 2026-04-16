@@ -1,0 +1,2076 @@
+{
+    "paper_metadata": {
+        "paper_id": "rkHVZWZAZ",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Accepted",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_63667f68",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_a8db068e",
+                        "type": "paragraph",
+                        "text": "Model-free deep reinforcement learning has achieved several remarkable successes in domains ranging from super-human-level control in video games (Mnih et al., 2015) and the game of Go (Silver et al., 2016; 2017) , to continuous motor control tasks (Lillicrap et al., 2015; Schulman et al., 2015) .",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b25",
+                            "Citation_b10",
+                            "Citation_b23"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d1c38c5c",
+                        "type": "paragraph",
+                        "text": "Much of the recent work can be divided into two categories. First, those of which that, often building on the DQN framework, act -greedily according to an action-value function and train using minibatches of transitions sampled from an experience replay buffer (Van Hasselt et al., 2016; Wang et al., 2015; He et al., 2017; Anschel et al., 2017) . These value-function agents benefit from improved sample complexity, but tend to suffer from long runtimes (e.g. DQN requires approximately a week to train on Atari). The second category are the actor-critic agents, which includes the asynchronous advantage actor-critic (A3C) algorithm, introduced by Mnih et al. (2016) . These agents train on transitions collected by multiple actors running, and often training, in parallel (Schulman et al., 2017; Vezhnevets et al., 2017) . The deep actor-critic agents train on each trajectory only once, and thus tend to have worse sample complexity. However, their distributed nature allows significantly faster training in terms of wall-clock time. Still, not all existing algorithms can be put in the above two categories and various hybrid approaches do exist (Zhao et al., 2016; O'Donoghue et al., 2017; Gu et al., 2017; Wang et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b28",
+                            "Citation_b31",
+                            "Citation_b5",
+                            "Citation_b0",
+                            "Citation_b14",
+                            "Citation_b24",
+                            "Citation_b30",
+                            "Citation_b35",
+                            "Citation_b17",
+                            "Citation_b4",
+                            "Citation_b32"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5e45347b",
+                        "type": "paragraph",
+                        "text": "Data-efficiency and off-policy learning are essential for many real-world domains where interactions with the environment are expensive. Similarly, wall-clock time (time-efficiency) directly impacts an algorithm's applicability through resource costs. The focus of this work is to produce an agent that is sample-and time-efficient. To this end, we introduce a new reinforcement learning agent, called Reactor (Retrace-Actor), which takes a principled approach to combining the sample-efficiency of off-policy experience replay with the time-efficiency of asynchronous algorithms. We combine recent advances in both categories of agents with novel contributions to produce an agent that inherits the benefits of both and reaches state-of-the-art performance over 57 Atari 2600 games.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6534f5e2",
+                        "type": "paragraph",
+                        "text": "Our primary contributions are (1) a novel policy gradient algorithm, \u03b2-LOO, which makes better use of action-value estimates to improve the policy gradient; (2) the first multi-step off-policy distributional reinforcement learning algorithm, distributional Retrace(\u03bb); (3) a novel prioritized replay for off-policy sequences of transitions; and (4) an optimized network and parallel training architecture.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4e1ae5aa",
+                        "type": "paragraph",
+                        "text": "We begin by reviewing background material, including relevant improvements to both value-function agents and actor-critic agents. In Section 3 we introduce each of our primary contributions and present the Reactor agent. Finally, in Section 4, we present experimental results on the 57 Atari 2600 games from the Arcade Learning Environment (ALE) (Bellemare et al., 2013) , as well as a series of ablation studies for the various components of Reactor.",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b2324d31",
+                "title": "BACKGROUND",
+                "blocks": [
+                    {
+                        "block_id": "b_ceeeb8d4",
+                        "type": "paragraph",
+                        "text": "We consider a Markov decision process (MDP) with state space X and finite action space A. A (stochastic) policy \u03c0(\u2022|x) is a mapping from states x \u2208 X to a probability distribution over actions. We consider a \u03b3-discounted infinite-horizon criterion, with \u03b3 \u2208 [0, 1) the discount factor, and define for policy \u03c0 the action-value of a state-action pair (x, a) as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c816291a",
+                        "type": "paragraph",
+                        "text": "where ({x t } t\u22650 ) is a trajectory generated by choosing a in x and following \u03c0 thereafter, i.e., a t \u223c \u03c0(\u2022|x t ) (for t \u2265 1), and r t is the reward signal. The objective in reinforcement learning is to find an optimal policy \u03c0 * , which maximises Q \u03c0 (x, a). The optimal action-values are given by Q * (x, a) = max \u03c0 Q \u03c0 (x, a).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d3dd4e19",
+                "title": "VALUE-BASED ALGORITHMS",
+                "blocks": [
+                    {
+                        "block_id": "b_13b427e7",
+                        "type": "paragraph",
+                        "text": "The Deep Q-Network (DQN) framework, introduced by Mnih et al. (2015) , popularised the current line of research into deep reinforcement learning by reaching human-level, and beyond, performance across 57 Atari 2600 games in the ALE. While DQN includes many specific components, the essence of the framework, much of which is shared by Neural Fitted Q-Learning (Riedmiller, 2005) , is to use of a deep convolutional neural network to approximate an action-value function, training this approximate action-value function using the Q-Learning algorithm (Watkins & Dayan, 1992 ) and mini-batches of one-step transitions (x t , a t , r t , x t+1 , \u03b3 t ) drawn randomly from an experience replay buffer (Lin, 1992) . Additionally, the next-state action-values are taken from a target network, which is updated to match the current network periodically. Thus, the temporal difference (TD) error for transition t used by these algorithms is given by",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b20",
+                            "Citation_b33",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_197b7095",
+                        "type": "paragraph",
+                        "text": "where \u03b8 denotes the parameters of the network and \u03b8 are the parameters of the target network.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bbab1d02",
+                        "type": "paragraph",
+                        "text": "Since this seminal work, we have seen numerous extensions and improvements that all share the same underlying framework. Double DQN (Van Hasselt et al., 2016) , attempts to correct for the over-estimation bias inherent in Q-Learning by changing the second term of (1) to Q(x t+1 , arg max a \u2208A Q(x t+1 , a ; \u03b8); \u03b8). The dueling architecture (Wang et al., 2015) , changes the network to estimate action-values using separate network heads V (x; \u03b8) and A(x, a; \u03b8) with",
+                        "extracted_citations": [
+                            "Citation_b28",
+                            "Citation_b31"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ecf9da80",
+                        "type": "paragraph",
+                        "text": "Recently, Hessel et al. (2017) introduced Rainbow, a value-based reinforcement learning agent combining many of these improvements into a single agent and demonstrating that they are largely complementary. Rainbow significantly out performs previous methods, but also inherits the poorer time-efficiency of the DQN framework. We include a detailed comparison between Reactor and Rainbow in the Appendix. In the remainder of the section we will describe in more depth other recent improvements to DQN.",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_345f4451",
+                "title": "PRIORITIZED EXPERIENCE REPLAY",
+                "blocks": [
+                    {
+                        "block_id": "b_0c446c49",
+                        "type": "paragraph",
+                        "text": "The experience replay buffer was first introduced by Lin (1992) and later used in DQN (Mnih et al., 2015) . Typically, the replay buffer is essentially a first-in-first-out queue with new transitions gradually replacing older transitions. The agent would then sample a mini-batch uniformly at random from the replay buffer. Drawing inspiration from prioritized sweeping (Moore & Atkeson, 1993) , prioritized experience replay replaces the uniform sampling with prioritized sampling proportional to the absolute TD error (Schaul et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b13",
+                            "Citation_b15",
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4fb6322f",
+                        "type": "paragraph",
+                        "text": "Specifically, for a replay buffer of size N , prioritized experience replay samples transition t with probability P (t), and applies weighted importance-sampling with w t to correct for the prioritization bias, where",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e3de7c98",
+                        "type": "paragraph",
+                        "text": "Prioritized DQN significantly increases both the sample-efficiency and final performance over DQN on the Atari 2600 benchmarks (Schaul et al., 2015) .",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_01d0e65b",
+                "title": "RETRACE(\u03bb)",
+                "blocks": [
+                    {
+                        "block_id": "b_2052b556",
+                        "type": "paragraph",
+                        "text": "Retrace(\u03bb) is a convergent off-policy multi-step algorithm extending the DQN agent (Munos et al., 2016) . Assume that some trajectory {x 0 , a 0 , r 0 , x 1 , a 1 , r 1 , . . . , x t , a t , r t , . . . , } has been generated according to behaviour policy \u00b5, i.e., a t \u223c \u00b5(\u2022|x t ). Now, we aim to evaluate the value of a different target policy \u03c0, i.e. we want to estimate Q \u03c0 . The Retrace algorithm will update our current estimate",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d5166906",
+                        "type": "paragraph",
+                        "text": ") is the temporal difference at time s under \u03c0, and",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a87b4083",
+                        "type": "paragraph",
+                        "text": "The Retrace algorithm comes with the theoretical guarantee that in finite state and action spaces, repeatedly updating our current estimate Q according to (3) produces a sequence of Q functions which converges to Q \u03c0 for a fixed \u03c0 or to Q * if we consider a sequence of policies \u03c0 which become increasingly greedy w.r.t. the Q estimates (Munos et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f6e569e8",
+                "title": "DISTRIBUTIONAL RL",
+                "blocks": [
+                    {
+                        "block_id": "b_eba8376d",
+                        "type": "paragraph",
+                        "text": "Distributional reinforcement learning refers to a class of algorithms that directly estimate the distribution over returns, whose expectation gives the traditional value function (Bellemare et al., 2017) . Such approaches can be made tractable with a distributional Bellman equation, and the recently proposed algorithm C51 showed state-of-the-art performance in the Atari 2600 benchmarks. C51 parameterizes the distribution over returns with a mixture over Diracs centered on a uniform grid, ,a)   ,",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f1ca91eb",
+                        "type": "paragraph",
+                        "text": "with hyperparameters v min , v max that bound the distribution support of size N .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0c4edb14",
+                "title": "ACTOR-CRITIC ALGORITHMS",
+                "blocks": [
+                    {
+                        "block_id": "b_b4b8895c",
+                        "type": "paragraph",
+                        "text": "In this section we review the actor-critic framework for reinforcement learning algorithms and then discuss recent advances in actor-critic algorithms along with their various trade-offs. The asynchronous advantage actor-critic (A3C) algorithm (Mnih et al., 2016) , maintains a parameterized policy \u03c0(a|x; \u03b8) and value function V (x; \u03b8 v ), which are updated with",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_31af4123",
+                        "type": "paragraph",
+                        "text": "where, A(x t , a t ;",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_071198ef",
+                        "type": "paragraph",
+                        "text": "A3C uses M = 16 parallel CPU workers, each acting independently in the environment and applying the above updates asynchronously to a shared set of parameters. In contrast to the previously discussed value-based methods, A3C is an on-policy algorithm, and does not use a GPU nor a replay buffer.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7fbb6386",
+                        "type": "paragraph",
+                        "text": "Proximal Policy Optimization (PPO) is a closely related actor-critic algorithm (Schulman et al., 2017) , which replaces the advantage (7) with,",
+                        "extracted_citations": [
+                            "Citation_b24"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ee9296f0",
+                        "type": "paragraph",
+                        "text": "where \u03c1 t is as defined in Section 2.1.2. Although both PPO and A3C run M parallel workers collecting trajectories independently in the environment, PPO collects these experiences to perform a single, synchronous, update in contrast with the asynchronous updates of A3C.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c74efe8d",
+                        "type": "paragraph",
+                        "text": "Actor-Critic Experience Replay (ACER) extends the A3C framework with an experience replay buffer, Retrace algorithm for off-policy corrections, and the Truncated Importance Sampling Likelihood Ratio (TISLR) algorithm used for off-policy policy optimization (Wang et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b32"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_57201687",
+                "title": "THE REACTOR",
+                "blocks": [
+                    {
+                        "block_id": "b_e033ce0d",
+                        "type": "paragraph",
+                        "text": "The Reactor is a combination of four novel contributions on top of recent improvements to both deep value-based RL and policy-gradient algorithms. Each contribution moves Reactor towards our goal of achieving both sample and time efficiency.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_50bc62ee",
+                "title": "\u03b2-LOO",
+                "blocks": [
+                    {
+                        "block_id": "b_b3cc3c05",
+                        "type": "paragraph",
+                        "text": "The Reactor architecture represents both a policy \u03c0(a|x) and action-value function Q(x, a). We use a policy gradient algorithm to train the actor \u03c0 which makes use of our current estimate Q(x, a) of Q \u03c0 (x, a). Let V \u03c0 (x 0 ) be the value function at some initial state x 0 , the policy gradient theorem says that \u2207V \u03c0 (x 0 ) = E t \u03b3 t a Q \u03c0 (x t , a)\u2207\u03c0(a|x t ) , where \u2207 refers to the gradient w.r.t. policy parameters (Sutton et al., 2000) . We now consider several possible ways to estimate this gradient.",
+                        "extracted_citations": [
+                            "Citation_b27"
+                        ]
+                    },
+                    {
+                        "block_id": "b_bb41dede",
+                        "type": "paragraph",
+                        "text": "To simplify notation, we drop the dependence on the state x for now and consider the problem of estimating the quantity",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3712a682",
+                        "type": "paragraph",
+                        "text": "In the off-policy case, we consider estimating G using a single action \u00e2 drawn from a (possibly different from \u03c0) behaviour distribution \u00e2 \u223c \u00b5. Let us assume that for the chosen action \u00e2 we have access to an unbiased estimate R(\u00e2) of Q \u03c0 (\u00e2). Then, we can use likelihood ratio (LR) method combined with an importance sampling (IS) ratio (which we call ISLR) to build an unbiased estimate of",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2cfe9661",
+                        "type": "paragraph",
+                        "text": "where V is a baseline that depends on the state but not on the chosen action. However this estimate suffers from high variance. A possible way for reducing variance is to estimate G directly from (8) by using the return R(\u00e2) for the chosen action \u00e2 and our current estimate Q of Q \u03c0 for the other actions, which leads to the so-called leave-one-out (LOO) policy-gradient estimate: This estimate has low variance but may be biased if the estimated Q values differ from Q \u03c0 . A better bias-variance tradeoff may be obtained by the more general \u03b2-LOO policy-gradient estimate:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_18dfcd8e",
+                        "type": "paragraph",
+                        "text": "where \u03b2 = \u03b2(\u00b5, \u03c0, \u00e2) can be a function of both policies, \u03c0 and \u00b5, and the selected action \u00e2. Notice that when \u03b2 = 1, (10) reduces to (9), and when",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_be93d360",
+                        "type": "paragraph",
+                        "text": "This estimate is unbiased and can be seen as a generalization of \u011cISLR where instead of using a state-only dependent baseline, we use a state-and-action-dependent baseline (our current estimate Q) and add the correction term a \u2207\u03c0(a)Q(a) to cancel the bias. Proposition 1 gives our analysis of the bias of G \u03b2-LOO , with a proof left to the Appendix.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ebd3bb32",
+                        "type": "paragraph",
+                        "text": "Thus the bias is small when \u03b2(a) is close to 1/\u00b5(a), or when the Q-estimates are close to the true Q \u03c0 values, and unbiased regardless of the estimates if \u03b2(a) = 1/\u00b5(a). The variance is low when \u03b2 is small, therefore, in order to improve the bias-variance tradeoff we recommend using the \u03b2-LOO estimate with \u03b2 defined as: \u03b2(\u00e2) = min c, 1 \u00b5(\u00e2) , for some constant c \u2265 1. This truncated 1/\u00b5 coefficient shares similarities with the truncated IS gradient estimate introduced in (Wang et al., 2017 ) (which we call TISLR for truncated-ISLR):",
+                        "extracted_citations": [
+                            "Citation_b32"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d62842d4",
+                        "type": "paragraph",
+                        "text": "The differences are: (i) we truncate 1/\u00b5(\u00e2) = \u03c0(\u00e2)/\u00b5(\u00e2) \u00d7 1/\u03c0(\u00e2) instead of truncating \u03c0(\u00e2)/\u00b5(\u00e2), which provides an additional variance reduction due to the variance of the LR \u2207 log \u03c0(\u00e2) = \u2207\u03c0(\u00e2)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_90bc3e20",
+                        "type": "paragraph",
+                        "text": "(since this LR may be large when a low probability action is chosen), and (ii) we use our Q-baseline instead of a V baseline, reducing further the variance of the LR estimate.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4b3d5910",
+                "title": "DISTRIBUTIONAL RETRACE",
+                "blocks": [
+                    {
+                        "block_id": "b_b9283886",
+                        "type": "paragraph",
+                        "text": "In off-policy learning it is very difficult to produce an unbiased sample R(\u00e2) of Q \u03c0 (\u00e2) when following another policy \u00b5. This would require using full importance sampling correction along the trajectory. Instead, we use the off-policy corrected return computed by the Retrace algorithm, which produces a (biased) estimate of Q \u03c0 (\u00e2) but whose bias vanishes asymptotically (Munos et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4bcc3ef6",
+                        "type": "paragraph",
+                        "text": "In Reactor, we consider predicting an approximation of the return distribution function from any state-action pair (x, a) in a similar way as in Bellemare et al. (2017) . The original algorithm C51 described in that paper considered single-step Bellman updates only. Here we need to extend this idea to multi-step updates and handle the off-policy correction performed by the Retrace algorithm, as defined in (3). Next, we describe these two extensions.",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_88b5d470",
+                        "type": "paragraph",
+                        "text": "Multi-step distributional Bellman operator: First, we extend C51 to multi-step Bellman backups. We consider return-distributions from (x, a) of the form i q i (x, a)\u03b4 zi (where \u03b4 z denotes a Dirac in z)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f11a85ff",
+                        "type": "paragraph",
+                        "text": "which are supported on a finite uniform grid",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_57f7d069",
+                        "type": "paragraph",
+                        "text": "The coefficients q i (x, a) (discrete distribution) corresponds to the probabilities assigned to each atom z i of the grid. From an observed n-step sequence {x t , a t , r t , x t+1 , . . . , x t+n }, generated by behavior policy \u00b5 (i.e, a s \u223c \u00b5(\u2022|x s ) for t \u2264 s < t + n), we build the n-step backed-up return-distribution from (x t , a t ). The n-step distributional Bellman target, whose expectation is t+n-1 s=t \u03b3 s-t r s + \u03b3 n Q(x t+n , a), is given by:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_44a6df2b",
+                        "type": "paragraph",
+                        "text": "Since this distribution is supported on the set of atoms {z n i }, which is not necessarily aligned with the grid {z i }, we do a projection step and minimize the KL-loss between the projected target and the current estimate, just as with C51 except with a different target distribution (Bellemare et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_93049c6e",
+                        "type": "paragraph",
+                        "text": "Distributional Retrace: Now, the Retrace algorithm defined in (3) involves an off-policy correction which is not handled by the previous n-step distributional Bellman backup. The key to extending this distributional back-up to off-policy learning is to rewrite the Retrace algorithm as a linear combination of n-step Bellman backups, weighted by some coefficients \u03b1 n,a . Indeed, notice that (3) rewrites as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d5d45052",
+                        "type": "paragraph",
+                        "text": "where \u03b1 n,a = c t+1 . . . c t+n-1 \u03c0(a|x t+n ) -I{a = a t+n }c t+n . These coefficients depend on the degree of off-policy-ness (between \u00b5 and \u03c0) along the trajectory. We have that n\u22651 a \u03b1 n,a = n\u22651 c t+1 . . . c t+n-1 (1 -c t+n ) = 1, but notice some coefficients may be negative. However, in expectation (over the behavior policy) they are non-negative. Indeed,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_63c7081d",
+                        "type": "paragraph",
+                        "text": "by definition of the c s coefficients (4). Thus in expectation (over the behavior policy), the Retrace update can be seen as a convex combination of n-step Bellman updates.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_31579831",
+                        "type": "paragraph",
+                        "text": "Then, the distributional Retrace algorithm can be defined as backing up a mixture of n-step distributions. More precisely, we define the Retrace target distribution as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d74b7ad8",
+                        "type": "paragraph",
+                        "text": "where h zi (x) is a linear interpolation kernel, projecting onto the support {z i }:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cc372cf8",
+                        "type": "paragraph",
+                        "text": "We update the current probabilities q(x t , a t ) by performing a gradient step on the KL-loss",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_47847096",
+                        "type": "paragraph",
+                        "text": "Again, notice that some target \"probabilities\" q * i (x t , a t ) may be negative for some sample trajectory, but in expectation they will be non-negative. Since the gradient of a KL-loss is linear w.r.t. its first argument, our update rule (12) provides an unbiased estimate of the gradient of the KL between the expected (over the behavior policy) Retrace target distribution and the current predicted distribution. 1",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fad89d8f",
+                        "type": "paragraph",
+                        "text": "Remark: The same method can be applied to other algorithms (such as TB(\u03bb) (Precup et al., 2000) and importance sampling (Precup et al., 2001) ) in order to derive distributional versions of other off-policy multi-step RL algorithms.",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b19"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3bd00898",
+                "title": "PRIORITIZED SEQUENCE REPLAY",
+                "blocks": [
+                    {
+                        "block_id": "b_77a3ec94",
+                        "type": "paragraph",
+                        "text": "Prioritized experience replay has been shown to boost both statistical efficiency and final performance of deep RL agents (Schaul et al., 2016) . However, as originally defined prioritized replay does not handle sequences of transitions and weights all unsampled transitions identically. In this section we present an alternative initialization strategy, called lazy initialization, and argue that it better encodes prior information about temporal difference errors. We then briefly describe our computationally efficient prioritized sequence sampling algorithm, with full details left to the appendix.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_91bde817",
+                        "type": "paragraph",
+                        "text": "It is widely recognized that TD errors tend to be temporally correlated, indeed the need to break this temporal correlation has been one of the primary justifications for the use of experience replay (Mnih et al., 2015) . Our proposed algorithm begins with this fundamental assumption. Assumption 1. Temporal differences are temporally correlated, with correlation decaying on average with the time-difference between two transitions.",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_08ba08d9",
+                        "type": "paragraph",
+                        "text": "Prioritized experience replay adds new transitions to the replay buffer with a constant priority, but given the above assumption we can devise a better method. Specifically, we propose to add experience to the buffer with no priority, inserting a priority only after the transition has been sampled and used for training. Also, instead of sampling transitions, we assign priorities to all (overlapping) sequences of length n. When sampling, sequences with an assigned priority are sampled proportionally to that priority. Sequences with no assigned priority are sampled proportionally to the average priority of assigned priority sequences within some local neighbourhood. Averages are weighted to compensate for sampling biases (i.e. more samples are made in areas of high estimated priorities, and in the absence of weighting this would lead to overestimation of unassigned priorities).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6a95df9b",
+                        "type": "paragraph",
+                        "text": "The lazy initialization scheme starts with priorities p t corresponding to the sequences {x t , a t , . . . , x t+n } for which a priority was already assigned. Then it extrapolates a priority of all other sequences in the following way. Let us define a partition (I i ) i of the states ordered by increasing time such that each cell I i contains exactly one state s i with already assigned priority. We define the estimated priority pt to all other sequences as pt = si\u2208J(t) wi i \u2208J(t) w i p(s i ), where J(t) is a collection of contiguous cells (I i ) containing time t, and w i = |I i | is the length of the cell I i containing s i . For already defined priorities denote pt = p t . Cell sizes work as estimates of inverse local density and are used as importance weights for priority estimation. 2 For the algorithm to be unbiased, partition (I i ) i must not be a function of the assigned priorities. So far we have defined a class of algorithms all free to choose the partition (I i ) and the collection of cells I(t), as long that they satisfy the above constraints. Figure 4 in the Appendix illustrates the above description. Now, with probability we sample uniformly at random, and with probability 1we sample proportionally to pt . We implemented an algorithm satisfying the above constraints and called it Contextual Priority Tree (CPT). It is based on AVL trees (Velskii & Landis, 1976 ) and can execute sampling, insertion, deletion and density evaluation in O(ln(n)) time. We describe CPT in detail in the Appendix in Section 6.3.",
+                        "extracted_citations": [
+                            "Citation_b29"
+                        ]
+                    },
+                    {
+                        "block_id": "b_3c731b4c",
+                        "type": "paragraph",
+                        "text": "We treated prioritization as purely a variance reduction technique. Importance-sampling weights were evaluated as in prioritized experience replay, with fixed \u03b2 = 1 in (2). We used simple gradient magnitude estimates as priorities, corresponding to a mean absolute TD error along a sequence for Retrace, as defined in (3) for the classical RL case, and total variation in the distributional Retrace case. 3",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1e4c309f",
+                "title": "AGENT ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_fba9e0db",
+                        "type": "paragraph",
+                        "text": "In order to improve CPU utilization we decoupled acting from learning. This is an important aspect of our architecture: an acting thread receives observations, submits actions to the environment, and  stores transitions in memory, while a learning thread re-samples sequences of experiences from memory and trains on them (Figure 2 , left). We typically execute 4-6 acting steps per each learning step. We sample sequences of length n = 33 in batches of 4. A moving network is unrolled over frames 1-32 while the target network is unrolled over frames 2-33.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_466fdb3b",
+                        "type": "paragraph",
+                        "text": "We allow the agent to be distributed over multiple machines each containing action-learner pairs. Each worker downloads the newest network parameters before each learning step and sends delta-updates at the end of it. Both the network and target network are stored on a shared parameter server while each machine contains its own local replay memory. Training is done by downloading a shared network, evaluating local gradients and sending them to be applied on the shared network. While the agent can also be trained on a single machine, in this work we present results of training obtained with either 10 or 20 actor-learner workers and one parameter server. In Figure 2 (right) we compare resources and runtimes of Reactor with related algorithms. 4",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9d3c223e",
+                "title": "NETWORK ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_4acc0467",
+                        "type": "paragraph",
+                        "text": "In some domains, such as Atari, it is useful to base decisions on a short history of past observations. The two techniques generally used to achieve this are frame stacking and recurrent network architectures. We chose the latter over the former for reasons of implementation simplicity and computational efficiency. As the Retrace algorithm requires evaluating action-values over contiguous sequences of trajectories, using a recurrent architecture allowed each frame to be processed by the convolutional network only once, as opposed to n times times if n frame concatenations were used.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e4a553d2",
+                        "type": "paragraph",
+                        "text": "The Reactor architecture uses a recurrent neural network which takes an observation x t as input and produces two outputs: categorical action-value distributions q i (x t , a) (i here is a bin identifier), and policy probabilities \u03c0(a|x t ). We use an architecture inspired by the duelling network architecture (Wang et al., 2015) . We split action-value -distribution logits into state-value logits and advantage logits, which in turn are connected to the same LSTM network (Hochreiter & Schmidhuber, 1997) .",
+                        "extracted_citations": [
+                            "Citation_b31",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4f312419",
+                        "type": "paragraph",
+                        "text": "Final action-value logits are produced by summing state-and action-specific logits, as in Wang et al. (2015) . Finally, a softmax layer on top for each action produces the distributions over discounted future returns.",
+                        "extracted_citations": [
+                            "Citation_b31"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a87e5cef",
+                        "type": "paragraph",
+                        "text": "The policy head uses a softmax layer mixed with a fixed uniform distribution over actions, where this mixing ratio is a hyperparameter (Wiering, 1999, Section 5.1.3). Policy and Q-networks have separate LSTMs. Both LSTMs are connected to a shared linear layer which is connected to a shared convolutional neural network (Krizhevsky et al., 2012) . The precise network specification is given in Table 3 in the Appendix.",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f0a7db20",
+                        "type": "paragraph",
+                        "text": "Gradients coming from the policy LSTM are blocked and only gradients originating from the Qnetwork LSTM are allowed to back-propagate into the convolutional neural network. We block gradients from the policy head for increased stability, as this avoids positive feedback loops between \u03c0 and q i caused by shared representations. We used the Adam optimiser (Kingma & Ba, 2014) , with a learning rate of 5 \u00d7 10 - 5 and zero momentum because asynchronous updates induce implicit momentum (Mitliagkas et al., 2016) . Further discussion of hyperparameters and their optimization can be found in Appendix 6.1.",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b12"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6f7e761f",
+                "title": "EXPERIMENTAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_73150fe6",
+                        "type": "paragraph",
+                        "text": "We trained and evaluated Reactor on 57 Atari games (Bellemare et al., 2013) . Figure 3",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b26fb5aa",
+                "title": "COMPARING TO PRIOR WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_173534fe",
+                        "type": "paragraph",
+                        "text": "We evaluated Reactor with target update frequency T update = 1000, \u03bb = 1.0 and \u03b2-LOO with \u03b2 = 1 on 57 Atari games trained on 10 machines in parallel. We averaged scores over 200 episodes using 30 random human starts and noop starts (Tables 4 and 5 in the Appendix). We calculated mean and median human normalised scores across all games. We also ranked all algorithms (including random and human scores) for each game and evaluated mean rank of each algorithm across all 57 Atari games. We also evaluated mean Rank and Elo scores for each algorithm for both human and noop start settings. Please refer to Section 6.2 in the Appendix for more details.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6fedabd4",
+                        "type": "paragraph",
+                        "text": "Tables 1 & 2 compare versions of our algorithm, 5 with several other state-of-art algorithms across 57 Atari games for a fixed random seed across all games (Bellemare et al., 2013) . We compare Reactor against are: DQN (Mnih et al., 2015) , Double DQN (Van Hasselt et al., 2016) , DQN with prioritised experience replay (Schaul et al., 2015) , dueling architecture and prioritised dueling (Wang et al., 2015) , ACER (Wang et al., 2017) , A3C (Mnih et al., 2016) , and Rainbow (Hessel et al., 2017) . Each algorithm was exposed to 200 million frames of experience, or 500 million frames when followed by 500M, and the same pre-processing pipeline including 4 action repeats was used as in the original DQN paper (Mnih et al., 2015) .",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b13",
+                            "Citation_b21",
+                            "Citation_b31",
+                            "Citation_b32",
+                            "Citation_b14",
+                            "Citation_b6",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_332a6c99",
+                        "type": "paragraph",
+                        "text": "In Table 1 , we see that Reactor exceeds the performance of all algorithms across all metrics, despite requiring under two days of training. With 500 million frames and four days training we see Reactor's performance continue to improve significantly. The difference in time-efficiency is especially apparent when comparing Reactor and Rainbow (see Figure 3 , right). Additionally, unlike Rainbow, Reactor does not use Noisy Networks (Fortunato et al., 2017) , which was reported to have contributed to the performance gains. When evaluating under the no-op starts regime (Table 2 ), Reactor out performs all methods except for Rainbow. This suggests that Rainbow is more sample-efficient when training and evaluation regimes match exactly, but may be overfitting to particular trajectories due to the significant drop in performance when evaluated on the random human starts.",
+                        "extracted_citations": [
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2fc34f7f",
+                        "type": "paragraph",
+                        "text": "Regarding ACER, another Retrace-based actor-critic architecture, both classical and distributional versions of Reactor (Figure 3 ) exceeded the best reported median human normalized score of 1.9 with noop starts achieved in 500 million steps. 6",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3d86dd33",
+                "title": "HYPERPARAMETER OPTIMIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_c3d2aeea",
+                        "type": "paragraph",
+                        "text": "As we believe that algorithms should be robust with respect to the choice of hyperparameters, we spent little effort on parameter optimization. In total, we explored three distinct values of learning rates and two values of ADAM momentum (the default and zero) and two values of T update on a subset of 7 Atari games without prioritization using non-distributional version of Reactor. We later used those values for all experiments. We did not optimize for batch sizes and sequence length or any prioritization hyperparamters.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8da7c685",
+                "title": "RANK AND ELO EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_6feb75fe",
+                        "type": "paragraph",
+                        "text": "Commonly used mean and median human normalized scores have several disadvantages. A mean human normalized score implicitly puts more weight on games that computers are good and humans are bad at. Comparing algorithm by a mean human normalized score across 57 Atari games is almost equivalent to comparing algorithms on a small subset of games close to the median and thus dominating the signal. Typically a set of ten most score-generous games, namely Assault, Asterix, Breakout, Demon Attack, Double Dunk, Gopher, Pheonix, Stargunner, Up'n Down and Video Pinball can explain more than half of inter-algorithm variance. A median human normalized score has the opposite disadvantage by effectively discarding very easy and very hard games from the comparison. As typical median human normalized scores are within the range of 1-2.5, an algorithm which scores zero points on Montezuma's Revenge is evaluated equal to the one which scores 2500 points, as both performance levels are still below human performance making incremental improvements on hard games not being reflected in the overall evaluation. In order to address both problem, we also evaluated mean rank and Elo metrics for inter-algorithm comparison. Those metrics implicitly assign the same weight to each game, and as a result is more sensitive of relative performance on very hard and easy games: swapping scores of two algorithms on any game would result in the change of both mean rank and Elo metrics.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0a723be8",
+                        "type": "paragraph",
+                        "text": "We calculated separate mean rank and Elo scores for each algorithm using results of test evaluations with 30 random noop-starts and 30 random human starts (Tables 5 and 4 ). All algorithms were ranked across each game separately, and a mean rank was evaluated across 57 Atari games. For Elo score evaluation algorithm, A was considered to win over algorithm B if it obtained more scores on a given Atari. We produced an empirical win-probability matrix by summing wins across all games and used this matrix to evaluate Elo scores. A ranking difference of 400 corresponds to the odds of winning of 10:1 under the Gaussian assumption.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c0e3abf8",
+                "title": "CONTEXTUAL PRIORITY TREE",
+                "blocks": [
+                    {
+                        "block_id": "b_3c79a2b4",
+                        "type": "paragraph",
+                        "text": "Contextual priority tree is one possible implementation of lazy prioritization (Figure 4 ). All sequence keys are put into a balanced binary search tree which maintains a temporal order. An AVL tree (Velskii & Landis (1976) ) was chosen due to the ease of implementation and because it is on average more evenly balanced than a Red-Black Tree.",
+                        "extracted_citations": [
+                            "Citation_b29"
+                        ]
+                    },
+                    {
+                        "block_id": "b_85a43580",
+                        "type": "paragraph",
+                        "text": "Each tree node has up to two children (left and right) and contains currently stored key and a priority of the key which is either set or is unknown. Some trees may only have a single child subtree while Figure 5 : Rules used to evaluate summary statistics on each node of a binary search tree where all sequence keys are kept sorted by temporal order. c l and c r are total number of nodes within left and right subtrees. m l and m l are estimated mean priorities per node within the subtree. A central square node corresponds to a single key stored within the parent node with its corresponding priority of p (if set) or ? if not set. Red subtrees do not have any singe child with a set priority, and a result do not have priority estimates. A red square shows that priority of the key stored within the parent node is not known. Unknown mean priorities is marked by a question mark. Empty child nodes simply behave as if c = 0 with p =?. Rules a-f illustrate how mean values are propagated down from children to parents when priorities are only partially known (rules d and e also apply symmetrically). Sampling is done by going from the root node up the tree by selecting one of the children (or the current key) stochastically proportional to orange proportions. Sampling terminates once the current (square) key is chosen.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_069974fe",
+                        "type": "paragraph",
+                        "text": "Figure 6 : Example of a balanced priority tree. Dark blue nodes contain keys with known priorities, light blue nodes have at least one child with at least a single known priority, while ping nodes do not have any priority estimates. Nodes 1, 2 and 3 will obtain priority estimates equal to 2/3 of the priority of key 5 and 1/3 of the priority of node 4. This implies that estimated priorities of keys 1, 2 and 3 are implicitly defined by keys 4 and 6. Nodes 8, 9 and 11 are estimated to have the same priority as node 10. some may have none. In addition to this information, we were tracking other summary statistics at each node which was re-evaluated after each tree rotation. The summary statistics was evaluated by consuming previously evaluated summary statistics of both children and a priority of the key stored within the current node. In particular, we were tracking a total number of nodes within each subtree and mean-priority estimates updated according to rules shown in Figure 5 . The total number of nodes within each subtree was always known (c in Figure 5 ), while mean priority estimates per key (m in Figure 5 ) could either be known or unknown.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6d46c53b",
+                        "type": "paragraph",
+                        "text": "If a mean priority of either one child subtree or a key stored within the current node is unknown then it can be estimated to by exploiting information coming from another sibling subtree or a priority stored within the parent node.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_22fa5cfc",
+                        "type": "paragraph",
+                        "text": "Sampling was done by traversing the tree from the root node up while sampling either one of the children subtrees or the currently held key proportionally to the total estimated priority masses contained within. The rules used to evaluate proportions are shown in orange in Figure 5 . Similarly, probabilities of arbitrary keys can be queried by traversing the tree from the root node towards the child node of an interest while maintaining a product of probabilities at each branching point. Insertion, deletion, sampling and probability query operations can be done in O(ln(n)) time.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_63ec5597",
+                        "type": "paragraph",
+                        "text": "The suggested algorithm has the desired property that it becomes a simple proportional sampling algorithm once all the priorities are known. While some key priorities are unknown, they are estimated by using nearby known key priorities (Figure 6 ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_099494c0",
+                        "type": "paragraph",
+                        "text": "Each time when a new sequence key is added to the tree, it was set to have an unknown priority. Any priority was assigned only after the key got first sampled and the corresponding sequence got passed through the learner. When a priority of a key is set or updated, the key node is deliberately removed from and placed back to the tree in order to become a leaf-node. This helped to set priorities of nodes in the immediate vicinity more accurately by using the freshest information available.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ead3a54d",
+                "title": "NETWORK ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_05072d8e",
+                        "type": "paragraph",
+                        "text": "The value of = 0.01 is the minimum probability of choosing a random action and it is hard-coded into the policy network. Figure 7 shows the overall network topology while Table 3 specifies network layer sizes.  In this section we compare Reactor with the recently published Rainbow agent (Hessel et al., 2017) . While ACER is the most closely related algorithmically, Rainbow is most closely related in terms of performance and thus a deeper understanding of the trade-offs between Rainbow and Reactor may benefit interested readers. There are many architectural and algorithmic differences between Rainbow and Reactor. We will therefore begin by highlighting where they agree. Both use a categorical action-value distribution critic (Bellemare et al., 2017) , factored into state and state-action logits (Wang et al., 2015) ,",
+                        "extracted_citations": [
+                            "Citation_b6",
+                            "Citation_b2",
+                            "Citation_b31"
+                        ]
+                    },
+                    {
+                        "block_id": "b_167a0c1d",
+                        "type": "paragraph",
+                        "text": "Both use prioritized replay, and finally, both perform n-step Bellman updates.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e4c91c76",
+                        "type": "paragraph",
+                        "text": "Despite these similarities, Reactor and Rainbow are fundamentally different algorithms and are based upon different lines of research. While Rainbow uses Q-Learning and is based upon DQN (Mnih et al., 2015) , Reactor is an actor-critic algorithm most closely based upon A3C (Mnih et al., 2016) . Each inherits some design choices from their predecessors, and we have not performed an extensive ablation comparing these various differences. Instead, we will discuss four of the differences we believe are important but less obvious.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b29ba58e",
+                        "type": "paragraph",
+                        "text": "First, the network structures are substantially different. Rainbow uses noisy linear layers and ReLU activations throughout the network, whereas Reactor uses standard linear layers and concatenated ReLU activations throughout. To overcome partial observability, Rainbow, inheriting this choice from DQN, uses frame stacking. On the other hand, Reactor, inheriting its choice from A3C, uses LSTMs after the convolutional layers of the network. It is also difficult to directly compare the number of parameters in each network because the use of noisy linear layers doubles the number of parameters, although half of these are used to control noise, while the LSTM units in Reactor require more parameters than a corresponding linear layer would.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6611eae5",
+                        "type": "paragraph",
+                        "text": "Second, both algorithms perform n-step updates, however, the Rainbow n-step update does not use any form of off-policy correction. Because of this, Rainbow is restricted to using only small values of n (e.g. n = 3) because larger values would make sequences more off-policy and hurt performance. By comparison, Reactor uses our proposed distributional Retrace algorithm for off-policy correction of n-step updates. This allows the use of larger values of n (e.g. n = 33) without loss of performance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0298128b",
+                        "type": "paragraph",
+                        "text": "Third, while both agents use prioritized replay buffers (Schaul et al., 2016) , they each store different information and prioritize using different algorithms. Rainbow stores a tuple containing the state x t-1 , action a t-1 , sum of n discounted rewards n-1 k=0 r t+k k-1 m=0 \u03b3 t+m , product of n discount factors n-1 k=0 \u03b3 t+k , and next-state n steps away x t+n-1 . Tuples are prioritized based upon the last observed TD error, and inserted into replay with a maximum priority. Reactor stores length n sequences of tuples (x t-1 , a t-1 , r t , \u03b3 t ) and also prioritizes based upon the observed TD error. However, when inserted into the buffer the priority is instead inferred based upon the known priorities of neighboring sequences. This priority inference was made efficient using the previously introduced contextual priority tree, and anecdotally we have seen it improve performance over a simple maximum priority approach.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8700a632",
+                        "type": "paragraph",
+                        "text": "Finally, the two algorithms have different approaches to exploration. Rainbow, unlike DQN, does not use -greedy exploration, but instead replaces all linear layers with noisy linear layers which induce randomness throughout the network. This method, called Noisy Networks (Fortunato et al., 2017) , creates an adaptive exploration integrated into the agent's network. Reactor does not use noisy networks, but instead uses the same entropy cost method used by A3C and many others (Mnih et al., 2016) , which penalizes deterministic policies thus encouraging indifference between similarly valued actions. Because Rainbow can essentially learn not to explore, it may learn to become entirely greedy in the early parts of the episode, while still exploring in states not as frequently seen. In some sense, this is precisely what we want from an exploration technique, but it may also lead to highly deterministic trajectories in the early part of the episode and an increase in overfitting to those trajectories. We hypothesize that this may be the explanation for the significant difference in Rainbow's performance between evaluation under no-op and random human starts, and why Reactor does not show such a large difference.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b14"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b036d08e",
+                "title": "ATARI RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_1a7cda82",
+                        "type": "paragraph",
+                        "text": "Table 4 : Scores for each game evaluated with 30 random human starts. Reactor was evaluated by averaging scores over 200 episodes. All scores (except for Reactor) were taken from Wang et al. (2015) , Mnih et al. (2016) and Hessel et al. (2017)",
+                        "extracted_citations": [
+                            "Citation_b31",
+                            "Citation_b14",
+                            "Citation_b6"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Averaged-dqn: Variance reduction and stabilization for deep reinforcement learning Oron Anschel Nir Baram Nahum Shimkin International Conference on Machine Learning 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "The arcade learning environment: An evaluation platform for general agents Yavar Marc G Bellemare Joel Naddaf Michael Veness Bowling J. Artif. Intell. Res.(JAIR) 47 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Will Marc G Bellemare R\u00e9mi Dabney Munos arXiv:1707.06887 A distributional perspective on reinforcement learning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Noisy networks for exploration Meire Fortunato Mohammad Gheshlaghi Azar Bilal Piot Jacob Menick Ian Osband Alex Graves Vlad Mnih Remi Munos Demis Hassabis Olivier Pietquin arXiv:1706.10295 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Q-prop: Sample-efficient policy gradient with an off-policy critic Shixiang Gu Timothy Lillicrap Zoubin Ghahramani Richard E Turner Sergey Levine International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Learning to play in a day: Faster deep reinforcement learning by optimality tightening Yang Frank S He Alexander G Liu Jian Schwing Peng International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Matteo Hessel Joseph Modayil Hado Van Hasselt Tom Schaul Georg Ostrovski Will Dabney Dan Horgan Bilal Piot Mohammad Azar David Silver arXiv:1710.02298 Rainbow: Combining improvements in deep reinforcement learning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Long short-term memory Sepp Hochreiter J\u00fcrgen Schmidhuber Neural computation 9 8 1997",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Diederik Kingma Jimmy Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Imagenet classification with deep convolutional neural networks Alex Krizhevsky Ilya Sutskever Geoffrey E Hinton Advances in neural information processing systems 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Jonathan J Timothy P Lillicrap Alexander Hunt Nicolas Pritzel Tom Heess Yuval Erez David Tassa Daan Silver Wierstra arXiv:1509.02971 Continuous control with deep reinforcement learning 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Self-improving reactive agents based on reinforcement learning, planning and teaching Long-H Lin Machine learning 8 3/4 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Asynchrony begets momentum, with an application to deep learning Ioannis Mitliagkas Ce Zhang Stefan Hadjis Christopher R\u00e9 Communication, Control, and Computing (Allerton), 2016 54th Annual Allerton Conference on IEEE 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Human-level control through deep reinforcement learning Volodymyr Mnih Koray Kavukcuoglu David Silver Andrei A Rusu Joel Veness Marc G Bellemare Alex Graves Martin Riedmiller Andreas K Fidjeland Georg Ostrovski Nature 518 7540 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Asynchronous methods for deep reinforcement learning Volodymyr Mnih Adria Puigdomenech Badia Mehdi Mirza Alex Graves Timothy P Lillicrap Tim Harley David Silver Koray Kavukcuoglu International Conference on Machine Learning 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Prioritized sweeping: Reinforcement learning with less data and less time Andrew W Moore Christopher G Atkeson Machine learning 13 1 1993",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Safe and efficient off-policy reinforcement learning R\u00e9mi Munos Tom Stepleton Anna Harutyunyan Marc Bellemare Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Combining policy gradient and q-learning O' Brendan Remi Donoghue Koray Munos Volodymyr Kavukcuoglu Mnih International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Eligibility traces for off-policy policy evaluation Doina Precup Richard S Sutton Satinder Singh Proceedings of the Seventeenth International Conference on Machine Learning the Seventeenth International Conference on Machine Learning 2000",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Off-policy temporal-difference learning with function approximation Doina Precup Richard S Sutton Sanjoy Dasgupta Proceedings of the 18th International Conference on Machine Laerning the 18th International Conference on Machine Laerning 2001",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Neural fitted q iteration-first experiences with a data efficient neural reinforcement learning method Martin Riedmiller ECML Springer 2005 3720",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Tom Schaul John Quan Ioannis Antonoglou David Silver arXiv:1511.05952 2015 Prioritized experience replay. arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Prioritized experience replay Tom Schaul John Quan Ioannis Antonoglou David Silver International Conference on Learning Representations 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Trust region policy optimization John Schulman Sergey Levine Pieter Abbeel Michael Jordan Philipp Moritz Proceedings of the 32nd International Conference on Machine Learning (ICML-15) the 32nd International Conference on Machine Learning (ICML-15) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "John Schulman Filip Wolski Prafulla Dhariwal Alec Radford Oleg Klimov arXiv:1707.06347 Proximal policy optimization algorithms 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Mastering the game of go with deep neural networks and tree search David Silver Aja Huang Chris J Maddison Arthur Guez Laurent Sifre George Van Den Julian Driessche Ioannis Schrittwieser Veda Antonoglou Marc Panneershelvam Lanctot Nature 529 7587 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "George van den Driessche, Thore Graepel, and Demis Hassabis David Silver Julian Schrittwieser Karen Simonyan Ioannis Antonoglou Aja Huang Arthur Guez Thomas Hubert Lucas Baker Matthew Lai Adrian Bolton Yutian Chen Timothy Lillicrap Fan Hui Laurent Sifre 10.1038/nature24270 Nature 550 7676 10 2017 Mastering the game of go without human knowledge",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Policy gradient methods for reinforcement learning with function approximation Richard S Sutton David Mcallester Satinder Singh Yishay Mansour Advances in Neural Information Processing Systems 12 2000 MIT Press",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Deep reinforcement learning with double qlearning Hado Van Hasselt Arthur Guez David Silver AAAI 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "An algorithm for the organisation of information G Adel'son E Velskii Landis Dokl. Akad. Nauk SSSR 146 1976",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Sasha Alexander Simon Vezhnevets Tom Osindero Nicolas Schaul Max Heess David Jaderberg Koray Silver Kavukcuoglu arXiv:1703.01161 Feudal networks for hierarchical reinforcement learning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Dueling network architectures for deep reinforcement learning Ziyu Wang Tom Schaul Matteo Hessel Marc Hado Van Hasselt Nando Lanctot De Freitas International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Sample efficient actor-critic with experience replay Ziyu Wang Victor Bapst Nicolas Heess Volodymyr Mnih Remi Munos Koray Kavukcuoglu Nando De Freitas International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Q-learning C J C H Watkins P Dayan Machine Learning 8 3 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "Explorations in efficient reinforcement learning A Marco Wiering 1999 University of Amsterdam PhD thesis",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Deep reinforcement learning with experience replay based on sarsa Dongbin Zhao Haitao Wang Kun Shao Yuanheng Zhu Computational Intelligence (SSCI), 2016 IEEE Symposium Series on IEEE 2016",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper proposes a novel reinforcement learning algorithm (\u00ab The Reactor \u00bb) based on the combination of several improvements to DQN: a distributional version of Retrace, a policy gradient update rule called beta-LOO aiming at variance reduction, a variant of prioritized experience replay for sequences, and a parallel training architecture.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Experiments on Atari games show a significant improvement over prioritized dueling networks in particular, and competitive performance compared to Rainbow, at a fraction of the training time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "There are definitely several interesting and meaningful contributions in this submission, and I like the motivations behind them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "They are not groundbreaking (essentially extending existing techniques) but are still very relevant to current RL research.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Unfortunately I also see it as a step back in terms of comparison to other algorithms.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "The recent Rainbow paper finally established a long overdue clear benchmark on Atari.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "We have seen with the \u00ab Deep Reinforcement Learning that Matters \u00bb paper how important (and difficult) it is to properly compare algorithms on deep RL problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "I assume that this submission was mostly written before Rainbow came out, and that comparisons to Rainbow were hastily added just before the ICLR deadline: this would explain why they are quite limited, but in my opinion it remains a major issue, which is the main reason why I am advocating for rejection.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "More precisely, focusing on the comparison to Rainbow which is the main competitor here, my concerns are the following:\n- There is almost no discussion on the differences between Reactor and Rainbow (actually the paper lacks a \u00ab related work \u00bb section).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "In particular Rainbow also uses a version of distributional multi-step, which as far as I can tell may not be as well motivated (from a mathematical point of view) as the one in this submission (since it does not correct for the \u00ab off-policyness \u00bb of the replay data), but still seems to work well on Atari.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "- Rainbow is not distributed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "This was a deliberate choice by its authors to focus on algorithmic comparisons.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "However, it seems to me that it could benefit from a parallel training scheme like Reactor\u2019s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "I believe a comparison between Reactor and Rainbow needs to either have them both parallelized or none of them (especially for a comparison on time efficiency like in Fig.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "2)\n- Rainbow uses the traditional feedforward DQN architecture while Reactor uses a recurrent network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "It is not clear to which extent this has an impact on the results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "- Rainbow was stopped at 200M steps, at which point it seems to be overall superior to Reactor at 200M steps.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "The results as presented here emphasize the superiority of Reactor at 500M steps, but a proper comparison would require Rainbow results at 500M steps as well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "In addition, although I found most of the paper to be clear enough, some parts were confusing to me, in particular:\n- \u00ab multi-step distributional Bellman operator \u00bb in 3.2: not clear exactly what the target distribution is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "If I understand correctly this is the same as the Rainbow extension, but this link is not mentioned.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "- 3.4.1 (network architecture): a simple diagram in the appendix would make it much easier to understand (Table 3 is still hard to read because it is not clear which layers are connected together)\n- 3.3 (prioritized sequence replay): again a visual illustration of the partitioning scheme would in my opinion help clarify the approach\n\nA few minor points to conclude:\n- In eq.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "6, 7 and the rest of this section, A does not depend (directly) on theta so it should probably be removed to avoid confusion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "Note also that using the letter A may not be best since A is used to denote an action in 3.1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "- In 3.1: \u00ab Let us assume that for the chosen action A we have access to an estimate R(A) of Q\u03c0(A) \u00bb => \u00ab unbiased estimate \u00bb\n- In last equation of p.5 it is not clear what q_i^n is\n- There is a lambda missing on p.6 in the equation showing that alphas are non-negative on average, just before the min\n- In the equation above eq.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "12 there is a sum over \u00ab i=1 \u00bb\n- That same equation ends with some h_z_i that are not defined\n- In Fig.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "2 (left) for Reactor we see one worker using large batches and another one using many threads.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_26",
+                    "text": "This is confusing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_27",
+                    "text": "- 3.3 mentions sequences of length 32 but 3.4 says length 33.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_28",
+                    "text": "- 3.3 says tree operations are in O(n ln(n)) but it should be O(ln(n))\n- At very end of 3.3 it is not clear what \u00ab total variation \u00bb is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_29",
+                    "text": "- In 3.4 please specify the frequency at which the learner thread downloads shared parameters and uploads updates\n- Caption of Fig.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_30",
+                    "text": "3 talks about \u00ab changing the number of workers \u00bb for the left plot while it is in the right plot\n- The explanation on what the variants of Reactor (ND and 500M) mean comes after results are shown in Fig.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_31",
+                    "text": "- Section 4 starts with Fig.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_32",
+                    "text": "3 without explaining what the task is, how performance is measured, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_33",
+                    "text": "It also claims that Distributional Retrace helps while this is not the case in Fig.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_34",
+                    "text": "3 (I realize it is explained afterwards, but it is confusing when reading the sentence \u00ab We can also see...",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_35",
+                    "text": "Finally it says priorization is the most important component while the beta-LOO ablation seems to perform just the same.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_36",
+                    "text": "- Footnote 3 should say it is 200M observations except for Reactor 500M\n- End of 4.1: \u00ab The algorithms that we compare Reactor against are \u00bb => missing ACER, A3C and Rainbow\n- There are two references for \u00ab Sample efficient actor-critic with experience replay \u00bb\n- I do not see the added benefit of the Elo computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_37",
+                    "text": "It seems to convey essentially the same information as average rank.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_38",
+                    "text": "And a few typos:\n- Just above 2.1.3: \u00ab increasing \u00bb => increasingly\n- In 3.1: \u00ab where V is a baseline that depend \u00bb => depends\n- p.7: \u00ab hight \u00bb => high, and \u00ab to all other sequences \u00bb => of all other sequences\n- Double parentheses in Bellemare citation at beginning of section 4\n- Several typos in appendix (too many to list)\n\nNote: I did not have time to carefully read Appendix 6.3 (contextual priority tree)\n\nEdit after revision: bumped score from 5 to 7 because (1) authors did many improvements to the paper, and (2) their explanations shed light on some of my concerns",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper proposes a novel reinforcement learning algorithm containing several contributions made by the authors: 1) a policy gradient algorithm that uses value function estimates to improve the policy gradient, 2) a distributed multi-step off-policy algorithm to estimate the value function, 3) an experience replay buffer mechanism that can handle sequences and (4) a distributed architecture, where threads are dedicated to either learning or interracting with the environment.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "Most contributions consist in improvements to handle multi-step trajectories instead of single step transitions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The resulting algorithm is evaluated on the ATARI domain and shown to outperform other similar algorithms, both in terms of score and training time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "Ablation studies are also performed to study the interest of the 4 contributions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "I find the paper interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "It is also well written and reasonably clear.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "The experiments are large, although I was disappointed that PPO was not included in the evaluation, as this algorithm also trains much faster than other algorithms.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "quality\n+ several contributions\n+ impressive experiments\n\nclarity\n- I found the replay buffer not as clear as the other parts of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "run time comparison: source of the code for the baseline methods?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "+ ablation study showing the merits of the different contributions\n- Methods not clearly labeled.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "For example, what is the difference between Reactor and Reactor 500M?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "originality\n+ 4 contributions\n\nsignificance\n+ important problem, very active area of research\n+ comparison to very recent algorithms\n- but no PPO in the evaluation",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.3682,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper presents a new reinforcement learning architecture called Reactor by combining various improvements in\ndeep reinforcement learning algorithms and architectures into a single model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The main contributions of the paper\nare to achieve a better bias-variance trade-off in policy gradient updates, multi-step off-policy updates with\ndistributional RL, and prioritized experience replay for transition sequences.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The different modules are integrated\nwell and the empirical results are very promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "The experiments (though limited to Atari) are well carried out and\nthe evaluation is performed on both sample efficiency and training time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Nice integration of several recent improvements in deep RL, along with a few novel tricks to improve training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "The empirical results on 57 Atari games are impressive, in terms of final scores as well as real-time training speed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Reactor is still less sample-efficient than Rainbow, with significantly lower scores after 200M frames.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "While the\nreactor trains much faster, it does use more parallel compute, so the comparison with Rainbow on wall clock time is\n not entirely fair.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Would a distributed version of Rainbow perform better in this respect?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Empirical comparisons are restricted to the Atari domain.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "The conclusions of the paper will be much stronger if\nresults are also shown on other environments like Mujoco/Vizdoom/Deepmind Lab.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "Since the paper introduces a few new ideas like prioritized sequence replay, it would help if a more detailed analysis\n was performed on the impact of these individual schemes, even if in a model simpler than the Reactor.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "For instance, one could investigate the impact of prioritized sequence replay in models like multi-step DQN or recurrent DQN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "This will help us understand  the impact of each of these ideas in a more comprehensive fashion.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_a8db068e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_a8db068e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_a8db068e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_a8db068e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "sec_63667f68",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a8db068e"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_d1c38c5c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "sec_63667f68",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d1c38c5c"
+        },
+        {
+            "source": "sec_63667f68",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e45347b"
+        },
+        {
+            "source": "sec_63667f68",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6534f5e2"
+        },
+        {
+            "source": "b_4e1ae5aa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_63667f68",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4e1ae5aa"
+        },
+        {
+            "source": "sec_b2324d31",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ceeeb8d4"
+        },
+        {
+            "source": "sec_b2324d31",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c816291a"
+        },
+        {
+            "source": "b_13b427e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_13b427e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_13b427e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "b_13b427e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_d3dd4e19",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_13b427e7"
+        },
+        {
+            "source": "sec_d3dd4e19",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_197b7095"
+        },
+        {
+            "source": "b_bbab1d02",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_bbab1d02",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "sec_d3dd4e19",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bbab1d02"
+        },
+        {
+            "source": "b_ecf9da80",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_d3dd4e19",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ecf9da80"
+        },
+        {
+            "source": "b_0c446c49",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_0c446c49",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_0c446c49",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_0c446c49",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_345f4451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0c446c49"
+        },
+        {
+            "source": "sec_345f4451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4fb6322f"
+        },
+        {
+            "source": "b_e3de7c98",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_345f4451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e3de7c98"
+        },
+        {
+            "source": "b_2052b556",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_01d0e65b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2052b556"
+        },
+        {
+            "source": "sec_01d0e65b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d5166906"
+        },
+        {
+            "source": "b_a87b4083",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_01d0e65b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a87b4083"
+        },
+        {
+            "source": "b_eba8376d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_f6e569e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eba8376d"
+        },
+        {
+            "source": "sec_f6e569e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f1ca91eb"
+        },
+        {
+            "source": "b_b4b8895c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_0c4edb14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b4b8895c"
+        },
+        {
+            "source": "sec_0c4edb14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_31af4123"
+        },
+        {
+            "source": "sec_0c4edb14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_071198ef"
+        },
+        {
+            "source": "b_7fbb6386",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_0c4edb14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7fbb6386"
+        },
+        {
+            "source": "sec_0c4edb14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee9296f0"
+        },
+        {
+            "source": "b_c74efe8d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "sec_0c4edb14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c74efe8d"
+        },
+        {
+            "source": "sec_57201687",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e033ce0d"
+        },
+        {
+            "source": "b_b3cc3c05",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b3cc3c05"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bb41dede"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3712a682"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2cfe9661"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18dfcd8e"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_be93d360"
+        },
+        {
+            "source": "b_ebd3bb32",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ebd3bb32"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d62842d4"
+        },
+        {
+            "source": "sec_50bc62ee",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_90bc3e20"
+        },
+        {
+            "source": "b_b9283886",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b9283886"
+        },
+        {
+            "source": "b_4bcc3ef6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4bcc3ef6"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_88b5d470"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f11a85ff"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_57f7d069"
+        },
+        {
+            "source": "b_44a6df2b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_44a6df2b"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_93049c6e"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d5d45052"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_63c7081d"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_31579831"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d74b7ad8"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cc372cf8"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47847096"
+        },
+        {
+            "source": "b_fad89d8f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_fad89d8f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_4b3d5910",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fad89d8f"
+        },
+        {
+            "source": "b_77a3ec94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_3bd00898",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_77a3ec94"
+        },
+        {
+            "source": "b_91bde817",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_3bd00898",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_91bde817"
+        },
+        {
+            "source": "sec_3bd00898",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08ba08d9"
+        },
+        {
+            "source": "b_6a95df9b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_3bd00898",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6a95df9b"
+        },
+        {
+            "source": "sec_3bd00898",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3c731b4c"
+        },
+        {
+            "source": "sec_1e4c309f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fba9e0db"
+        },
+        {
+            "source": "sec_1e4c309f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_466fdb3b"
+        },
+        {
+            "source": "sec_9d3c223e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4acc0467"
+        },
+        {
+            "source": "b_e4a553d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_e4a553d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_9d3c223e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4a553d2"
+        },
+        {
+            "source": "b_4f312419",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "sec_9d3c223e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4f312419"
+        },
+        {
+            "source": "b_a87e5cef",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_9d3c223e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a87e5cef"
+        },
+        {
+            "source": "b_f0a7db20",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_f0a7db20",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_9d3c223e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0a7db20"
+        },
+        {
+            "source": "b_73150fe6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_6f7e761f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_73150fe6"
+        },
+        {
+            "source": "sec_b26fb5aa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_173534fe"
+        },
+        {
+            "source": "b_6fedabd4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_6fedabd4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_6fedabd4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_6fedabd4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_6fedabd4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_6fedabd4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_6fedabd4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_6fedabd4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_b26fb5aa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6fedabd4"
+        },
+        {
+            "source": "b_332a6c99",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_b26fb5aa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_332a6c99"
+        },
+        {
+            "source": "sec_b26fb5aa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2fc34f7f"
+        },
+        {
+            "source": "sec_3d86dd33",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c3d2aeea"
+        },
+        {
+            "source": "sec_8da7c685",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6feb75fe"
+        },
+        {
+            "source": "sec_8da7c685",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0a723be8"
+        },
+        {
+            "source": "b_3c79a2b4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_c0e3abf8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3c79a2b4"
+        },
+        {
+            "source": "sec_c0e3abf8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_85a43580"
+        },
+        {
+            "source": "sec_c0e3abf8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_069974fe"
+        },
+        {
+            "source": "sec_c0e3abf8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6d46c53b"
+        },
+        {
+            "source": "sec_c0e3abf8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_22fa5cfc"
+        },
+        {
+            "source": "sec_c0e3abf8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_63ec5597"
+        },
+        {
+            "source": "sec_c0e3abf8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_099494c0"
+        },
+        {
+            "source": "b_05072d8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_05072d8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_05072d8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "sec_ead3a54d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_05072d8e"
+        },
+        {
+            "source": "sec_ead3a54d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_167a0c1d"
+        },
+        {
+            "source": "b_e4c91c76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_e4c91c76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_ead3a54d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4c91c76"
+        },
+        {
+            "source": "sec_ead3a54d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b29ba58e"
+        },
+        {
+            "source": "sec_ead3a54d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6611eae5"
+        },
+        {
+            "source": "b_0298128b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_ead3a54d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0298128b"
+        },
+        {
+            "source": "b_8700a632",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_8700a632",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_ead3a54d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8700a632"
+        },
+        {
+            "source": "b_1a7cda82",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_1a7cda82",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_1a7cda82",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_b036d08e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1a7cda82"
+        }
+    ]
+}

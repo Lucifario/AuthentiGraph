@@ -1,0 +1,1404 @@
+{
+    "paper_metadata": {
+        "paper_id": "737",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Rejected",
+        "total_reviews_available": 4
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_b6a24909",
+                "title": "INTRODUCTION AND MOTIVATION",
+                "blocks": [
+                    {
+                        "block_id": "b_3cb3480c",
+                        "type": "paragraph",
+                        "text": "Much of the recent research on deep convolutional neural networks (CNNs) has focused on increasing accuracy on computer vision datasets. For a given accuracy level, there typically exist multiple CNN architectures that achieve that accuracy level. Given equivalent accuracy, a CNN architecture with fewer parameters has several advantages:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3a4dc6a4",
+                        "type": "paragraph",
+                        "text": "\u2022 More efficient distributed training. Communication among servers is the limiting factor to the scalability of distributed CNN training. For distributed data-parallel training, communication overhead is directly proportional to the number of parameters in the model (Iandola et al., 2016) . In short, small models train faster due to requiring less communication. \u2022 Less overhead when exporting new models to clients. For autonomous driving, companies such as Tesla periodically copy new models from their servers to customers' cars. This practice is often referred to as an over-the-air update. Consumer Reports has found that the safety of Tesla's Autopilot semi-autonomous driving functionality has incrementally improved with recent over-the-air updates (Consumer Reports, 2016) . However, over-theair updates of today's typical CNN/DNN models can require large data transfers. With AlexNet, this would require 240MB of communication from the server to the car. Smaller models require less communication, making frequent updates more feasible. \u2022 Feasible FPGA and embedded deployment. FPGAs often have less than 10MB 1 of onchip memory and no off-chip memory or storage. For inference, a sufficiently small model could be stored directly on the FPGA instead of being bottlenecked by memory bandwidth (Qiu et al., 2016) , while video frames stream through the FPGA in real time. Further, when deploying CNNs on Application-Specific Integrated Circuits (ASICs), a sufficiently small model could be stored directly on-chip, and smaller models may enable the ASIC to fit on a smaller die.",
+                        "extracted_citations": [
+                            "Citation_b28",
+                            "Citation_b37"
+                        ]
+                    },
+                    {
+                        "block_id": "b_88668aff",
+                        "type": "paragraph",
+                        "text": "As you can see, there are several advantages of smaller CNN architectures. With this in mind, we focus directly on the problem of identifying a CNN architecture with fewer parameters but equivalent accuracy compared to a well-known model. We have discovered such an architecture, which we call SqueezeNet. In addition, we present our attempt at a more disciplined approach to searching the design space for novel CNN architectures.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_237483f5",
+                        "type": "paragraph",
+                        "text": "The rest of the paper is organized as follows. In Section 2 we review the related work. Then, in Sections 3 and 4 we describe and evaluate the SqueezeNet architecture. After that, we turn our attention to understanding how CNN architectural design choices impact model size and accuracy. We gain this understanding by exploring the design space of SqueezeNet-like architectures. In Section 5, we do design space exploration on the CNN microarchitecture, which we define as the organization and dimensionality of individual layers and modules. In Section 6, we do design space exploration on the CNN macroarchitecture, which we define as high-level organization of layers in a CNN. Finally, we conclude in Section 7. In short, Sections 3 and 4 are useful for CNN researchers as well as practitioners who simply want to apply SqueezeNet to a new application. The remaining sections are aimed at advanced researchers who intend to design their own CNN architectures.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_187042fe",
+                "title": "MODEL COMPRESSION",
+                "blocks": [
+                    {
+                        "block_id": "b_176a90c9",
+                        "type": "paragraph",
+                        "text": "The overarching goal of our work is to identify a model that has very few parameters while preserving accuracy. To address this problem, a sensible approach is to take an existing CNN model and compress it in a lossy fashion. In fact, a research community has emerged around the topic of model compression, and several approaches have been reported. A fairly straightforward approach by Denton et al. is to apply singular value decomposition (SVD) to a pretrained CNN model (Denton et al., 2014) . Han et al. developed Network Pruning, which begins with a pretrained model, then replaces parameters that are below a certain threshold with zeros to form a sparse matrix, and finally performs a few iterations of training on the sparse CNN (Han et al., 2015b) . Recently, Han et al. extended their work by combining Network Pruning with quantization (to 8 bits or less) and huffman encoding to create an approach called Deep Compression (Han et al., 2015a) , and further designed a hardware accelerator called EIE (Han et al., 2016a) that operates directly on the compressed model, achieving substantial speedups and energy savings.",
+                        "extracted_citations": [
+                            "Citation_b11"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_611acb2d",
+                "title": "CNN MICROARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_87ef1ce6",
+                        "type": "paragraph",
+                        "text": "Convolutions have been used in artificial neural networks for at least 25 years; LeCun et al. helped to popularize CNNs for digit recognition applications in the late 1980s (LeCun et al., 1989) . In neural networks, convolution filters are typically 3D, with height, width, and channels as the key dimensions. When applied to images, CNN filters typically have 3 channels in their first layer (i.e. RGB), and in each subsequent layer L i the filters have the same number of channels as L i-1 has filters. The early work by LeCun et al. (LeCun et al., 1989 ) uses 5x5xChannels 2 filters, and the recent VGG (Simonyan & Zisserman, 2014) architectures extensively use 3x3 filters. Models such as Network-in-Network (Lin et al., 2013) and the GoogLeNet family of architectures (Szegedy et al., 2014; Ioffe & Szegedy, 2015; Szegedy et al., 2015; 2016) use 1x1 filters in some layers.",
+                        "extracted_citations": [
+                            "Citation_b32",
+                            "Citation_b32",
+                            "Citation_b38",
+                            "Citation_b33",
+                            "Citation_b43",
+                            "Citation_b44"
+                        ]
+                    },
+                    {
+                        "block_id": "b_429011c1",
+                        "type": "paragraph",
+                        "text": "With the trend of designing very deep CNNs, it becomes cumbersome to manually select filter dimensions for each layer. To address this, various higher level building blocks, or modules, comprised of multiple convolution layers with a specific fixed organization have been proposed. For example, the GoogLeNet papers propose Inception modules, which are comprised of a number of different dimensionalities of filters, usually including 1x1 and 3x3, plus sometimes 5x5 (Szegedy et al., 2014) and sometimes 1x3 and 3x1 (Szegedy et al., 2015) . Many such modules are then combined, perhaps with additional ad-hoc layers, to form a complete network. We use the term CNN microarchitecture to refer to the particular organization and dimensions of the individual modules.",
+                        "extracted_citations": [
+                            "Citation_b43",
+                            "Citation_b44"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_368e6328",
+                "title": "CNN MACROARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_662b7db6",
+                        "type": "paragraph",
+                        "text": "While the CNN microarchitecture refers to individual layers and modules, we define the CNN macroarchitecture as the system-level organization of multiple modules into an end-to-end CNN architecture.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d52aa33f",
+                        "type": "paragraph",
+                        "text": "Perhaps the mostly widely studied CNN macroarchitecture topic in the recent literature is the impact of depth (i.e. number of layers) in networks. Simoyan and Zisserman proposed the VGG (Simonyan & Zisserman, 2014) family of CNNs with 12 to 19 layers and reported that deeper networks produce higher accuracy on the ImageNet-1k dataset (Deng et al., 2009) . K. He et al. proposed deeper CNNs with up to 30 layers that deliver even higher ImageNet accuracy (He et al., 2015a) .",
+                        "extracted_citations": [
+                            "Citation_b38",
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_28a28ab4",
+                        "type": "paragraph",
+                        "text": "The choice of connections across multiple layers or modules is an emerging area of CNN macroarchitectural research. Residual Networks (ResNet) (He et al., 2015b) and Highway Networks (Srivastava et al., 2015) each propose the use of connections that skip over multiple layers, for example additively connecting the activations from layer 3 to the activations from layer 6. We refer to these connections as bypass connections. of NNs has focused on developing automated approaches for finding NN architectures that deliver higher accuracy. These automated DSE approaches include bayesian optimization (Snoek et al., 2012) , simulated annealing (Ludermir et al., 2006) , randomized search (Bergstra & Bengio, 2012) , and genetic algorithms (Stanley & Miikkulainen, 2002) . To their credit, each of these papers provides a case in which the proposed DSE approach produces a NN architecture that achieves higher accuracy compared to a representative baseline. However, these papers make no attempt to provide intuition about the shape of the NN design space. Later in this paper, we eschew automated approaches -instead, we refactor CNNs in such a way that we can do principled A/B comparisons to investigate how CNN architectural decisions influence model size and accuracy.",
+                        "extracted_citations": [
+                            "Citation_b41",
+                            "Citation_b39",
+                            "Citation_b34",
+                            "Citation_b3",
+                            "Citation_b42"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b7c83e08",
+                        "type": "paragraph",
+                        "text": "In the following sections, we first propose and evaluate the SqueezeNet architecture with and without model compression. Then, we explore the impact of design choices in microarchitecture and macroarchitecture for SqueezeNet-like CNN architectures.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1b3da71c",
+                "title": "SQUEEZENET: PRESERVING ACCURACY WITH FEW PARAMETERS",
+                "blocks": [
+                    {
+                        "block_id": "b_c2d3b813",
+                        "type": "paragraph",
+                        "text": "In this section, we begin by outlining our design strategies for CNN architectures with few parameters. Then, we introduce the Fire module, our new building block out of which to build CNN architectures. Finally, we use our design strategies to construct SqueezeNet, which is comprised mainly of Fire modules.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d95ad2bc",
+                "title": "ARCHITECTURAL DESIGN STRATEGIES",
+                "blocks": [
+                    {
+                        "block_id": "b_b8915548",
+                        "type": "paragraph",
+                        "text": "Our overarching objective in this paper is to identify CNN architectures that have few parameters while maintaining competitive accuracy. To achieve this, we employ three main strategies when designing CNN architectures:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ddfdb30d",
+                        "type": "paragraph",
+                        "text": "Strategy 1. Replace 3x3 filters with 1x1 filters. Given a budget of a certain number of convolution filters, we will choose to make the majority of these filters 1x1, since a 1x1 filter has 9X fewer parameters than a 3x3 filter.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_37affad3",
+                        "type": "paragraph",
+                        "text": "Strategy 2. Decrease the number of input channels to 3x3 filters. Consider a convolution layer that is comprised entirely of 3x3 filters. The total quantity of parameters in this layer is (number of input channels) * (number of filters) * (3*3). So, to maintain a small total number of parameters in a CNN, it is important not only to decrease the number of 3x3 filters (see Strategy 1 above), but also to decrease the number of input channels to the 3x3 filters. We decrease the number of input channels to 3x3 filters using squeeze layers, which we describe in the next section.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aff7f80b",
+                        "type": "paragraph",
+                        "text": "Strategy 3. Downsample late in the network so that convolution layers have large activation maps. In a convolutional network, each convolution layer produces an output activation map with a spatial resolution that is at least 1x1 and often much larger than 1x1. The height and width of these activation maps are controlled by: (1) the size of the input data (e.g. 256x256 images) and ( 2 ) the choice of layers in which to downsample in the CNN architecture. Most commonly, downsampling is engineered into CNN architectures by setting the (stride > 1) in some of the convolution or pooling layers (e.g. (Szegedy et al., 2014; Simonyan & Zisserman, 2014; Krizhevsky et al., 2012) ).",
+                        "extracted_citations": [
+                            "Citation_b43",
+                            "Citation_b38",
+                            "Citation_b31"
+                        ]
+                    },
+                    {
+                        "block_id": "b_83fed835",
+                        "type": "paragraph",
+                        "text": "If early 3 layers in the network have large strides, then most layers will have small activation maps.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4669d7c2",
+                        "type": "paragraph",
+                        "text": "Conversely, if most layers in the network have a stride of 1, and the strides greater than 1 are concentrated toward the end 4 of the network, then many layers in the network will have large activation maps. Our intuition is that large activation maps (due to delayed downsampling) can lead to higher classification accuracy, with all else held equal. Indeed, K. He and H. Sun applied delayed downsampling to four different CNN architectures, and in each case delayed downsampling led to higher classification accuracy (He & Sun, 2015) .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e4bc4cda",
+                        "type": "paragraph",
+                        "text": "Strategies 1 and 2 are about judiciously decreasing the quantity of parameters in a CNN while attempting to preserve accuracy. Strategy 3 is about maximizing accuracy on a limited budget of parameters. Next, we describe the Fire module, which is our building block for CNN architectures that enables us to successfully employ Strategies 1, 2, and 3.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4d47e31f",
+                "title": "THE FIRE MODULE",
+                "blocks": [
+                    {
+                        "block_id": "b_520caf04",
+                        "type": "paragraph",
+                        "text": "We define the Fire module as follows. A Fire module is comprised of: a squeeze convolution layer (which has only 1x1 filters), feeding into an expand layer that has a mix of 1x1 and 3x3 convolution filters; we illustrate this in Figure 1 . The liberal use of 1x1 filters in Fire modules is an application of Strategy 1 from Section 3.1. We expose three tunable dimensions (hyperparameters) in a Fire module: s 1x1 , e 1x1 , and e 3x3 . In a Fire module, s 1x1 is the number of filters in the squeeze layer (all 1x1), e 1x1 is the number of 1x1 filters in the expand layer, and e 3x3 is the number of 3x3 filters in the expand layer. When we use Fire modules we set s 1x1 to be less than (e 1x1 + e 3x3 ), so the squeeze layer helps to limit the number of input channels to the 3x3 filters, as per Strategy 2 from Section 3.1.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a2ecfbf6",
+                "title": "THE SQUEEZENET ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_d54785d4",
+                        "type": "paragraph",
+                        "text": "We now describe the SqueezeNet CNN architecture. We illustrate in Figure 2 that SqueezeNet begins with a standalone convolution layer (conv1), followed by 8 Fire modules (fire2-9), ending with a final conv layer (conv10). We gradually increase the number of filters per fire module from the beginning to the end of the network. SqueezeNet performs max-pooling with a stride of 2 after layers conv1, fire4, fire8, and conv10; these relatively late placements of pooling are per Strategy 3 from Section 3.1. We present the full SqueezeNet architecture in Table 1 .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8c1b015c",
+                "title": "OTHER SQUEEZENET DETAILS",
+                "blocks": [
+                    {
+                        "block_id": "b_2c404891",
+                        "type": "paragraph",
+                        "text": "For brevity, we have omitted number of details and design choices about SqueezeNet from Table 1 and Figure 2 . We provide these design choices in the following. The intuition behind these choices may be found in the papers cited below.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1b2128cd",
+                        "type": "paragraph",
+                        "text": "\u2022 So that the output activations from 1x1 and 3x3 filters have the same height and width, we add a 1-pixel border of zero-padding in the input data to 3x3 filters of expand modules. \u2022 ReLU (Nair & Hinton, 2010 ) is applied to activations from squeeze and expand layers.",
+                        "extracted_citations": [
+                            "Citation_b36"
+                        ]
+                    },
+                    {
+                        "block_id": "b_304353f0",
+                        "type": "paragraph",
+                        "text": "\u2022 Dropout (Srivastava et al., 2014) with a ratio of 50% is applied after the fire9 module.",
+                        "extracted_citations": [
+                            "Citation_b40"
+                        ]
+                    },
+                    {
+                        "block_id": "b_93f41c2d",
+                        "type": "paragraph",
+                        "text": "\u2022 Note the lack of fully-connected layers in SqueezeNet; this design choice was inspired by the NiN (Lin et al., 2013) architecture. \u2022 When training SqueezeNet, we begin with a learning rate of 0.04, and we linearly decrease the learning rate throughout training, as described in (Mishkin et al., 2016) . For details on the training protocol (e.g. batch size, learning rate, parameter initialization), please refer to our Caffe-compatible configuration files located here: https://github.com/DeepScale/SqueezeNet. \u2022 The Caffe framework does not natively support a convolution layer that contains multiple filter resolutions (e.g. 1x1 and 3x3) (Jia et al., 2014) . To get around this, we implement our expand layer with two separate convolution layers: a layer with 1x1 filters, and a layer with 3x3 filters. Then, we concatenate the outputs of these layers together in the channel dimension. This is numerically equivalent to implementing one layer that contains both 1x1 and 3x3 filters.",
+                        "extracted_citations": [
+                            "Citation_b33",
+                            "Citation_b35",
+                            "Citation_b30"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a94ad2ed",
+                        "type": "paragraph",
+                        "text": "We released the SqueezeNet configuration files in the format defined by the Caffe CNN framework. However, in addition to Caffe, several other CNN frameworks have emerged, including MXNet (Chen et al., 2015a) , Chainer (Tokui et al., 2015) , Keras (Chollet, 2016) , and Torch (Collobert et al., 2011) . Each of these has its own native format for representing a CNN architecture. That said, most of these libraries use the same underlying computational back-ends such as cuDNN (Chetlur et al., 2014) and MKL-DNN (Das et al., 2016) . The research community has ported the SqueezeNet CNN architecture for compatibility with a number of other CNN software frameworks:",
+                        "extracted_citations": [
+                            "Citation_b46",
+                            "Citation_b7",
+                            "Citation_b8",
+                            "Citation_b6",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2fbf9175",
+                        "type": "paragraph",
+                        "text": "\u2022 MXNet (Chen et al., 2015a) port of SqueezeNet: (Haria, 2016) \u2022 Chainer (Tokui et al., 2015) port of SqueezeNet: (Bell, 2016) \u2022 Keras (Chollet, 2016) port of SqueezeNet: (DT42, 2016)",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b46",
+                            "Citation_b2",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_70131037",
+                        "type": "paragraph",
+                        "text": "\u2022 Torch (Collobert et al., 2011) port of SqueezeNet's Fire Modules: (Waghmare, 2016)",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8722dcc1",
+                "title": "EVALUATION OF SQUEEZENET",
+                "blocks": [
+                    {
+                        "block_id": "b_6709e217",
+                        "type": "paragraph",
+                        "text": "We now turn our attention to evaluating SqueezeNet. In each of the CNN model compression papers reviewed in Section 2.1, the goal was to compress an AlexNet (Krizhevsky et al., 2012)",
+                        "extracted_citations": [
+                            "Citation_b31"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f5b4d6ff",
+                        "type": "paragraph",
+                        "text": "In Table 2 , we review SqueezeNet in the context of recent model compression results. The SVDbased approach is able to compress a pretrained AlexNet model by a factor of 5x, while diminishing top-1 accuracy to 56.0% (Denton et al., 2014) . Network Pruning achieves a 9x reduction in model size while maintaining the baseline of 57.2% top-1 and 80.3% top-5 accuracy on ImageNet (Han et al., 2015b) . Deep Compression achieves a 35x reduction in model size while still maintaining the baseline accuracy level (Han et al., 2015a) . Now, with SqueezeNet, we achieve a 50X reduction in model size compared to AlexNet, while meeting or exceeding the top-1 and top-5 accuracy of AlexNet. We summarize all of the aforementioned results in Table 2 .",
+                        "extracted_citations": [
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5dc7cc88",
+                        "type": "paragraph",
+                        "text": "It appears that we have surpassed the state-of-the-art results from the model compression community: even when using uncompressed 32-bit values to represent the model, SqueezeNet has a 1.4\u00d7 smaller model size than the best efforts from the model compression community while maintaining or exceeding the baseline accuracy. Until now, an open question has been: are small models amenable to compression, or do small models \"need\" all of the representational power afforded by dense floating-point values? To find out, we applied Deep Compression (Han et al., 2015a) Finally, note that Deep Compression (Han et al., 2015b) uses a codebook as part of its scheme for quantizing CNN parameters to 6-or 8-bits of precision. Therefore, on most commodity processors, it is not trivial to achieve a speedup of 32 8 = 4x with 8-bit quantization or 32 6 = 5.3x with 6-bit quantization using the scheme developed in Deep Compression. However, Han et al. developed custom hardware -Efficient Inference Engine (EIE) -that can compute codebook-quantized CNNs more efficiently (Han et al., 2016a) . In addition, in the months since we released SqueezeNet, P. Gysel developed a strategy called Ristretto for linearly quantizing SqueezeNet to 8 bits (Gysel, 2016) . Specifically, Ristretto does computation in 8 bits, and it stores parameters and activations in 8-bit data types. Using the Ristretto strategy for 8-bit computation in SqueezeNet inference, Gysel observed less than 1 percentage-point of drop in accuracy when using 8-bit instead of 32-bit data types.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_810d974a",
+                "title": "CNN MICROARCHITECTURE DESIGN SPACE EXPLORATION",
+                "blocks": [
+                    {
+                        "block_id": "b_b48eb5cd",
+                        "type": "paragraph",
+                        "text": "So far, we have proposed architectural design strategies for small models, followed these principles to create SqueezeNet, and discovered that SqueezeNet is 50x smaller than AlexNet with equivalent accuracy. However, SqueezeNet and other models reside in a broad and largely unexplored design space of CNN architectures. Now, in Sections 5 and 6, we explore several aspects of the design space. We divide this architectural exploration into two main topics: microarchitectural exploration (per-module layer dimensions and configurations) and macroarchitectural exploration (high-level end-to-end organization of modules and other layers).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cdbbc2a2",
+                        "type": "paragraph",
+                        "text": "In this section, we design and execute experiments with the goal of providing intuition about the shape of the microarchitectural design space with respect to the design strategies that we proposed in Section 3.1. Note that our goal here is not to maximize accuracy in every experiment, but rather to understand the impact of CNN architectural choices on model size and accuracy.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f62440f5",
+                "title": "CNN MICROARCHITECTURE METAPARAMETERS",
+                "blocks": [
+                    {
+                        "block_id": "b_047a9caa",
+                        "type": "paragraph",
+                        "text": "In SqueezeNet, each Fire module has three dimensional hyperparameters that we defined in Section 3.2: s 1x1 , e 1x1 , and e 3x3 . SqueezeNet has 8 Fire modules with a total of 24 dimensional hyperparameters. To do broad sweeps of the design space of SqueezeNet-like architectures, we define the following set of higher level metaparameters which control the dimensions of all Fire modules in a CNN. We define base e as the number of expand filters in the first Fire module in a CNN. After every f req Fire modules, we increase the number of expand filters by incr e . In other words, for Fire module i, the number of expand filters is e i = base e + (incr e * i f req ). In the expand layer of a Fire module, some filters are 1x1 and some are 3x3; we define e i = e i,1x1 + e i,3x3 with pct 3x3 (in the range [0, 1], shared over all Fire modules) as the percentage of expand filters that are 3x3. In other words, e i,3x3 = e i * pct 3x3 , and e i,1x1 = e i * (1 -pct 3x3 ). Finally, we define the number of filters in the squeeze layer of a Fire module using a metaparameter called the squeeze ratio (SR) (again, in the range [0, 1], shared by all Fire modules): s i,1x1 = SR * e i (or equivalently s i,1x1 = SR * (e i,1x1 + e i,3x3 )). SqueezeNet (Table 1 ) is an example architecture that we generated with the aforementioned set of metaparameters. Specifically, SqueezeNet has the following metaparameters: base e = 128, incr e = 128, pct 3x3 = 0.5, f req = 2, and SR = 0.125.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_67f15a3b",
+                "title": "SQUEEZE RATIO",
+                "blocks": [
+                    {
+                        "block_id": "b_afab7f6c",
+                        "type": "paragraph",
+                        "text": "In Section 3.1, we proposed decreasing the number of parameters by using squeeze layers to decrease the number of input channels seen by 3x3 filters. We defined the squeeze ratio (SR) as the ratio between the number of filters in squeeze layers and the number of filters in expand layers. We now design an experiment to investigate the effect of the squeeze ratio on model size and accuracy.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eae97287",
+                        "type": "paragraph",
+                        "text": "In these experiments, we use SqueezeNet (Figure 2 ) as a starting point. As in SqueezeNet, these experiments use the following metaparameters: base e = 128, incr e = 128, pct 3x3 = 0.5, and f req = 2. We train multiple models, where each model has a different squeeze ratio (SR) 7 in the range [0.125, 1.0]. In Figure 3 (a), we show the results of this experiment, where each point on the graph is an independent model that was trained from scratch. SqueezeNet is the SR=0.125 point in this figure. 8 From this figure, we learn that increasing SR beyond 0.125 can further increase ImageNet top-5 accuracy from 80.3% (i.e. AlexNet-level) with a 4.8MB model to 86.0% with a 19MB model. Accuracy plateaus at 86.0% with SR=0.75 (a 19MB model), and setting SR=1.0 further increases model size without improving accuracy.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_09654ff5",
+                "title": "TRADING OFF 1X1 AND 3X3 FILTERS",
+                "blocks": [
+                    {
+                        "block_id": "b_2dcf10d4",
+                        "type": "paragraph",
+                        "text": "In Section 3.1, we proposed decreasing the number of parameters in a CNN by replacing some 3x3 filters with 1x1 filters. An open question is, how important is spatial resolution in CNNs? The VGG (Simonyan & Zisserman, 2014) architectures have 3x3 spatial resolution in most layers' filters; GoogLeNet (Szegedy et al., 2014) and Network-in-Network (NiN) (Lin et al., 2013) have 1x1 filters in some layers. In GoogLeNet and NiN, the authors simply propose a specific quantity of 1x1 and 3x3 filters without further analysis. 9 Here, we attempt to shed light on how the proportion of 1x1 and 3x3 filters affects model size and accuracy.",
+                        "extracted_citations": [
+                            "Citation_b38",
+                            "Citation_b43",
+                            "Citation_b33"
+                        ]
+                    },
+                    {
+                        "block_id": "b_27fed4b9",
+                        "type": "paragraph",
+                        "text": "We use the following metaparameters in this experiment: base e = incr e = 128, f req = 2, SR = 0.500, and we vary pct 3x3 from 1% to 99%. In other words, each Fire module's expand layer has a predefined number of filters partitioned between 1x1 and 3x3, and here we turn the knob on these filters from \"mostly 1x1\" to \"mostly 3x3\". As in the previous experiment, these models have 8 Fire modules, following the same organization of layers as in Figure 2 . We show the results of this experiment in Figure 3(b) . Note that the 13MB models in Figure 3 (a) and Figure 3 (b) are the same architecture: SR = 0.500 and pct 3x3 = 50%. We see in Figure 3 (b) that the top-5 accuracy plateaus at 85.6% using 50% 3x3 filters, and further increasing the percentage of 3x3 filters leads to a larger model size but provides no improvement in accuracy on ImageNet.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d974733d",
+                "title": "CNN MACROARCHITECTURE DESIGN SPACE EXPLORATION",
+                "blocks": [
+                    {
+                        "block_id": "b_dfa6e0f1",
+                        "type": "paragraph",
+                        "text": "So far we have explored the design space at the microarchitecture level, i.e. the contents of individual modules of the CNN. Now, we explore design decisions at the macroarchitecture level concerning the high-level connections among Fire modules. Inspired by ResNet (He et al., 2015b) , we explored three different architectures:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_db981da4",
+                        "type": "paragraph",
+                        "text": "\u2022 Vanilla SqueezeNet (as per the prior sections).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_534da47d",
+                        "type": "paragraph",
+                        "text": "\u2022 SqueezeNet with simple bypass connections between some Fire modules. (Inspired by (Srivastava et al., 2015; He et al., 2015b ).) \u2022 SqueezeNet with complex bypass connections between the remaining Fire modules.",
+                        "extracted_citations": [
+                            "Citation_b41"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c0e9b984",
+                        "type": "paragraph",
+                        "text": "We illustrate these three variants of SqueezeNet in Figure 2 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dcb36f57",
+                        "type": "paragraph",
+                        "text": "Our simple bypass architecture adds bypass connections around Fire modules 3, 5, 7, and 9, requiring these modules to learn a residual function between input and output. As in ResNet, to implement a bypass connection around Fire3, we set the input to Fire4 equal to (output of Fire2 + output of Fire3), where the + operator is elementwise addition. This changes the regularization applied to the parameters of these Fire modules, and, as per ResNet, can improve the final accuracy and/or ability to train the full model.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_54606b1f",
+                        "type": "paragraph",
+                        "text": "One limitation is that, in the straightforward case, the number of input channels and number of output channels has to be the same; as a result, only half of the Fire modules can have simple bypass connections, as shown in the middle diagram of Fig 2 . When the \"same number of channels\" requirement can't be met, we use a complex bypass connection, as illustrated on the right of Figure 2 . While a simple bypass is \"just a wire,\" we define a complex bypass as a bypass that includes a 1x1 convolution layer with the number of filters set equal to the number of output channels that are needed. Note that complex bypass connections add extra parameters to the model, while simple bypass connections do not.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3ba22f39",
+                        "type": "paragraph",
+                        "text": "In addition to changing the regularization, it is intuitive to us that adding bypass connections would help to alleviate the representational bottleneck introduced by squeeze layers. In SqueezeNet, the squeeze ratio (SR) is 0.125, meaning that every squeeze layer has 8x fewer output channels than the accompanying expand layer. Due to this severe dimensionality reduction, a limited amount of information can pass through squeeze layers. However, by adding bypass connections to SqueezeNet, we open up avenues for information to flow around the squeeze layers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4b57d2ff",
+                        "type": "paragraph",
+                        "text": "We trained SqueezeNet with the three macroarchitectures in Figure 2 and compared the accuracy and model size in Table 3 . We fixed the microarchitecture to match SqueezeNet as described in Table 1 throughout the macroarchitecture exploration. Complex and simple bypass connections both yielded an accuracy improvement over the vanilla SqueezeNet architecture. Interestingly, the simple bypass enabled a higher accuracy accuracy improvement than complex bypass. Adding the simple bypass connections yielded an increase of 2.9 percentage-points in top-1 accuracy and 2.2 percentage-points in top-5 accuracy without increasing model size.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0048a73e",
+                "title": "CONCLUSIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_b71f6e7c",
+                        "type": "paragraph",
+                        "text": "In this paper, we have proposed steps toward a more disciplined approach to the design-space exploration of convolutional neural networks. We mentioned near the beginning of this paper that small models are more amenable to on-chip implementations on FPGAs. Since we released the SqueezeNet model, Gschwend has developed a variant of SqueezeNet and implemented it on an FPGA (Gschwend, 2016) . As we anticipated, Gschwend was able to able to store the parameters of a SqueezeNet-like model entirely within the FPGA and eliminate the need for off-chip memory accesses to load model parameters.",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f96341d3",
+                        "type": "paragraph",
+                        "text": "In the context of this paper, we focused on ImageNet as a target dataset. However, it has become common practice to apply ImageNet-trained CNN representations to a variety of applications such as fine-grained object recognition (Zhang et al., 2013; Donahue et al., 2013) , logo identification in images (Iandola et al., 2015) , and generating sentences about images (Fang et al., 2015) . ImageNettrained CNNs have also been applied to a number of applications pertaining to autonomous driving, including pedestrian and vehicle detection in images (Iandola et al., 2014; Girshick et al., 2015; Ashraf et al., 2016) and videos (Chen et al., 2015b) , as well as segmenting the shape of the road (Badrinarayanan et al., 2015) . We think SqueezeNet will be a good candidate CNN architecture for a variety of applications, especially those in which small model size is of importance.",
+                        "extracted_citations": [
+                            "Citation_b48",
+                            "Citation_b12",
+                            "Citation_b27",
+                            "Citation_b14",
+                            "Citation_b26",
+                            "Citation_b15",
+                            "Citation_b0",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_30fa8d5a",
+                        "type": "paragraph",
+                        "text": "SqueezeNet is one of several new CNNs that we have discovered while broadly exploring the design space of CNN architectures. We hope that SqueezeNet will inspire the reader to consider and explore the broad range of possibilities in the design space of CNN architectures and to perform that exploration in a more systematic manner.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Khalid Ashraf Bichen Wu Forrest N Iandola Matthew W Moskewicz Kurt Keutzer arXiv:1606.01561 Shallow networks for high-accuracy road object-detection 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "SegNet: A deep convolutional encoderdecoder architecture for image segmentation Vijay Badrinarayanan Alex Kendall Roberto Cipolla arxiv:1511.00561 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "A implementation of squeezenet in chainer Eddie Bell 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "An optimization methodology for neural network weights and architectures J Bergstra Y Bengio JMLR 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Mxnet: A flexible and efficient machine learning library for heterogeneous distributed systems Tianqi Chen Mu Li Yutian Li Min Lin Naiyan Wang Minjie Wang Tianjun Xiao Bing Xu Chiyuan Zhang Zheng Zhang arXiv:1512.01274 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Sanja Fidler, and Raquel Urtasun. 3d object proposals for accurate object class detection Xiaozhi Chen Kaustav Kundu Yukun Zhu Andrew G Berneshawi Huimin Ma NIPS 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Sharan Chetlur Cliff Woolley Philippe Vandermersch Jonathan Cohen John Tran Bryan Catanzaro Evan Shelhamer arXiv:1410.0759 cuDNN: efficient primitives for deep learning 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Keras: Deep learning library for theano and tensorflow Francois Chollet 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Torch7: A matlab-like environment for machine learning Ronan Collobert Koray Kavukcuoglu Clement Farabet Consumer Reports. Teslas new autopilot: Better but still needs improvement 2011. 2016 NIPS BigLearn Workshop",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Distributed deep learning using synchronous stochastic gradient descent Dipankar Das Sasikanth Avancha Dheevatsa Mudigere Karthikeyan Vaidyanathan Srinivas Sridharan D Dhiraj Bharat Kalamkar Pradeep Kaul Dubey arXiv:1602.06709 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "ImageNet: A large-scale hierarchical image database J Deng W Dong R Socher L.-J Li K Li L Fei-Fei CVPR 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Exploiting linear structure within convolutional networks for efficient evaluation E Denton W Zaremba J Bruna Y Lecun R Fergus NIPS 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Decaf: A deep convolutional activation feature for generic visual recognition Jeff Donahue Yangqing Jia Oriol Vinyals Judy Hoffman Ning Zhang Eric Tzeng Trevor Darrell arXiv:1310.1531 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Squeezenet keras implementation 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "From captions to visual concepts and back Saurabh Hao Fang Forrest Gupta Rupesh Iandola Li Srivastava Piotr Deng Jianfeng Dollar Xiaodong Gao Margaret He John C Mitchell C Lawrence Platt Geoffrey Zitnick Zweig CVPR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Deformable part models are convolutional neural networks Ross B Girshick Forrest N Iandola Trevor Darrell Jitendra Malik CVPR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Zynqnet: An fpga-accelerated embedded convolutional neural network David Gschwend 2016 ETH-Zurich Swiss Federal Institute of Technology Zurich Master's thesis",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Ristretto: Hardware-oriented approximation of convolutional neural networks Philipp Gysel arXiv:1605.06402 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Deep compression: Compressing DNNs with pruning, trained quantization and huffman coding S Han H Mao W Dally arxiv:1510.00149v3 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Learning both weights and connections for efficient neural networks S Han J Pool J Tran W Dally In NIPS, 2015b",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Eie: Efficient inference engine on compressed deep neural network Song Han Xingyu Liu Huizi Mao Jing Pu Ardavan Pedram Mark A Horowitz William J Dally International Symposium on Computer Architecture (ISCA) 2016 a",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Song han and jeff pool and sharan narang and huizi mao and shijian tang and erich elsen and bryan catanzaro and john tran and william j Song Han Jeff Pool Sharan Narang Huizi Mao Shijian Tang Erich Elsen Bryan Catanzaro John Tran William J Dally arXiv:1607.04381 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Guo Haria 0cf57539375fd5429275af36fc94c774503427c3 2016 convert squeezenet to mxnet",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Delving deep into rectifiers: Surpassing human-level performance on imagenet classification K He X Zhang S Ren J Sun ICCV 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Convolutional neural networks at constrained time cost Kaiming He Jian Sun CVPR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Deep residual learning for image recognition Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun arXiv:1512.03385 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Forrest N Iandola Matthew W Moskewicz Sergey Karayev Ross B Girshick Trevor Darrell Kurt Keutzer Densenet arXiv:1404.1869 Implementing efficient convnet descriptor pyramids 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Forrest N Iandola Anting Shen Peter Gao Kurt Keutzer Deeplogo arXiv:1510.02131 Hitting logo recognition with the deep neural network hammer 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "FireCaffe: near-linear acceleration of deep neural network training on compute clusters Forrest N Iandola Khalid Ashraf Matthew W Moskewicz Kurt Keutzer CVPR 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Batch normalization: Accelerating deep network training by reducing internal covariate shift Sergey Ioffe Christian Szegedy JMLR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Yangqing Jia Evan Shelhamer Jeff Donahue Sergey Karayev Jonathan Long Ross Girshick Sergio Guadarrama Trevor Darrell Caffe arXiv:1408.5093 Convolutional architecture for fast feature embedding 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "ImageNet Classification with Deep Convolutional Neural Networks Alex Krizhevsky Ilya Sutskever Geoffrey E Hinton NIPS 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Backpropagation applied to handwritten zip code recognition Y Lecun B Boser J S Denker D Henderson R E Howard W Hubbard L D Jackel Neural Computation 1989",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Min Lin Qiang Chen Shuicheng Yan arXiv:1312.4400 Network in network 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "An optimization methodology for neural network weights and architectures T B Ludermir A Yamazaki C Zanchettin IEEE Trans. Neural Networks 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Systematic evaluation of cnn advances on the imagenet Dmytro Mishkin Nikolay Sergievskiy Jiri Matas arXiv:1606.02228 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b36",
+                "raw_text": "Rectified linear units improve restricted boltzmann machines Vinod Nair Geoffrey E Hinton ICML 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b37",
+                "raw_text": "Going deeper with embedded fpga platform for convolutional neural network Jiantao Qiu Jie Wang Song Yao Kaiyuan Guo Boxun Li Erjin Zhou Jincheng Yu Tianqi Tang Ningyi Xu Sen Song Yu Wang Huazhong Yang ACM International Symposium on FPGA 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b38",
+                "raw_text": "Very deep convolutional networks for large-scale image recognition Karen Simonyan Andrew Zisserman arXiv:1409.1556 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b39",
+                "raw_text": "Practical bayesian optimization of machine learning algorithms J Snoek H Larochelle R P Adams NIPS 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b40",
+                "raw_text": "Dropout: a simple way to prevent neural networks from overfitting Nitish Srivastava Geoffrey Hinton Alex Krizhevsky Ilya Sutskever Ruslan Salakhutdinov JMLR 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b41",
+                "raw_text": "Highway networks R K Srivastava K Greff J Schmidhuber ICML Deep Learning Workshop 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b42",
+                "raw_text": "K O Stanley R Miikkulainen Evolving neural networks through augmenting topologies. Neurocomputing 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b43",
+                "raw_text": "Christian Szegedy Wei Liu Yangqing Jia Pierre Sermanet Scott Reed Dragomir Anguelov arXiv:1409.4842 Dumitru Erhan, Vincent Vanhoucke, and Andrew Rabinovich. Going deeper with convolutions 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b44",
+                "raw_text": "Rethinking the inception architecture for computer vision Christian Szegedy Vincent Vanhoucke Sergey Ioffe Jonathon Shlens Zbigniew Wojna arXiv:1512.00567 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b45",
+                "raw_text": "Inception-v4, inception-resnet and the impact of residual connections on learning Christian Szegedy Sergey Ioffe Vincent Vanhoucke arXiv:1602.07261 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b46",
+                "raw_text": "Chainer: a next-generation open source framework for deep learning S Tokui K Oono S Hido J Clayton NIPS Workshop on Machine Learning Systems (LearningSys) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b47",
+                "raw_text": "M Sagar Waghmare 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b48",
+                "raw_text": "Deformable part descriptors for fine-grained recognition and attribute prediction Ning Zhang Ryan Farrell Forrest Iandola Trevor Darrell ICCV 2013",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0352,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "Strengths\n\uf06e-- An interesting proposal for a smaller CNN architecture designed for embedded CNN applications.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "\uf06e-- Balanced exploration of CNN macroarchitecture and microarchitecture with fire modules.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "\uf06e-- x50 less memory usage than AlexNet, keeping similar accuracy \n\uf06e-- strong experimental results\n\nWeaknesses\n\uf06e--Would be nice to test Sqeezenet on multiple tasks\n\n\uf06e--lack of insights and rigorous analysis into what factors are responsible for the success of SqueezeNet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "For example, how are ResNet and GoogleNet connected to the current architecture?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Another old paper (Analysis of correlation structure for a neural predictive model with application to speech recognition, Neural Networks, 1994) also showed that the \u201cby-pass\u201d architecture by mixing linear and nonlinear prediction terms improves long term dependency in NN based on rigorous perturbation analysis.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Can the current work be placed more rigorously on theoretical analysis?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.0352,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "Strengths\n\uf06e-- An interesting proposal for a smaller CNN architecture designed for embedded CNN applications.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "\uf06e-- Balanced exploration of CNN macroarchitecture and microarchitecture with fire modules.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "\uf06e-- x50 less memory usage than AlexNet, keeping similar accuracy \n\uf06e-- strong experimental results\n\nWeaknesses\n\uf06e--Would be nice to test Sqeezenet on multiple tasks\n\n\uf06e--lack of insights and rigorous analysis into what factors are responsible for the success of SqueezeNet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "For example, how are ResNet and GoogleNet connected to the current architecture?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Another old paper (Analysis of correlation structure for a neural predictive model with application to speech recognition, Neural Networks, 1994) also showed that the \u201cby-pass\u201d architecture by mixing linear and nonlinear prediction terms improves long term dependency in NN based on rigorous perturbation analysis.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Can the current work be placed more rigorously on theoretical analysis?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_8",
+            "type": "Human",
+            "liang_alpha_score": 0.0352,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_8_s_0",
+                    "text": "Strengths\n\uf06e-- An interesting proposal for a smaller CNN architecture designed for embedded CNN applications.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_1",
+                    "text": "\uf06e-- Balanced exploration of CNN macroarchitecture and microarchitecture with fire modules.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_2",
+                    "text": "\uf06e-- x50 less memory usage than AlexNet, keeping similar accuracy \n\uf06e-- strong experimental results\n\nWeaknesses\n\uf06e--Would be nice to test Sqeezenet on multiple tasks\n\n\uf06e--lack of insights and rigorous analysis into what factors are responsible for the success of SqueezeNet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_3",
+                    "text": "For example, how are ResNet and GoogleNet connected to the current architecture?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_4",
+                    "text": "Another old paper (Analysis of correlation structure for a neural predictive model with application to speech recognition, Neural Networks, 1994) also showed that the \u201cby-pass\u201d architecture by mixing linear and nonlinear prediction terms improves long term dependency in NN based on rigorous perturbation analysis.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_5",
+                    "text": "Can the current work be placed more rigorously on theoretical analysis?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_10",
+            "type": "Human",
+            "liang_alpha_score": 0.0352,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_10_s_0",
+                    "text": "Strengths\n\uf06e-- An interesting proposal for a smaller CNN architecture designed for embedded CNN applications.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_1",
+                    "text": "\uf06e-- Balanced exploration of CNN macroarchitecture and microarchitecture with fire modules.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_2",
+                    "text": "\uf06e-- x50 less memory usage than AlexNet, keeping similar accuracy \n\uf06e-- strong experimental results\n\nWeaknesses\n\uf06e--Would be nice to test Sqeezenet on multiple tasks\n\n\uf06e--lack of insights and rigorous analysis into what factors are responsible for the success of SqueezeNet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_3",
+                    "text": "For example, how are ResNet and GoogleNet connected to the current architecture?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_4",
+                    "text": "Another old paper (Analysis of correlation structure for a neural predictive model with application to speech recognition, Neural Networks, 1994) also showed that the \u201cby-pass\u201d architecture by mixing linear and nonlinear prediction terms improves long term dependency in NN based on rigorous perturbation analysis.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_5",
+                    "text": "Can the current work be placed more rigorously on theoretical analysis?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_b6a24909",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3cb3480c"
+        },
+        {
+            "source": "b_3a4dc6a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_3a4dc6a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "sec_b6a24909",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3a4dc6a4"
+        },
+        {
+            "source": "sec_b6a24909",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_88668aff"
+        },
+        {
+            "source": "sec_b6a24909",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_237483f5"
+        },
+        {
+            "source": "b_176a90c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_187042fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_176a90c9"
+        },
+        {
+            "source": "b_87ef1ce6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_87ef1ce6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_87ef1ce6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "b_87ef1ce6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "b_87ef1ce6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b43"
+        },
+        {
+            "source": "b_87ef1ce6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b44"
+        },
+        {
+            "source": "sec_611acb2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_87ef1ce6"
+        },
+        {
+            "source": "b_429011c1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b43"
+        },
+        {
+            "source": "b_429011c1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b44"
+        },
+        {
+            "source": "sec_611acb2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_429011c1"
+        },
+        {
+            "source": "sec_368e6328",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_662b7db6"
+        },
+        {
+            "source": "b_d52aa33f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "b_d52aa33f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_368e6328",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d52aa33f"
+        },
+        {
+            "source": "b_28a28ab4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b41"
+        },
+        {
+            "source": "b_28a28ab4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b39"
+        },
+        {
+            "source": "b_28a28ab4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "b_28a28ab4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_28a28ab4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b42"
+        },
+        {
+            "source": "sec_368e6328",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28a28ab4"
+        },
+        {
+            "source": "sec_368e6328",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b7c83e08"
+        },
+        {
+            "source": "sec_1b3da71c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c2d3b813"
+        },
+        {
+            "source": "sec_d95ad2bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b8915548"
+        },
+        {
+            "source": "sec_d95ad2bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ddfdb30d"
+        },
+        {
+            "source": "sec_d95ad2bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_37affad3"
+        },
+        {
+            "source": "b_aff7f80b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b43"
+        },
+        {
+            "source": "b_aff7f80b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "b_aff7f80b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "sec_d95ad2bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aff7f80b"
+        },
+        {
+            "source": "sec_d95ad2bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_83fed835"
+        },
+        {
+            "source": "sec_d95ad2bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4669d7c2"
+        },
+        {
+            "source": "sec_d95ad2bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4bc4cda"
+        },
+        {
+            "source": "sec_4d47e31f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_520caf04"
+        },
+        {
+            "source": "sec_a2ecfbf6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d54785d4"
+        },
+        {
+            "source": "sec_8c1b015c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2c404891"
+        },
+        {
+            "source": "b_1b2128cd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b36"
+        },
+        {
+            "source": "sec_8c1b015c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1b2128cd"
+        },
+        {
+            "source": "b_304353f0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b40"
+        },
+        {
+            "source": "sec_8c1b015c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_304353f0"
+        },
+        {
+            "source": "b_93f41c2d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "b_93f41c2d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_93f41c2d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_8c1b015c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_93f41c2d"
+        },
+        {
+            "source": "b_a94ad2ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b46"
+        },
+        {
+            "source": "b_a94ad2ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_a94ad2ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_a94ad2ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_a94ad2ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_8c1b015c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a94ad2ed"
+        },
+        {
+            "source": "b_2fbf9175",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_2fbf9175",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b46"
+        },
+        {
+            "source": "b_2fbf9175",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_2fbf9175",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_8c1b015c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2fbf9175"
+        },
+        {
+            "source": "b_70131037",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_8c1b015c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_70131037"
+        },
+        {
+            "source": "b_6709e217",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "sec_8722dcc1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6709e217"
+        },
+        {
+            "source": "b_f5b4d6ff",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_8722dcc1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f5b4d6ff"
+        },
+        {
+            "source": "b_5dc7cc88",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_8722dcc1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5dc7cc88"
+        },
+        {
+            "source": "sec_810d974a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b48eb5cd"
+        },
+        {
+            "source": "sec_810d974a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cdbbc2a2"
+        },
+        {
+            "source": "sec_f62440f5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_047a9caa"
+        },
+        {
+            "source": "sec_67f15a3b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_afab7f6c"
+        },
+        {
+            "source": "sec_67f15a3b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eae97287"
+        },
+        {
+            "source": "b_2dcf10d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "b_2dcf10d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b43"
+        },
+        {
+            "source": "b_2dcf10d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "sec_09654ff5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2dcf10d4"
+        },
+        {
+            "source": "sec_09654ff5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_27fed4b9"
+        },
+        {
+            "source": "sec_d974733d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dfa6e0f1"
+        },
+        {
+            "source": "sec_d974733d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_db981da4"
+        },
+        {
+            "source": "b_534da47d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b41"
+        },
+        {
+            "source": "sec_d974733d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_534da47d"
+        },
+        {
+            "source": "sec_d974733d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c0e9b984"
+        },
+        {
+            "source": "sec_d974733d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dcb36f57"
+        },
+        {
+            "source": "sec_d974733d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_54606b1f"
+        },
+        {
+            "source": "sec_d974733d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3ba22f39"
+        },
+        {
+            "source": "sec_d974733d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4b57d2ff"
+        },
+        {
+            "source": "b_b71f6e7c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_0048a73e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b71f6e7c"
+        },
+        {
+            "source": "b_f96341d3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b48"
+        },
+        {
+            "source": "b_f96341d3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_f96341d3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_f96341d3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_f96341d3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_f96341d3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_f96341d3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_f96341d3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_0048a73e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f96341d3"
+        },
+        {
+            "source": "sec_0048a73e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_30fa8d5a"
+        }
+    ]
+}

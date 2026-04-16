@@ -1,0 +1,1291 @@
+{
+    "paper_metadata": {
+        "paper_id": "379",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Accepted",
+        "total_reviews_available": 6
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_6bdc31a8",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_b8f4c822",
+                        "type": "paragraph",
+                        "text": "Training deep neural networks directly on minimally pre-processed corpora has led to many recent performance breakthroughs, mainly on problems in domains such as vision (Krizhevsky et al., 2012) and natural language (Bahdanau et al., 2015) where the inputs can be cast as dense n-dimensional arrays (henceforth tensors), or sequences of tensors. These successes exploit the effectiveness of training via gradient descent on mini-batches of tens to hundreds of inputs, implemented using the parallel SIMD capabilities of modern GPUs (Oh & Jung, 2004 ) and multi-core CPUs (Vanhoucke et al., 2011) . This, in turn has led to a proliferation of libraries making it easier to train and deploy such models, by expressing them in terms of differentiable data-flow graphs over tensors (Abadi et al., 2016; Theano Development Team, 2016; Collobert et al., 2011) .",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b2",
+                            "Citation_b13",
+                            "Citation_b19",
+                            "Citation_b0",
+                            "Citation_b18",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6032d8c7",
+                        "type": "paragraph",
+                        "text": "However, there is also a long history of neural networks that compute over structures such as parse trees (Pollack, 1990) , logical terms (Goller & Kuchler, 1996) , and molecular graphs (Bianucci et al., 2000) . In these models, each distinct input has a different computation graph structure; we say that they use dynamic computation graphs (DCGs). Such models continue to be developed and have recently yielded superior results on problems such as sentiment classification and semantic relatedness (Tai et al., 2015; Li et al., 2015) , question-answering (Andreas et al., 2016) , and screening of chemical compounds (Kearnes et al., 2016) . Despite these successes, most practitioners avoid DCGs for implementation reasons. For example, Bowman et al. (2016) assert that \"because TreeRNNs use a different model structure for each sentence ... efficient batching is impossible in standard implementations\". Moreover, even if efficient batching were possible in principle, current libraries such as TensorFlow (Abadi et al., 2016) assume that the data-flow graph is static (i.e. is the same for each input) and impose a significant cost to graph construction, which makes it infeasible to build a new graph for each input.",
+                        "extracted_citations": [
+                            "Citation_b14",
+                            "Citation_b6",
+                            "Citation_b3",
+                            "Citation_b17",
+                            "Citation_b11",
+                            "Citation_b1",
+                            "Citation_b9",
+                            "Citation_b4",
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_237bfc68",
+                        "type": "paragraph",
+                        "text": "Section 2 introduces dynamic batching, which enables efficient batching for training and inference with DCGs. Dynamic batching runs DCGs efficiently with existing libraries that only support static data-flow graphs; e.g. the same static graph can run a TreeRNN over any parse tree. We present empirical results for our implementation in TensorFlow. Section 3 presents a combinator library for concisely implementing models with DCGs using dynamic batching. Section 4 concludes.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_30bfd741",
+                "title": "DYNAMIC BATCHING",
+                "blocks": [
+                    {
+                        "block_id": "b_4d4a412f",
+                        "type": "paragraph",
+                        "text": "In deep learning libraries like TensorFlow, computations are manually batched. The computation is expressed as a static graph of mathematical operations, such as y = \u03c3(x \u2022 w + c), which are polymorphic in batch size; an input x of dimensions (b, n) will yield an output of dimensions (b, m), where b is the batch size. With DCGs, the graph of operations is not static, but is assumed to be different for every input, so multiple inputs no longer naturally batch together in the same way. The dynamic batching algorithm overcomes this difficulty. Given a set of computation graphs as input, each of which has a different size and topology, it will rewrite the graphs by batching together all instances of the same operation that occur at the same depth in the graph. The rewriting process inserts additional concat and gather operations to move data between the batched operations; the indices to gather encode the topology of the original input graphs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a964743c",
+                        "type": "paragraph",
+                        "text": "We distinguish between individual operations appearing as nodes in the underlying data-flow graph, such as addition or matrix-multiply, and small sub-graphs that conceptually act as functions over tensors, such as a feed-forward layer or LSTM cell. We refer to the former as \"ops\", and to the latter as \"operations.\" Operations, (i.e. sub-graphs), form the building-blocks from which neural networks with DCGs are composed; dynamic batching schedules operations, not ops. Our algorithm requires that all operations which might be used be specified in advance, and it enumerates them for scheduling purposes. For example, a binary TreeRNN for NLP parse trees has two operations: embedding table lookups for words at the leaves of the tree, and RNN cells for the non-terminals.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4ff26387",
+                        "type": "paragraph",
+                        "text": "The inputs and outputs of operations have tensor types. Each input or output may have a different type, but all types must be fixed and fully specified in advance. A tensor type consists of a shape, x 1 , . . . x n , together with a scalar data type (e.g. float32). The inputs to an operation shall be tensors of dimension (b, x 1 , . . . x n ), where b is the batch size and x 1 . . . x n is the shape of corresponding input tensor type. The outputs must all be tensors of dimension (b, y 1 , . . . y m ), where y 1 , . . . y m is the shape of the corresponding output tensor type. Operations must be polymorphic with respect to the batch size, because the batch size will change each time the operation is invoked, depending on the topologies of the input graphs. However, their tensor types are fixed, so that it is possible to assign a known tensor type to each edge in the input computation graph.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1d3b0261",
+                        "type": "paragraph",
+                        "text": "The dynamic batching algorithm takes a directed acyclic computation graph as input. A batch of multiple input graphs can be treated as a single disconnected graph. Source nodes are constant tensors, and non-source nodes are operations. Edges connect one of the outputs of a node to one of the inputs of another node. Scheduling is performed using a greedy algorithm:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2d81418b",
+                        "type": "paragraph",
+                        "text": "\u2022 Assign a depth to each node in the graph. Nodes with no dependencies (constants) are assigned depth zero. Nodes with only dependencies of depth zero are assigned depth one, nodes whose dependencies have a maximum depth of one get assigned depth two, etc.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_590debc1",
+                        "type": "paragraph",
+                        "text": "\u2022 Insert pass-through (identity) operations so that an operation at depth d + 1 only refers to results at depth d.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bc02a478",
+                        "type": "paragraph",
+                        "text": "\u2022 Batch together all nodes invoking the same operation at the same depth into a single node.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_03fcf087",
+                        "type": "paragraph",
+                        "text": "\u2022 Concatenate all outputs which have the same depth and tensor type. The order of concatenation corresponds to the order in which the dynamic batching operations were enumerated.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7169b458",
+                        "type": "paragraph",
+                        "text": "\u2022 Assign a label (d, t, i) to each edge in the original graph, where d is the depth, t is the tensor type, and i is the integer index for that edge into the (concatenated) outputs for d, t. The schedule for the graph consists of the indices i for all edges, which are grouped together by depth and operation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1cc4a835",
+                        "type": "paragraph",
+                        "text": "In our TensorFlow implementation, each dynamic operation is instantiated once in the static data-flow graph. The inputs to each operation are tf.gather ops, and the outputs are fed into tf.concat ops, as described above. These TensorFlow ops are then placed within a tf.while_loop. Each iteration of the loop will evaluate all of the operations at a particular depth. The loop maintains state variables for each tensor type t, and feeds the output of concat for tensor type t and iteration d into the input of the gathers at tensor type t and iteration d + 1. The indices for gather at iteration d are drawn from the edge labels i for depth d in the schedule. The initial values for the state variables at iteration/depth 0 are the constants in the input graph. Dynamic batching allows us to construct a static TensorFlow graph that contains a single instance of each operation, yet can emulate input graphs of arbitrary size and topology where operations may appear an arbitrary number of times. The TensorFlow concat, gather, and while_loop ops are all differentiable, so gradients calculations and back-propagation do not require any additional code.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e4ae4afc",
+                        "type": "paragraph",
+                        "text": "For example, a binary TreeRNN as described above yields a TensorFlow data-flow graph with a tf.while_loop whose body is shown on the left of Figure 1 . Here each gather has an additional input (the indices for the given op at the given depth) which picks out which elements the operations are to be called with. The long downward arrows are the pass-throughs. The algorithm consumes a tree such as the one shown on the right of Figure 1 and turns it into inputs for the gather operations at each depth (here depth is the loop counter for the tf.while_loop.)",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2ddb0029",
+                "title": "EXPERIMENTAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_13e4fbc3",
+                        "type": "paragraph",
+                        "text": "We have implemented dynamic batching as part of a new library, TensorFlow Fold, and designed a synthetic speed benchmark to compare it with manual batching in native TensorFlow. The benchmark uses the same underlying kernels and execution engine in both cases. Native TensorFlow cannot batch together trees of different shapes so, for testing purposes, we use a batch of random binary trees, all of which have the same shape. These test results thus represent a best-case scenario, in which all operations can be batched together perfectly. For the manual batching tests, we construct a static data-flow graph of operations corresponding to the shape of the tree. For the dynamic batching tests, we traverse each tree to construct a schedule, as described above.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7058fca9",
+                        "type": "paragraph",
+                        "text": "The leaves of the tree are lookups into an embedding table, while the non-terminals implement a variant of the Tree-LSTM (Tai et al., 2015) equations. The tree size is 128, with a state size of 1024 for the LSTM. The CPU tests were run on a Dell z620 workstation with dual 8-core Intel Xeon processors (32 hardware threads), and the GPU tests were done using a consumer Nvidia GeForce GTX-1080 card. We compare manual batching, dynamic batching where all trees have the same shape, and dynamic batching where each tree has a different shape (the column marked \"full dynamic\"). There is no measurable penalty for dealing with trees of different shapes.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8599e06b",
+                        "type": "paragraph",
+                        "text": "The test results shown in Table 1 emphasize the importance of batching, especially on GPUs. Tensor-Flow will launch a GPU kernel for every node in the tree, so there is a fixed overhead, proportional to the size of the tree, that dominates execution for small batch sizes. TensorFlow does not begin to saturate the GPU until relatively large batch sizes -1024 or higher. The difference in speed between fully-batched and unbatched is over 160x.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cddd3c37",
+                        "type": "paragraph",
+                        "text": "Dynamic batching has less kernel invocation overhead because the data-flow graph is smaller. Dynamic batching instantiates each operation only once, and invokes it once for each depth, so the number of kernel invocations is log(n), rather than n, where n is tree size. Dynamic batching thus achieves substantial speedups even at batch size 1, because it batches operations at the same depth within a single tree. However, the extra concat and gather ops that dynamic batching inserts do have a cost. The \"cost ratio\" column above shows the ratio between dynamic and manual batching, in the case where all trees in the batch have the same shape. The cost is only 20% for inference on GPUs with batch-size 1, but rises to 60% for training with backpropagation. The cost is mainly visible at large batch sizes, because it is balanced by the benefit of within-tree batching at smaller sizes.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c1f73029",
+                        "type": "paragraph",
+                        "text": "Even with the cost, dynamic batching yields a 120x speedup over using a batch size of 1 on GPU, and 28x on CPU. The \"speedup ratio\" column above shows the ratio between the per-tree time for dynamic batching on random shapes (\"full dynamic\"), versus manual batching with a batch size of 1. Note that using a batch size of 1 is not actually feasible for TensorFlow, because TensorFlow has a large graph construction overhead, which is not included in these measurements, but it may apply to other libraries that lack such overhead.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_69f2c7a8",
+                "title": "A COMBINATOR LIBRARY FOR NEURAL NETWORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_3bd25a2f",
+                        "type": "paragraph",
+                        "text": "In addition to dynamic batching, the TensorFlow Fold library provides a set of combinators that simplify the task of constructing neural networks for DCGs. Our goal here is to show how dynamic batching enables implementing deep learning models (which are growing ever more complex) at a higher level of abstraction than manual batching. This in turn facilitates a more rapid feedback loop for trying out novel model variants, and thus obtaining superior results.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3bc52813",
+                        "type": "paragraph",
+                        "text": "The design of the library was inspired by functional programming techniques such as parser combinators (Hutton & Meijer, 1996) and arrows (Hughes, 2000) . In a combinator library computations are structured compositionally, by plugging together simpler computations in various ways. The basic unit of computation in TensorFlow Fold is a block, essentially a function from input to output.",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_600bd2c2",
+                        "type": "paragraph",
+                        "text": "In a typical DCG model, the input is a graph or tree of some kind, and the output is a vector, which can be attached to a loss for training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_04310ce5",
+                        "type": "paragraph",
+                        "text": "For example, consider a model where the inputs are sequences of words, of varying lengths, and the output is a sentence vector. Our library provide several different ways of handling sequences. Given a simpler block f that operates on elements of the sequence, or g on pairs of elements, we define the following combinators:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ea1e461b",
+                        "type": "paragraph",
+                        "text": "Applies f to each element of the sequence, e.g. embedding each of the words of a sentence into R N .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fc662dcd",
+                        "type": "paragraph",
+                        "text": "\u2022 Fold(g, z): yields g(. . . g(g(z, x 1 ), x 2 ), . . . x n ). Applies g sequentially in a leftward chain, e.g. running an RNN over a sequence. By default z = 0.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c98f8dac",
+                        "type": "paragraph",
+                        "text": "\u2022 Reduce(g): yields g(Reduce([x 1 , . . . x n/2 ]), Reduce([x n/2 +1 , . . . x n ])). Applies g in a balanced tree, 2 e.g. max or sum-pooling over the elements.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f6ec4d05",
+                        "type": "paragraph",
+                        "text": "Note that it is not necessary to pad or truncate sequences to the same length; dynamic batching handles sequences of differing lengths.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_44b84a49",
+                "title": "TYPE SYSTEM",
+                "blocks": [
+                    {
+                        "block_id": "b_8de643d7",
+                        "type": "paragraph",
+                        "text": "Blocks are statically typed; each block has an input type and an output type. Types are inferred where possible, but must be explicitly specified in some cases. A type is one of the following:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7ddedfe5",
+                        "type": "paragraph",
+                        "text": "\u2022 Input denotes objects in the host language (Python), such as trees and dictionaries.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_41333f13",
+                        "type": "paragraph",
+                        "text": "\u2022 Tensor dtype,shape denotes tensors of a particular dtype and shape. \u2022 Sequence(t), denotes a sequence of elements of type t, of any length.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7d65e3cd",
+                        "type": "paragraph",
+                        "text": "\u2022 Void is the unit type.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1df594e0",
+                        "type": "paragraph",
+                        "text": "For example Sequence(Sequence(Tuple(Tensor float32,[] , Tensor int8, [3, 4] ))) denotes jagged arrays whose elements are pairs (float32, int8 3\u00d74 ).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2db92fa5",
+                "title": "BLOCKS AND COMBINATORS",
+                "blocks": [
+                    {
+                        "block_id": "b_e13d93f5",
+                        "type": "paragraph",
+                        "text": "Blocks are composed hierarchically; a block expression is always a tree. The non-terminals in the tree are combinators such as Map and Fold, which take simpler blocks as arguments. The leaves of the tree are atomic blocks, which include the following:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_93cad4e2",
+                        "type": "paragraph",
+                        "text": "\u2022 Scalar: Input \u2192 Tensor Convert a Python scalar to a tensor. \u2022 InputTransform(h): Input \u2192 Input Applies a user-defined Python function h to pre-process the input.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_260f59d8",
+                        "type": "paragraph",
+                        "text": "In addition to the the sequence combinators described above, important combinators in the library include the following:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c86d0143",
+                        "type": "paragraph",
+                        "text": "\u2022 b1 >> b2: Function composition; the output of b 1 is fed to the input of b 2 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2c9409c3",
+                        "type": "paragraph",
+                        "text": "\u2022 Record({l1 : b1 , . . . ln : bn}: Input \u2192 Tuple(t 1 , . . . t n ) Takes a Python dictionary or tuple as input, and applies each block b i to the field labeled l i , to yield an object of type t i . Returns a tuple of the results for all fields.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_87e4f975",
+                        "type": "paragraph",
+                        "text": "\u2022 OneOf(b1, . . . bn): Input \u2192 t Conditionally dispatches on its input to one of the blocks b 1 , . . . b n .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_22b7b4da",
+                        "type": "paragraph",
+                        "text": "\u2022 Optional(b): Input \u2192 t Applies b if the input is not None, otherwise returns zeros. A special case of OneOf.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e5c0e124",
+                        "type": "paragraph",
+                        "text": "\u2022 AllOf(b1, . . . bn): t 0 \u2192 Tuple(t 1 , . . . 3), feed-forward attention (Section 3.4), binary Tree-LSTMs (Section 3.5), and the weave module for molecule graphs (Section 3.6).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_411d7bb7",
+                "title": "PIPELINES",
+                "blocks": [
+                    {
+                        "block_id": "b_fd0d0dd2",
+                        "type": "paragraph",
+                        "text": "Assume we have a set of (text, label) pairs as input and wish to predict the label from the text. The text consists of words, and we want to use an array of pretrained word embeddings (word_matrix) and corresponding dictionary mapping words to indices (word_idx). We call word_idx.get(word) to obtain the index of word in word_matrix, or None if word is unknown.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_00d95f22",
+                        "type": "paragraph",
+                        "text": "We start by creating a block which embeds each word into a continuous space:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e6239286",
+                        "type": "paragraph",
+                        "text": "This block uses an InputTransform to get the index of a word, which is passed to an Optional block that converts the scalar index to a tensor (or 0 if None). This in turn gets passed to an Embedding operation, which performs a lookup into an embedding table.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4ddb7733",
+                        "type": "paragraph",
+                        "text": "With word2vec in hand, we can define text2vec, which embeds sentences: We use an InputTransform to split the string into words. Then we map the words to vectors with word2vec, and combine the word vectors with a simple RNN, which uses a single fully connected layer FC with d hidden units. The Zeros block defines the initial state for the RNN.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c90d8803",
+                        "type": "paragraph",
+                        "text": "Assume there are n labels; we use a linear layer with n outputs to get unscaled logits:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_21a58dda",
+                        "type": "paragraph",
+                        "text": "For training, we create a Record block to convert the label to a tensor as well, and calculate loss:",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_13762a8d",
+                "title": "COMPLEX COMPOSITIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_0ec8c69b",
+                        "type": "paragraph",
+                        "text": "Recently, Raffel & Ellis (2016) have introduced an attention model for feed-forward neural networks. The model generalizes average-pooling and is defined as:",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9dc82fc7",
+                        "type": "paragraph",
+                        "text": "where a is a learnable function.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e4d9d69a",
+                        "type": "paragraph",
+                        "text": "In this model, the block architecture is not a simple pipeline (i.e. a composition using >>) but instead forms a directed acyclic graph, as illustrated in Figure 2 . A Composition block allows blocks to be composed into DAGs. The model code and details may be found in Appendix A.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1eeef36b",
+                "title": "RECURSIVE DEFINITIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_739abe0e",
+                        "type": "paragraph",
+                        "text": "N -ary Tree-LSTMs (Tai et al., 2015, sec. 3.2) generalize LSTMs from 1 to N previous states. In Tai et al. (2015, sec. 5 .1) they are applied to classify sentences from the Stanford Sentiment Treebank. This corpus consists of binarized constituency parse trees of one-sentence movie reviews, where every node has a sentiment label. At the leaves of the tree, words are mapped to word-embedding vectors which serve as the input to a binary tree-LSTM with 0 for the previous states. At the internal nodes, the LSTM takes 0 as input, and previous states from its two children. More formally,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9dbd587d",
+                        "type": "paragraph",
+                        "text": "where T reeLST M (x, h lef t , h right ) is a learnable function corresponding to Tai et al. (2015) eqs. 9-14 with N = 2. Since a tree is a recursive data type, a model that processes trees must be recursively defined, as illustrated by the cycle in Figure 2 . A ForwardDeclaration allows the creation of recursive models: A forward declaration like expr is not itself a block, but may be called (using the expr() syntax) to create references -i.e. blocks which refer to the declaration. The subsequent call to resolve_to then updates all the references to refer to expr_def.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_80f73f30",
+                        "type": "paragraph",
+                        "text": "The word2vec block is as defined in Section 3.3.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_413240a4",
+                "title": "EXPERIMENTAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_0f51f356",
+                        "type": "paragraph",
+                        "text": "Here we briefly report on some experiments with our implementation of N -ary Tree-LSTMs for sentiment analysis. While we set a new state-of-the-art, that is not really the point here. Our models are not particularly original, and could certainly be implemented without using TensorFlow Fold. What Fold does is to enable simpler and more concise definitions (see Table 3 ), along with faster execution, thus making it easier to rapidly explore novel model variants.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eff45517",
+                        "type": "paragraph",
+                        "text": "We used constituency Tree-LSTMs with tuned Glove vectors for word embedding, which achieved the best results of all sentiment models presented in Tai et al. (2015) . In addition to this specific model, we have explored several novel variants. 4 In particular, Tai et al. ( 2015 ) employed non- 2015 ) report five independent runs, our results are based on thirty independent runs. 5 Noting the small size of this dataset (8544/1101/2210 trees for train/dev/test), we further evaluated an ensemble consisting of these thirty independently trained models; this variant sets a new state-of-the-art on both subtasks.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_013e09ca",
+                "title": "GRAPH CONVOLUTIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_e1b57949",
+                        "type": "paragraph",
+                        "text": "As a final example, we have used the Fold library to implement the graph convolution model introduced by Kearnes et al. (2016) for molecules, which are represented as undirected graphs of atoms. The code is more complex than our previous examples because it involves nested Composition blocks, and is given in Appendix B.",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fe0802f1",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_ee90d764",
+                        "type": "paragraph",
+                        "text": "Neural architectures with dynamic computation graphs suffer from inefficient batching and poor tooling. Dynamic batching solves the former problem in full generality, we believe for the first time.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b595605f",
+                        "type": "paragraph",
+                        "text": "The SPINN architecture (Bowman et al., 2016 ) is an alternative stack-based approach that also enables efficient batching with DCGs, but it is limited to binary trees, and requires padding/truncation to handle trees of different sizes. The Fold library addresses the tooling problem by providing a high-level combinator library which is intended to make it easy for practitioners to rapidly develop and iterate on architectures with DCGs.",
+                        "extracted_citations": [
+                            "Citation_b4"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6546bfae",
+                        "type": "paragraph",
+                        "text": "The experimental results presented in section 2.1 quantify the impact of dynamic batching. The impact of the combinator library is harder to demonstrate quantitatively. One way to approach this (with a large grain of salt) is by comparing lines of code, which we do in Table 3 , vs. the original author's sources. See Appendix C for details on the comparison protocol. Of course, a very short implementation is suboptimal if it comes at the cost of flexibility. The results in Section 3.5.1 show that models from the literature can be reimplemented in Fold, then extended to achieve superior performance. We suspect that other models with DCGs will have quite a bit of \"head room\" as well, due to simply having less work done tuning them compared with more mainstream architectures.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "TensorFlow: Large-scale machine learning on heterogeneous systems Mart\u0131n Abadi Ashish Agarwal Paul Barham Eugene Brevdo Zhifeng Chen Craig Citro Greg S Corrado Andy Davis Jeffrey Dean Matthieu Devin arXiv, 1603.04467 2015. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Learning to compose neural networks for question answering Jacob Andreas Marcus Rohrbach Trevor Darrell Dan Klein NAACL 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Neural machine translation by jointly learning to align and translate Dzmitry Bahdanau Kyunghyun Cho Yoshua Bengio ICLR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Application of cascade correlation networks for structures to chemistry Anna Maria Bianucci Alessio Micheli Alessandro Sperduti Antonina Starita Applied Intelligence 2000",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "A fast unified model for parsing and sentence understanding R Samuel Jon Bowman Abhinav Gauthier Raghav Rastogi Christopher D Gupta Christopher Manning Potts NAACL 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Torch7: A Matlab-like environment for machine learning Ronan Collobert Koray Kavukcuoglu Cl\u00e9ment Farabet BigLearn, NIPS Workshop 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Learning task-dependent distributed representations by backpropagation through structure Christoph Goller Andreas Kuchler In ICNN 1996",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Generalising monads to arrows John Hughes Science of Computer Programming 2000",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Monadic parser combinators Graham Hutton Erik Meijer NOTTCS-TR-96-4 1996 Technical Report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Molecular graph convolutions: moving beyond fingerprints Steven Kearnes Kevin Mccloskey Marc Berndl Vijay Pande Patrick Riley Journal of Computer-Aided Molecular Design 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Imagenet classification with deep convolutional neural networks Alex Krizhevsky Ilya Sutskever Geoffrey E Hinton NIPS 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "When are tree structures necessary for deep learning of representations? Jiwei Li Minh-Thang Luong Dan Jurafsky Eudard Hovy arXiv, 1503.00185 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Tsendsuren Munkhdalai Hong Yu arXiv, 1607.04492 Neural semantic encoders. arXiv, 1607.04315, 2016a. Tsendsuren Munkhdalai and Hong Yu. Neural tree indexers for text understanding 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "GPU implementation of neural networks Kyoung-Su Oh Keechul Jung Pattern Recognition 2004",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "B Jordan Pollack Recursive distributed representations 1990",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Feed-forward networks with attention can solve some long-term memory problems Colin Raffel Daniel Ellis ICLR (Workshop Track) 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Stanislau Semeniuta Aliaksei Severyn Erhardt Barth arXiv, 1603.05118 Recurrent dropout without memory loss 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Improved semantic representations from tree-structured long short-term memory networks Kai Sheng Tai Richard Socher Christopher D Manning NAACL 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Theano: A Python framework for fast computation of mathematical expressions Theano Development Team arXiv, 1605.02688 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Improving the speed of neural networks on CPUs Vincent Vanhoucke Andrew Senior Mark Z Mao Deep Learning and Unsupervised Feature Learning, NIPS Workshop 2011",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.3992,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "The paper describes a novel technique to improve the efficiency of computation graphs in deep learning frameworks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "An impressive speedup can be observed in their implementation within TensorFlow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The content is presented with sufficient clarity, although some more graphical illustrations could be useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "This work is relevant in order to achieve highest performance in neural network training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Pros:\n\n- significant speed improvements through dynamic batching\n- source code provided\n\n\nCons:\n\n- the effect on a large real-world (ASR, SMT) would allow the reader to put the improvements better into context\n- presentation/vizualisation can be improved",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.2306,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": 5,
+                "impact": 4
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "The paper presents a novel strategy to deal with dynamic computation graphs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "They arise, when the computation is dynamically influenced by the input data, such as in LSTMs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "The authors propose an `unrolling' strategy over the operations done at every step, which allows a new kind of batching of inputs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "The presented idea is novel and the results clearly indicate the potential of the approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "For the sake of clarity of the presentation I would drop parts of Section 3 (\"A combinator library for neural networks\") which presents technical details that are in general interesting, but do not help the understanding of the core idea of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "The presented experimental results on the \"Stanford Sentiment Treebank\" are in my opinion not supporting the claim of the paper, which is towards speed, than a little bit confusing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "It is important to point out that even though the presented ensemble \"[...] variant sets a new state-of-the-art on both subtasks\" [p.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "8], this is not due to the framework, not even due to the model (comp.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "lines 4 and 2 of Tab.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "2), but probably, and this can only be speculated about, due to the ensemble averaging.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "I would appreciate a clearer argumentation in this respect.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_11",
+                    "text": "Update on Jan.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_12",
+                    "text": "17th:\nafter the authors update for their newest revision, I increase my rating to 8 due to the again improved, now very clear argumentation.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_6",
+            "type": "Human",
+            "liang_alpha_score": 0.3992,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": 5
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_6_s_0",
+                    "text": "The paper describes a novel technique to improve the efficiency of computation graphs in deep learning frameworks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_1",
+                    "text": "An impressive speedup can be observed in their implementation within TensorFlow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_2",
+                    "text": "The content is presented with sufficient clarity, although some more graphical illustrations could be useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_3",
+                    "text": "This work is relevant in order to achieve highest performance in neural network training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_4",
+                    "text": "Pros:\n\n- significant speed improvements through dynamic batching\n- source code provided\n\n\nCons:\n\n- the effect on a large real-world (ASR, SMT) would allow the reader to put the improvements better into context\n- presentation/vizualisation can be improved",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_8",
+            "type": "Human",
+            "liang_alpha_score": 0.3992,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_8_s_0",
+                    "text": "The paper describes a novel technique to improve the efficiency of computation graphs in deep learning frameworks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_1",
+                    "text": "An impressive speedup can be observed in their implementation within TensorFlow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_2",
+                    "text": "The content is presented with sufficient clarity, although some more graphical illustrations could be useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_3",
+                    "text": "This work is relevant in order to achieve highest performance in neural network training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_4",
+                    "text": "Pros:\n\n- significant speed improvements through dynamic batching\n- source code provided\n\n\nCons:\n\n- the effect on a large real-world (ASR, SMT) would allow the reader to put the improvements better into context\n- presentation/vizualisation can be improved",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_13",
+            "type": "Human",
+            "liang_alpha_score": 0.2306,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": 5,
+                "impact": 4
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_13_s_0",
+                    "text": "The paper presents a novel strategy to deal with dynamic computation graphs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_1",
+                    "text": "They arise, when the computation is dynamically influenced by the input data, such as in LSTMs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_2",
+                    "text": "The authors propose an `unrolling' strategy over the operations done at every step, which allows a new kind of batching of inputs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_3",
+                    "text": "The presented idea is novel and the results clearly indicate the potential of the approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_4",
+                    "text": "For the sake of clarity of the presentation I would drop parts of Section 3 (\"A combinator library for neural networks\") which presents technical details that are in general interesting, but do not help the understanding of the core idea of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_5",
+                    "text": "The presented experimental results on the \"Stanford Sentiment Treebank\" are in my opinion not supporting the claim of the paper, which is towards speed, than a little bit confusing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_6",
+                    "text": "It is important to point out that even though the presented ensemble \"[...] variant sets a new state-of-the-art on both subtasks\" [p.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_7",
+                    "text": "8], this is not due to the framework, not even due to the model (comp.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_8",
+                    "text": "lines 4 and 2 of Tab.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_9",
+                    "text": "2), but probably, and this can only be speculated about, due to the ensemble averaging.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_10",
+                    "text": "I would appreciate a clearer argumentation in this respect.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_11",
+                    "text": "Update on Jan.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_12",
+                    "text": "17th:\nafter the authors update for their newest revision, I increase my rating to 8 due to the again improved, now very clear argumentation.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.3992,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": 5
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "The paper describes a novel technique to improve the efficiency of computation graphs in deep learning frameworks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "An impressive speedup can be observed in their implementation within TensorFlow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "The content is presented with sufficient clarity, although some more graphical illustrations could be useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "This work is relevant in order to achieve highest performance in neural network training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "Pros:\n\n- significant speed improvements through dynamic batching\n- source code provided\n\n\nCons:\n\n- the effect on a large real-world (ASR, SMT) would allow the reader to put the improvements better into context\n- presentation/vizualisation can be improved",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_b8f4c822",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_b8f4c822",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_b8f4c822",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_b8f4c822",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_b8f4c822",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_b8f4c822",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_b8f4c822",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_6bdc31a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b8f4c822"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_6032d8c7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_6bdc31a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6032d8c7"
+        },
+        {
+            "source": "sec_6bdc31a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_237bfc68"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4d4a412f"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a964743c"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4ff26387"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d3b0261"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2d81418b"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_590debc1"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bc02a478"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_03fcf087"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7169b458"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1cc4a835"
+        },
+        {
+            "source": "sec_30bfd741",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4ae4afc"
+        },
+        {
+            "source": "sec_2ddb0029",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_13e4fbc3"
+        },
+        {
+            "source": "b_7058fca9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_2ddb0029",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7058fca9"
+        },
+        {
+            "source": "sec_2ddb0029",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8599e06b"
+        },
+        {
+            "source": "sec_2ddb0029",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cddd3c37"
+        },
+        {
+            "source": "sec_2ddb0029",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c1f73029"
+        },
+        {
+            "source": "sec_69f2c7a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3bd25a2f"
+        },
+        {
+            "source": "b_3bc52813",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_3bc52813",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_69f2c7a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3bc52813"
+        },
+        {
+            "source": "sec_69f2c7a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_600bd2c2"
+        },
+        {
+            "source": "sec_69f2c7a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_04310ce5"
+        },
+        {
+            "source": "sec_69f2c7a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ea1e461b"
+        },
+        {
+            "source": "sec_69f2c7a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fc662dcd"
+        },
+        {
+            "source": "sec_69f2c7a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c98f8dac"
+        },
+        {
+            "source": "sec_69f2c7a8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f6ec4d05"
+        },
+        {
+            "source": "sec_44b84a49",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8de643d7"
+        },
+        {
+            "source": "sec_44b84a49",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ddedfe5"
+        },
+        {
+            "source": "sec_44b84a49",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_41333f13"
+        },
+        {
+            "source": "sec_44b84a49",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7d65e3cd"
+        },
+        {
+            "source": "sec_44b84a49",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1df594e0"
+        },
+        {
+            "source": "sec_2db92fa5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e13d93f5"
+        },
+        {
+            "source": "sec_2db92fa5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_93cad4e2"
+        },
+        {
+            "source": "sec_2db92fa5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_260f59d8"
+        },
+        {
+            "source": "sec_2db92fa5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c86d0143"
+        },
+        {
+            "source": "sec_2db92fa5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2c9409c3"
+        },
+        {
+            "source": "sec_2db92fa5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_87e4f975"
+        },
+        {
+            "source": "sec_2db92fa5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_22b7b4da"
+        },
+        {
+            "source": "sec_2db92fa5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e5c0e124"
+        },
+        {
+            "source": "sec_411d7bb7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fd0d0dd2"
+        },
+        {
+            "source": "sec_411d7bb7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_00d95f22"
+        },
+        {
+            "source": "sec_411d7bb7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6239286"
+        },
+        {
+            "source": "sec_411d7bb7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4ddb7733"
+        },
+        {
+            "source": "sec_411d7bb7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c90d8803"
+        },
+        {
+            "source": "sec_411d7bb7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_21a58dda"
+        },
+        {
+            "source": "b_0ec8c69b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_13762a8d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ec8c69b"
+        },
+        {
+            "source": "sec_13762a8d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9dc82fc7"
+        },
+        {
+            "source": "sec_13762a8d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4d9d69a"
+        },
+        {
+            "source": "sec_1eeef36b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_739abe0e"
+        },
+        {
+            "source": "b_9dbd587d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_1eeef36b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9dbd587d"
+        },
+        {
+            "source": "sec_1eeef36b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_80f73f30"
+        },
+        {
+            "source": "sec_413240a4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0f51f356"
+        },
+        {
+            "source": "b_eff45517",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_413240a4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eff45517"
+        },
+        {
+            "source": "b_e1b57949",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_013e09ca",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e1b57949"
+        },
+        {
+            "source": "sec_fe0802f1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee90d764"
+        },
+        {
+            "source": "b_b595605f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_fe0802f1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b595605f"
+        },
+        {
+            "source": "sec_fe0802f1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6546bfae"
+        }
+    ]
+}

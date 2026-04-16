@@ -1,0 +1,1112 @@
+{
+    "paper_metadata": {
+        "paper_id": "HJDUjKeA-",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_d3fb2d2b",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_c80ab309",
+                        "type": "paragraph",
+                        "text": "Humans are able to parse the world as a collection of objects, that are discrete, persistent, and can be interacted with. Humans can use this representation for planning, reasoning, and exploration. When playing a game such as Montezuma's Revenge in Atari, a human can identify the different objects, such as an avatar that moves in a 2-D plane, a rolling skull, and a key. Even if they do not know initially what to do, they can explore the state space using the prior knowledge that objects persist, move around contiguously, and can interact with other objects in local proximity. This explicit representation of objects and prior knowledge is missing from artificial reinforcement learning agents, such as DQN (Mnih et al. (2015) ). Although architectures such as DQN attain superhuman performance on many games, in particular those whose reward signal is dense (see e.g., Bellemare et al. (2016) ), its performance on games with sparse rewards, or greater planning complexity, is often below that of humans. Perhaps explicit object knowledge is one missing ingredient, which would allow for more powerful exploration than existing epsilon-greedy methods (that simply execute a random walk in action space).",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_23e74ae9",
+                        "type": "paragraph",
+                        "text": "In this paper we set forth a method to learn objects from pixels in an unsupervised manner. By an object representation, we mean a \"tabular\" representation, where there is a list of objects, and each object has a position and a set of features (represented by a vector).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_14502903",
+                        "type": "paragraph",
+                        "text": "Learning such a representation from input pixels is a non-trivial challenge. The space of possible inputs is a connected manifold, but the space of object representations is disconnected; for example, there is no continuous transformation from 4 objects to 5. We address this challenge by introducing an object presence value between 0 and 1, which is a continuous relaxation of whether an object is present or not.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_67da4b3c",
+                        "type": "paragraph",
+                        "text": "We give a method of tracking the same object across multiple frames (object persistence), and give an architecture that can perform calculations using the object representation. We test this model in the Atari domain, and show that it is possible to do reinforcement learning on a learnt object representation. Objects such as the ball and paddles in Pong, and the submarine and fish in Seaquest, emerge naturally without supervision. We give results and insights into how best to calculate global values from a collection of objects using an \"interaction net\" style architecture, where calculations are invariant to object order.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a3df3b20",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_ff582d9b",
+                        "type": "paragraph",
+                        "text": "The main contributions of our work are a method for learning an object representation from pixels without supervision of what constitutes an object, and how to use this representation for doing reinforcement learning. There are various papers that have looked at extracting objects from scenes without object labels, or using an object representation to perform calculations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a566fb97",
+                        "type": "paragraph",
+                        "text": "The model in Attend, Infer, Repeat: Fast Scene Understanding with Generative Models (Eslami et al. ( 2016 )) produces objects from pixels in an unsupervised manner. For example, on a dataset of images consisting of a few scattered MNIST digits, their model learns to represent each digit as an object. Their model is based on recurrence, at each step giving an object location, and as such is able to deal with overlapping objects (which our model cannot). However, our model can handle larger images with more objects, possibly because we avoid both recurrence and the use of spatial transformers, which may have issue \"homing in\" on undiscovered objects: we can detect tens of objects in Atari images, whereas the datasets they use only have up to three objects. Another (completely different) approach to detecting objects is given by Stewart and Ermon (2017), using the prior that any detected object must obey physical laws, such as following a parabola when in free fall. This relies on having access to a contiguous sequence of frames.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_86313418",
+                        "type": "paragraph",
+                        "text": "There are various models that have a \"two-stage\" architecture. Garnelo et al. (2016) propose a class of architectures for doing reinforcement learning, consisting of a \"neural back end\" and a \"symbolic front end\", where the neural back end is responsible for recognizing objects from low-level pictures, and the symbolic front end does fast generalizable reinforcement learning using these objects. More specific to our model, there are various models that use an interaction network architecture on top of a convolutional stack from an input image (as we do). Visual interaction networks (Watters et al. ( 2017 )) learns to extract a few objects from pixels and predict future state (such as bouncing balls) using a supervised training loss. A simple neural network module for relational reasoning (Santoro et al. (2017) ) learns to answer questions from pixels that involve spatial reasoning; the intermediary representation fed into the interaction network is not quite a set of objects, but rather the output from the final convolutional layer.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b14"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_efe73066",
+                "title": "THE MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_eeedbf6c",
+                        "type": "paragraph",
+                        "text": "Here we describe the differentiable mapping from pixels to a list of objects, which produces a list",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_68ef818b",
+                        "type": "paragraph",
+                        "text": ", where for the ith object, x i \u2208 R 2 is its position, f i \u2208 R n f is its features (for some n f \u2265 1), and p i \u2208 [0, 1] is its \"presence\", which should be interpreted as a continuous relaxation of whether the ith object is present or not. The object representation acts as a bottleneck; objects are then learnt by minimizing a loss function using the object representation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8c5f4e59",
+                        "type": "paragraph",
+                        "text": "The model is depicted in Figure 1 . Here we give a high-level overview, and below we are more precise. To obtain the list of objects, the input pixels go through a series of transformations to obtain the final list. First, the pixels are mapped through a convolutional input network, to obtain two tensors: a 2-D mask tensor, and a 3-D features tensor, with the same height and width. The mask tensor is the additional output of a sigmoid layer, so that it is scaled between 0 and 1. Second, this mask tensor is used to identify object positions: for each local maxima in the mask, we sample the object position from a diagonal Gaussian whose statistics match the mask in a small window centered at the local maxima. This gives a list of object positions, and we associate object features with these by convolving the mask with the feature tensor, and use the value of the local maxima for the presence value of each object. Third, we take the top k of these objects by presence value for computational efficiency further down the \"pipeline\". Fourth, we add noise to the presence values (before they are used by downstream loss functions); this helps in exploration and learning sharp mask values. Finally, we include an optional loss term that to discourage useless objects from appearing.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aa7309e8",
+                        "type": "paragraph",
+                        "text": "We now describe the model in mor edetail and more formally. First, map the input pixels through a convolutional stack, with a final sigmoid activation in the first case, to produce a pair of tensors:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0796dd16",
+                        "type": "paragraph",
+                        "text": "Roughly speaking, the local maxima of the mask give the approximate object positions, and the values of the mask at these points will give the presence values. However, the local maxima are integer coordinates and not differentiable, so we modify this by taking the object position as the weighted average in a small window around the local maxima, as follows.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f960e0a3",
+                        "type": "paragraph",
+                        "text": "For coordinates (a, b) and r \u2265 1, let B r (a, b) = {(c, d) : |a -c|, |b -d| \u2264 r} be the window (or \u221e -ball) around (a, b) with radius r. (In our application to Atari, we take r = 2.) With the notation",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_52674225",
+                        "type": "paragraph",
+                        "text": "be the set of local maxima. (In our implementation, we add a small uniform random number to each pixel of the mask to break ties, ensuring that there is at most one maxima in each window.) For each (a, b) \u2208 M , define the mean position x \u00b5 (a, b) \u2208 R 2 as the center of mass within this window:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5242e59c",
+                        "type": "paragraph",
+                        "text": "We could use x \u00b5 (a, b) as an object position. However, it is better to sample the object position from a diagonal Gaussian with statistics of the mask inside the local window, because this encourages the mask to produce sharp values about the actual object positions, and encourages exploration in the latent space of positions. Thus define x \u03c3 (a, b) 2 \u2208 R 2 to be the diagonal of the covariance matrix of the mask within the window B r (a, b). In sampling the position, we subtract a small constant from this, so it is possible to have fractional (non-integer) positions with zero standard deviation 1 . We need to subtract at least 0.5, and empirically 1 works well. Thus, for local maxima (a, b) \u2208 M , we take the final position to be the Gaussian sample",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_48a18f06",
+                        "type": "paragraph",
+                        "text": "We can make this a differentiable function of x \u00b5 and x \u03c3 by the reparameterization trick (introduced in the context of variational inference independently by Kingma and Welling (2014) , Rezende et al. ( 2014 ), and Titsias and Lazaro-Gredilla ( 2014 )).",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6e9cfe99",
+                        "type": "paragraph",
+                        "text": "The object feature vector is the average of the feature tensor in the window about the maxima, weighted by the mask,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f3b9f167",
+                        "type": "paragraph",
+                        "text": "Putting this together, each (a, b) \u2208 M indexes an object, with position x(a, b) given by (1), feature vector f (a, b) given by (2), and presence q(a, b) equal to m(a, b).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c9fae461",
+                        "type": "paragraph",
+                        "text": "Select the top k values of m(a, b) with (a, b) \u2208 M (see motivation below) to produce a list of objects with pre-modified presence values",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c2460b67",
+                        "type": "paragraph",
+                        "text": "(If there are less than k objects, then pad using arbitrary values for the position and features, and with presence values equal to zero.)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_36ad28f1",
+                        "type": "paragraph",
+                        "text": "To produce the final presence values p i , we use the concrete transformation (Maddison et al. (2017) and Jang et al. ( 2017 )) with temperature equal to 1 (see justification below), which in this case simplifies to",
+                        "extracted_citations": [
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4def6cac",
+                        "type": "paragraph",
+                        "text": "where u 0 and u 1 are independent uniform random variables in the range [0, 1] (independently for each object).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_05b40e08",
+                "title": "USING THE PRESENCE VALUE",
+                "blocks": [
+                    {
+                        "block_id": "b_0a2c3189",
+                        "type": "paragraph",
+                        "text": "We require any function defined on the objects to be smoothly gated on the presence (so that an object with presence 0 has no effect on the output). In this way, minimizing a loss defined on this function encourages useful objects to have larger presence (i.e., to emerge). See Sections 4 and 5 for examples of this gating.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e1675725",
+                "title": "WHY DO WE ADD \"NOISE\" TO THE PRESENCE VALUES?",
+                "blocks": [
+                    {
+                        "block_id": "b_65094c82",
+                        "type": "paragraph",
+                        "text": "In reality, objects are either \"fully present\" or not present at all; it does not make sense to have an object half present. Thus we wish the presence values to go to 0 or 1. To achieve this, we add noise to the presence values from the mask before they are used to gate any functions. The concrete transformation used satisfies the property that presence values close to 0 or 1 tend not to change much, but presence values near 0.5 can change a lot. In this way, if an object is useful, then learning encourages the presence value to go to 1 where the output is a more deterministic function of the object. The concrete transformation as described works well (much better than with no noise at all), and experimentally the best temperature to take is 1. We did not investigate annealing.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_10383088",
+                "title": "WHY DO WE TAKE THE TOP K?",
+                "blocks": [
+                    {
+                        "block_id": "b_47e64284",
+                        "type": "paragraph",
+                        "text": "There are a variable and potentially large number of objects indexed by the local maxima of the mask. Objects with small presence value do not have much effect on the output, and it is computationally wasteful to retain them. Furthermore for our TensorFlow implementation, it is convenient to have a fixed number of objects. So we simply take the top k objects for a sufficiently large k (we take k = 16). This is not the same as assuming there are exactly k objects, since having a presence close to zero is the same as not having an object.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e777c564",
+                        "type": "paragraph",
+                        "text": "Taking a fixed number objects introduces an obvious risk: objects that are useful to minimize the loss, but have an initially small presence value, may never be \"seen\", as there is nothing explicitly discouraging useless objects from occupying the top k slots 2 . Other approaches for sampling k objects cannot ameliorate this issue either: any reasonable sampling method will not consistently select objects for which there are at least k other objects with larger presence.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_48d84af8",
+                        "type": "paragraph",
+                        "text": "Thus to discourage useless objects from appearing, it is sometimes necessary to add a loss penalty to discourage the \"expected slot occupancy\" going beyond some amount \u03b1,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_146f6b79",
+                        "type": "paragraph",
+                        "text": "(In our application to Atari, we take \u03b1 = 0.5.)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_27c5b45b",
+                        "type": "paragraph",
+                        "text": "We have experimented with other schemes, such as sampling objects in proportion to their presence value, but have found that these more complex schemes do not perform as well.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2df56c20",
+                "title": "COMPARISON WITH OTHER ATTENTION MODELS",
+                "blocks": [
+                    {
+                        "block_id": "b_55980ab2",
+                        "type": "paragraph",
+                        "text": "It is interesting to compare the attention with loss scheme used here with that in Shazeer et al. ( 2017 ) (used for selecting network modules to perform forward calculations), as it highlights what is and is not important for us. Probably the main difference is that in our use case, it is far more important that all the useful objects are attended to (for example, in playing Pong, we always want to aware of the ball); after this, remaining slots can be filled with only potentially useful objects. Whereas in their model, if a quite useful network module is not selected, then many other modules will still perform well, and indeed they do not always want to select the currently most useful modules to avoid having only a few modules becoming \"experts\". These differences mean that we always have to select the top k objects (before noise has been added), and otherwise add a small loss term to discourage useless objects from appearing; there is no \"load balancing loss\".",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_49891319",
+                "title": "MATCHING OBJECTS IN SUCCESSIVE FRAMES",
+                "blocks": [
+                    {
+                        "block_id": "b_a2998acf",
+                        "type": "paragraph",
+                        "text": "For some applications, it is useful to identify the same object across successive frames. We do this by constructing a 2k\u00d72k bipartite graph with vertex classes A = {a 1 , . . . , a 2k } and B = {b 1 , . . . , b 2k } with edge weights defined below, and find a minimal edge weight perfect matching. Vertices with index \u2264 k correspond to objects, and those with index \u2265 k + 1 correspond to non-objects. For example, suppose a i and b j are matched; if 1 \u2264 i, j \u2264 k, then i and j correspond to the same object; if on the other hand 1 \u2264 i \u2264 k < j, then object i is not present in the second frame. The perfect matching can be found in polynomial time (e.g., by the Hungarian algorithm).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f0c1f0c8",
+                        "type": "paragraph",
+                        "text": "The following constants control the matching thresholds. s = min{height, width} length scale c t = 0.02 matching threshold c p = 0.03 presence weight coefficient The weights of the bipartite graph are",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1de7e61c",
+                        "type": "paragraph",
+                        "text": "Observe that the constants have been judiciously chosen so that, for example, object i in the first frame will never be matched to object j in the second frame if",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1169a3c1",
+                        "type": "paragraph",
+                        "text": "A minimal weight matching also has a probabilistic interpretation. Ignoring the presence term in (5) and conditioning on there being no unmatched objects, then such a matching can be interpreted as the maximal likelihood assignment of objects, if the objects in the second frame are sampled from Gaussian random variables with identical standard deviation and means equal to the positions of the objects in the first frame (under some permutation of the object order).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b926d40b",
+                        "type": "paragraph",
+                        "text": "We have not included features in the weights in ( 5 ), since it is not clear what scaling to give them, although adding such a term may further improve the quality of the matching.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_307b5d21",
+                        "type": "paragraph",
+                        "text": "This matching mechanism is entirely deterministic with no learnable parameters, and we have found it works well in practice. However, we could give a learnable bias to the edge weights, and interpret the edge weights as log probabilities and use ideas from the concrete distribution to allow the network to learn how to match objects.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_405dad13",
+                        "type": "paragraph",
+                        "text": "For an example of object matching in successive frames in this model, see the video at https: //goo.gl/AEXEQP (matched objects get the same colour in successive frames).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_def27cde",
+                        "type": "paragraph",
+                        "text": "Figure 2 : Our calculation architecture consists of three streams: a global stream, a per-object stream, and a per-object-pair stream. Each \"layer\" consists of mixing, followed by a linear transformation and a ReLU activation (for non-final layers). The layers are repeated several times.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e5d24894",
+                        "type": "paragraph",
+                        "text": "Figure 3 : One surprising lesson was that the interaction network-style architectures need to be quite deep to be effective (and learn Q-values), despite having \"clear\" representations for input. This is surprising as DQN and A3C have success with relative shallow architectures (4 to 5 layers including both convolutional and fully connected layers). These graphs show the effect on average episode score on some of the Atari games, according to the number of layers in the interaction network alone. The x-axis scale is one tick is 800k agent steps.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4050fc6c",
+                        "type": "paragraph",
+                        "text": "1. The output should be invariant to object order.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d5db6646",
+                        "type": "paragraph",
+                        "text": "2. The output should be invariant to objects with zero presence, and otherwise smoothly gated on the presence.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_12cc9bbb",
+                        "type": "paragraph",
+                        "text": "3. The architecture should support recurrence.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2c024bf9",
+                        "type": "paragraph",
+                        "text": "(Recurrence is required for reinforcement learning. For example, it is is important to know which direction the ball is travelling in in Pong. DQN avoids recurrence by stacking together input frames, however, this makes it much harder for the architecture to learn objects, which no longer have a single well-defined location.)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1e2be5f8",
+                        "type": "paragraph",
+                        "text": "We use ideas introduced in interaction networks (Battaglia et al. (2016) ), also introduced in parallel by Chang et al. (2016) , for the architecture. Precise details are given in Appendix B.3. The \"oxygen remaining\" bar is not learnt in this run, but the submarine and other objects are learnt.",
+                        "extracted_citations": [
+                            "Citation_b0",
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1d0f2570",
+                        "type": "paragraph",
+                        "text": "The architecture is composed of identical layers (with separate parameters), that operate on three streams of information. The input and output of each layer is a triple (A, B, C), where A \u2208 R a , B \u2208 R k\u00d7b , and C \u2208 R k\u00d7k\u00d7c ; these represent global quantities, per-object quantities, and perobject-pair quantities respectively (see Figure 2 ). Typically we have a b c for computational expediency (we take a = 512, b = 256, c = 64 for reinforcement learning in Atari), although the input to the first layer has a = c = 0 and b = n f + 2 being the concatenation of the object features and its position, and the output of the final layer has a equal to the size of quantity required for the global output (e.g., the number of actions for Q-learning).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_29cb3de4",
+                        "type": "paragraph",
+                        "text": "Each layer performs its calculation by mixing its three inputs (broadcasting, reducing, and concatenating as appropriate), before applying a learnable linear transformation. In the linear transformation, we achieve invariance to object order by treating the object dimension(s) as batch dimensions. We use ReLUs for internal activations. The reduction operation is an average over an object axis as in interaction networks, except we also gate on the object presence so the output is invariant to objects with presence 0. We also found it useful to allow self-gating of the network, as this allows the network to ignore objects that are not useful for calculating Q-values, without penalizing them if they are useful in reconstructing the input as described in Section 5.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_509ecd64",
+                        "type": "paragraph",
+                        "text": "To make the network recurrent, we maintain a per-object state vector (of size 20 for Atari), which is updated using LSTM-style gates: if the ith object has state s t-1 i at time t -1, then its state in the next frame is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b9d4b509",
+                        "type": "paragraph",
+                        "text": "where f t i , i t i , j t i are output from the per-object stream, and this state is fed back into the per-object stream at the next time step. (Objects are paired in adjacent frames using the pairing described in Section 3.5, and objects that appear in a given frame have state initialized to zero.)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5694c23e",
+                        "type": "paragraph",
+                        "text": "We chose this architecture because it is fairly homogeneous (there are two axes of freedom: the number of layers, and the sizes of the streams), and it allows the input and output of global and per-object information, such as object state in recurrence, global Q-values, or per-object Q-values for applications such as object-based exploration.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_55e7bc70",
+                "title": "PIXEL DECODER",
+                "blocks": [
+                    {
+                        "block_id": "b_75c6fce0",
+                        "type": "paragraph",
+                        "text": "An easy and useful way of learning objects from pixels is to use them to reconstruct the input. We do this by drawing each object using a stack of transpose convolutional layers (Zeiler et al. ( 2010 )) with the object features as inputs, and composing these with a learnt static background, positioned using the object position and gated using the presence values. The decoder loss decoder is the l 2 pixel reconstruction loss. This model works well for many of the Atari games. Implementation details are in Appendix B.2.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d4a0687a",
+                "title": "APPLICATION: REINFORCEMENT LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_8770c170",
+                        "type": "paragraph",
+                        "text": "As an example application, we show here that it is possible to combine these models to build a reinforcement learning agent. We use distributional Q-learning as in Bellemare et al. (2017) for speed of learning, with outputs calculated from the object representation using the architecture described in Section 4. For Atari games, it is beneficial to use the object reconstruction loss decoder described in Section 5 to bootstrap object identification. We also include the top-k loss top defined in Section 3.3, which is needed in some environments to prevent phantom (useless) objects from appearing. Thus we train our agents using the combined loss",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9e36bde0",
+                "title": "B.1 ENCODER ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_48e6ff7f",
+                        "type": "paragraph",
+                        "text": "The encoder is the most expensive part of the model, as the output mask has the same size as the input, with large receptive field. (Another option is to use a mask with a smaller resolution than 84 \u00d7 84, however, this would also reduce the power to distinguish objects close together.)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0cefcbf5",
+                        "type": "paragraph",
+                        "text": "For a tensor X, define Conv(X, n, t, s) to be the output of a padded convolution on X with n features, kernel size t \u00d7 t and stride s, and define scale(X) to be the scaling of X so that its height and width are both 84. Let ReLU be the rectifier nonlinearity. Let X 1 = ReLU(Conv(I, 30, 5, 2)) \u2208 R 42\u00d742\u00d730 , X 2 = ReLU(Conv(X 1 , 20, 3, 2)) \u2208 R 21\u00d721\u00d720 , and X 3 = Conv(X 2 , n f , 3, 1) \u2208 R 21\u00d721\u00d7n f . The output features are then f = scale(X 3 ). Let X 4 \u2208 R 84\u00d784\u00d7(53+n f ) be the stacking of I, X 1 , X 2 , X 3 after scaling to 84 \u00d7 84. Use a 1 \u00d7 1 convolution to get X 5 = ReLU(Conv(X 4 , 3, 1, 1)) with reduced number of channels. Then the output mask is m = \u03c3(Conv(X 5 , 1, 3, 1)).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4fd34ef7",
+                "title": "B.2 DECODER ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_7850f4ef",
+                        "type": "paragraph",
+                        "text": "We draw each object using a stack of transpose convolutional layers (Long et al. (2015) ) with the feature vector (as a 1\u00d71\u00d7n f tensor) as input. We use 3 layers, all with kernel size 3\u00d73 and stride 2, and layer sizes 30, 20, 2d, where d = 3 is the number of output channels. Thus each object drawing",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Interaction networks for learning about objects, relations and physics Peter Battaglia Razvan Pascanu Matthew Lai Danilo Jimenez Rezende Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Unifying count-based exploration and intrinsic motivation Marc Bellemare Sriram Srinivasan Georg Ostrovski Tom Schaul David Saxton Remi Munos Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "A distributional perspective on reinforcement learning Marc Bellemare Will Dabney Remi Munos ICML 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "A compositional object-based approach to learning physical dynamics Tomer Michael B Chang Antonio Ullman Joshua B Torralba Tenenbaum arXiv:1612.00341 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Attend, infer, repeat: Fast scene understanding with generative models Nicolas Sm Ali Eslami Theophane Heess Yuval Weber David Tassa Geoffrey E Szepesvari Hinton Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Marta Garnelo Kai Arulkumaran Murray Shanahan arXiv:1609.05518 Towards deep symbolic reinforcement learning 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Categorical reparameterization with gumbel-softmax Eric Jang Shixiang Gu Ben Poole International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Diederik Kingma Jimmy Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Auto-encoding variational bayes P Diederik Max Kingma Welling ICLR 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Fully convolutional networks for semantic segmentation Jonathan Long Evan Shelhamer Trevor Darrell Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition the IEEE Conference on Computer Vision and Pattern Recognition 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "The concrete distribution: A continuous relaxation of discrete random variables Andriy Chris J Maddison Yee Whye Mnih Teh International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Daan Wierstra, Shane Legg, and Demis Hassabis. Human-level control through deep reinforcement learning Volodymyr Mnih Koray Kavukcuoglu David Silver Andrei A Rusu Joel Veness Marc G Bellemare Alex Graves Martin Riedmiller Andreas K Fidjeland Georg Ostrovski Stig Petersen Charles Beattie Amir Sadik Ioannis Antonoglou Helen King Dharshan Kumaran Nature 518 7540 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Asynchronous methods for deep reinforcement learning Volodymyr Mnih Adria Puigdomenech Badia Mehdi Mirza Alex Graves Timothy Lillicrap Tim Harley David Silver Koray Kavukcuoglu International Conference on Machine Learning 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Stochastic backpropagation and approximate inference in deep generative models Danilo Jimenez Rezende Shakir Mohamed Daan Wierstra ICML 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Adam Santoro David Raposo G T David Mateusz Barrett Razvan Malinowski Peter Pascanu Timothy Battaglia Lillicrap arXiv:1706.01427 A simple neural network module for relational reasoning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.1027,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper learns to construct masks and feature representations from an input image, in order to represent objects.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "This is applied to the relatively simple domain of Atari games video input (compared to natural images).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The paper is completely inadequate in respect to related work; it re-invents known techniques like non-maximum suppression and matching for tracking; fails to learn convincing objects according to visual inspection; and fails to compare with earlier methods for these tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "(The comment above about re-invention is the most charitable intepretation -- the worst case would be using these ideas without citation.)\n\n\n1) The related work section is outrageous, containing no references before 2016.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Do the authors think researchers never tried to do this task before then?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "This is the bad side of the recent deep nets hype, and ICLR is particularly susceptible to this.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "Examples include\n\n@article{wang-adelson-94,\n  author        = \"Wang,  J.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "and Adelson, E.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "H.\",\n  title         = {{Representing Moving Images with Layers}},\n  journal       = {{IEEE Transactions on Image Processing}},\n  year          = \"1994\",\n  volume        = \"3(5)\",\n  pages         = {625-638}\n}\nsee http://persci.mit.edu/pub_pdfs/wang_tr279.pdf\n\nand\n\n@article{frey-jojic-03,\n   author    = {Frey, B.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "and Jojic, N.},\n   title     = {{Transformation Invariant Clustering Using the EM Algorithm}},\n   journal   = {IEEE Trans Pattern Analysis and Machine Intelligence},\n   year      = {2003},\n   volume    = {25(1)},\n   pages     = {1-17}\n}\nwhere mask and appearances for each object of interest are learned.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "There is a literature which follows on from the F&J paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "The methods used in Frey & Jojic are different from what is proposed in the paper, but there needs to be comparisons.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "The AIR paper also contains references to relevant previous work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "2) p 3 center -- this seems to be reinventing non-maximum suppression\n\n3) p 4 eq 3 and sec 3.2 -- please justify *why* it makes sense to use\nthe concrete transform.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "Can you explain better (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "in the supp mat)\nthe effect of this for different values of q_i?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "4) Sec 3.5 Matching objects in successive frames using the Hungarian \nalgorithm is also well known, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "it is in the matlab function\nassignDetectionsToTracks .",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "5) Overall: in this paper the authors come up with a method for learning objects from Atari games video input.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "This is a greatly restricted setting compared to real images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "The objects learned as shown in Appendix A are quite unconvincing, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "For example for Boxing why are the black and white objects broken up into 3 pieces, and why do they appear coloured in col 4?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "Also the paper lacks comparisons to other methods (including ones from before 2016) which have tackled this problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "It may be that the methods in this paper can outperform previous ones -- that would be interesting, but it would need a lot of work to address the issues raised above.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "Text corrections:\n\np 2 \"we are more precise\" -> \"we give more details\"\n\np 3 and p 2 -- local maximum (not maxima) for a single maximum.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "[occurs many times]",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.3513,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The paper proposes a neural architecture to map video streams to a discrete collection of objects, without human annotations, using an unsupervised pixel reconstruction loss.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The paper uses such object representation to inform state representation for reinforcement learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Each object is described by a position, appearance feature and confidence of existence (presence).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "The proposed network predicts a 2D mask image, where local maxima  correspond to object locations, and values of the maxima correspond to presence values.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "The paper uses a hard decision on the top-k objects (there can be at most k objects) in the final object list, based on the soft object presence values (I have not understood if these top k are sampled based on the noisy presence values or are thresholded, if the authors could kindly clarify).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "The final presence values though are sampled using Gumbell-softmax.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "Objects are matched across consecutive frames using non parametric (not learnable) deterministic matching functions, that takes into account the size and appearance of the objects.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "For the unsupervised reconstruction loss, a static background is populated with objects, one at a time, each passing its state and feature through deconvolution layers to generate RGB object content.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "Then a policy network is trained with deep Q learning whose architecture takes into account the objects in the scene, in an order agnostic way, and pairwise features are captured between pairs of objects, using similar layers as visual interaction nets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "Pros\nThe paper presents interesting ideas regarding unsupervised object discovery\n\nCons:\nThe paper shows no results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "The objects discovered could be discovered with mosaicing (since the background is static) and background subtraction.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.3545,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "The paper proposes a method  for learning object representations from pixels and then use such representations for doing reinforcement learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "This method is based on convnets that map raw pixels to a mask and feature map.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The mask contains information about the presence/absence of objects in different pixel locations and the feature map contains information about object appearance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "I believe that the current method can only learn and track simple objects in a constant background, a problem which is  well-solved in computer vision.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Specifically, a simple method such as \"background subtraction\" can easily infer the mask (the outlying pixels which correspond to moving objects)  while simple tracking methods (see a huge literature over decades on computer vision) can allow to track these objects across frames.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "The authors completely ignore all this previous work and their \"related work\" section  starts citing papers from 2016 and onwards!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Is it any benefit of learning objects with the current (very expensive) method compared to simple methods such as  \"background subtraction\"?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "Furthermore, the paper is very badly written since it keeps postponing the actual explanations to later sections (while these  sections eventually refer to the appendices).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "This makes reading the paper very hard.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "For example, during the early sections you  keep referring to a loss function which will allow for learning the objects, but you never really give the form of this loss (which you should as soon as  you mentioning it) and the reader needs to search into the appendices to find out what is happening.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "Also, experimental results are very preliminary and not properly analyzed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "For example the results in Figure 3 are unclear and need to be discussed in detail in the main text.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_c80ab309",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_c80ab309",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_d3fb2d2b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c80ab309"
+        },
+        {
+            "source": "sec_d3fb2d2b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_23e74ae9"
+        },
+        {
+            "source": "sec_d3fb2d2b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_14502903"
+        },
+        {
+            "source": "sec_d3fb2d2b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_67da4b3c"
+        },
+        {
+            "source": "sec_a3df3b20",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff582d9b"
+        },
+        {
+            "source": "sec_a3df3b20",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a566fb97"
+        },
+        {
+            "source": "b_86313418",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_86313418",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_a3df3b20",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_86313418"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eeedbf6c"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_68ef818b"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8c5f4e59"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aa7309e8"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0796dd16"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f960e0a3"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_52674225"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5242e59c"
+        },
+        {
+            "source": "b_48a18f06",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_48a18f06"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6e9cfe99"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f3b9f167"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c9fae461"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c2460b67"
+        },
+        {
+            "source": "b_36ad28f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36ad28f1"
+        },
+        {
+            "source": "sec_efe73066",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4def6cac"
+        },
+        {
+            "source": "sec_05b40e08",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0a2c3189"
+        },
+        {
+            "source": "sec_e1675725",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_65094c82"
+        },
+        {
+            "source": "sec_10383088",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47e64284"
+        },
+        {
+            "source": "sec_10383088",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e777c564"
+        },
+        {
+            "source": "sec_10383088",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_48d84af8"
+        },
+        {
+            "source": "sec_10383088",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_146f6b79"
+        },
+        {
+            "source": "sec_10383088",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_27c5b45b"
+        },
+        {
+            "source": "sec_2df56c20",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_55980ab2"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a2998acf"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0c1f0c8"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1de7e61c"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1169a3c1"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b926d40b"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_307b5d21"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_405dad13"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_def27cde"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e5d24894"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4050fc6c"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d5db6646"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_12cc9bbb"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2c024bf9"
+        },
+        {
+            "source": "b_1e2be5f8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_1e2be5f8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1e2be5f8"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d0f2570"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_29cb3de4"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_509ecd64"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b9d4b509"
+        },
+        {
+            "source": "sec_49891319",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5694c23e"
+        },
+        {
+            "source": "sec_55e7bc70",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_75c6fce0"
+        },
+        {
+            "source": "b_8770c170",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_d4a0687a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8770c170"
+        },
+        {
+            "source": "sec_9e36bde0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_48e6ff7f"
+        },
+        {
+            "source": "sec_9e36bde0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0cefcbf5"
+        },
+        {
+            "source": "b_7850f4ef",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_4fd34ef7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7850f4ef"
+        }
+    ]
+}

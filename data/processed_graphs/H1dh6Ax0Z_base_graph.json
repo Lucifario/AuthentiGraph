@@ -1,0 +1,1573 @@
+{
+    "paper_metadata": {
+        "paper_id": "H1dh6Ax0Z",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Accepted",
+        "total_reviews_available": 2
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_b83d6a8a",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_592b5c04",
+                        "type": "paragraph",
+                        "text": "A promising approach to improving model-free deep reinforcement learning (RL) is to combine it with on-line planning. The model-free value function can be viewed as a rough global estimate which is then locally refined on the fly for the current state by the on-line planner. Crucially, this does not require new samples from the environment but only additional computation, which is often available.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e5947374",
+                        "type": "paragraph",
+                        "text": "One strategy for on-line planning is to use look-ahead tree search (Knuth & Moore, 1975; Browne et al., 2012) . Traditionally, such methods have been limited to domains where perfect environment simulators are available, such as board or card games (Coulom, 2006; Sturtevant, 2008) . However, in general, models for complex environments with high dimensional observation spaces and complex dynamics must be learned from agent experience. Unfortunately, to date, it has proven difficult to learn models for such domains with sufficient fidelity to realise the benefits of look-ahead planning (Oh et al., 2015; Talvitie, 2017) .",
+                        "extracted_citations": [
+                            "Citation_b12",
+                            "Citation_b2",
+                            "Citation_b4",
+                            "Citation_b24",
+                            "Citation_b17",
+                            "Citation_b29"
+                        ]
+                    },
+                    {
+                        "block_id": "b_611c2b3c",
+                        "type": "paragraph",
+                        "text": "A simple approach to learning environment models is to maximise a similarity metric between model predictions and ground truth in the observation space. This approach has been applied with some success in cases where model fidelity is less important, e.g., for improving exploration (Chiappa et al., 2017; Oh et al., 2015) . However, this objective causes significant model capacity to be devoted to predicting irrelevant aspects of the environment dynamics, such as noisy backgrounds, at the expense of value-critical features that may occupy only a small part of the observation space (Pathak et al., 2017) . Consequently, current state-of-the-art models still accumulate errors too rapidly to be used for look-ahead planning in complex environments.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b17",
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_59e1b6c3",
+                        "type": "paragraph",
+                        "text": "Another strategy is to train a model such that, when it is used to predict a value function, the error in those predictions is minimised. Doing so can encourage the model to focus on features of the observations that are relevant for the control task. An example is the predictron (Silver et al., 2017b) , where the model is used to aid policy evaluation without addressing control. Value prediction networks (VPNs, Oh et al., 2017) take a similar approach but use the model to construct a look-ahead tree only when constructing bootstrap targets and selecting actions, similarly to TD-search (Silver et al., 2012) . Crucially, the model is not embedded in a planning algorithm during optimisation.",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_babd5adf",
+                        "type": "paragraph",
+                        "text": "We propose a new tree-structured neural network architecture to address the aforementioned problems. By formulating the tree look-ahead in a differentiable way and integrating it directly into the Qfunction or policy, we train the entire agent, including its learned transition model, end-to-end. This ensures that the model is optimised for the correct goal and is suitable for on-line planning during execution of the policy.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f7582166",
+                        "type": "paragraph",
+                        "text": "Since the transition model is only weakly grounded in the actual environment, our approach can alternatively be viewed as a model-free method in which the fully connected layers of DQN are replaced by a recursive network that applies transition functions with shared parameters at each tree node expansion.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0ecb1b90",
+                        "type": "paragraph",
+                        "text": "The resulting architecture, which we call TreeQN, encodes an inductive bias based on the prior knowledge that the environment is a stationary Markov process, which facilitates faster learning of better policies. We also present an actor-critic variant, ATreeC, in which the tree is augmented with a softmax layer and used as a policy network.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0b00abe2",
+                        "type": "paragraph",
+                        "text": "We show that TreeQN and ATreeC outperform their DQN-based counterparts in a box-pushing domain and a suite of Atari games, with deeper trees often outperforming shallower trees, and TreeQN outperforming VPN (Oh et al., 2017) on most Atari games. We also present ablation studies investigating various auxiliary losses for grounding the transition model more strongly in the environment, which could improve performance as well as lead to interpretable internal plans. While we show that grounding the reward function is valuable, we conclude that how to learn strongly grounded transition models and generate reliably interpretable plans without compromising performance remains an open research question.",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6f1a9f5e",
+                "title": "BACKGROUND",
+                "blocks": [
+                    {
+                        "block_id": "b_e7328611",
+                        "type": "paragraph",
+                        "text": "We consider an agent learning to act in a Markov Decision Process (MDP), with the goal of maximising its expected discounted sum of rewards R t = \u221e t=0 \u03b3 t r t , by learning a policy \u03c0(s) that maps states s \u2208 S to actions a \u2208 A. The state-action value function (Q-function) is defined as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_67b29c96",
+                        "type": "paragraph",
+                        "text": "The Bellman optimality equation writes Q * recursively as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d0cfbdfa",
+                        "type": "paragraph",
+                        "text": "where P is the MDP state transition function and r is a reward function, which for simplicity we assume to be deterministic. Q-learning (Watkins & Dayan, 1992) uses a single-sample approximation of the contraction operator T to iteratively improve an estimate of Q * .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2086a227",
+                        "type": "paragraph",
+                        "text": "In deep Q-learning (Mnih et al., 2015) , Q is represented by a deep neural network with parameters \u03b8, and is improved by regressing Q(s, a) to a target r + \u03b3 max a Q(s , a ; \u03b8 -), where \u03b8 -are the parameters of a target network periodically copied from \u03b8.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1aaa5e52",
+                        "type": "paragraph",
+                        "text": "We use a version of n-step Q-learning (Mnih et al., 2016) with synchronous environment threads. In particular, starting at a timestep t, we roll forward n env = 16 threads for n = 5 timesteps each. We then bootstrap off the final states only and gather all n env \u00d7 n = 80 transitions in a single batch for the backward pass, minimising the loss:",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0150f2eb",
+                        "type": "paragraph",
+                        "text": "(1) If the episode terminates, we use the remaining episode return as the target, without bootstrapping. This algorithm's actor-critic counterpart is A2C, a synchronous variant of A3C (Mnih et al., 2016) in which a policy \u03c0 and state-value function V (s) are trained using the gradient:",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d3ef96d8",
+                        "type": "paragraph",
+                        "text": "\u2207 \u03b8\u03c0 log \u03c0(a t+n-j |s t+n-j )A j (s t+n-j , a t+n-j ) + \u03b2\u2207 \u03b8\u03c0 H(\u03c0(s t+n-j ))",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2deb9bf9",
+                        "type": "paragraph",
+                        "text": "where A j is an advantage estimate given by j k=1 \u03b3 j-k r t+n-k + \u03b3 j V (s t+n ) -V (s t+n-j ), H is the policy entropy, \u03b2 is a hyperparameter tuning the degree of entropy regularisation, and \u03b1 is a hyperparameter controlling the relative learning rates of actor and critic. These algorithms were chosen for their simplicity and reasonable wallclock speeds, but TreeQN can also be used in other algorithms, as described in Section 3. Our implementations are based on OpenAI Baselines (Hesse et al., 2017 ). The canonical neural network architecture in deep RL with visual observations has a series of convolutional layers followed by two fully connected layers, where the final layer produces one output for each action-value. We can think of this network as first calculating an encoding z t of the state s t which is then evaluated by the final layer to estimate Q * (s t , a) (see Fig. 1 ).",
+                        "extracted_citations": [
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4c3f76bf",
+                        "type": "paragraph",
+                        "text": "In tree-search on-line planning, a look-ahead tree of possible future states is constructed by recursively applying an environment model. These states are typically evaluated by a heuristic, a learned value function, or Monte-Carlo rollouts. Backups through the tree aggregate these values along with the immediate rewards accumulated along each path to estimate the value of taking an action in the current state. This paper focuses on a simple tree-search with a deterministic transition function and no value uncertainty estimates, but our approach can be extended to tree-search variants like UCT (Kocsis & Szepesv\u00e1ri, 2006; Silver et al., 2016) if the components remain differentiable.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b21"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6a6ebc47",
+                "title": "TREEQN",
+                "blocks": [
+                    {
+                        "block_id": "b_03ece9a4",
+                        "type": "paragraph",
+                        "text": "In this section, we propose TreeQN, a novel end-to-end differentiable tree-structured architecture for deep reinforcement learning. We first give an overview of the architecture, followed by details of each model component and the training procedure.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7f0d046e",
+                        "type": "paragraph",
+                        "text": "TreeQN uses a recursive tree-structured neural network between the encoded state z t and the predicted state-action values Q(s t , a), instead of directly estimating the state-action value from the current encoded state z t using fully connected layers as in DQN (Mnih et al., 2015) . Specifically, TreeQN uses a recursive model to refine its estimate of Q(s t , a) via learned transition, reward, and value functions, and a tree backup (see Fig. 2 ). Because these learned components are shared throughout the tree, TreeQN implements an inductive bias, missing from DQN, that reflects the prior knowledge that the Q-values are properties of a stationary Markov process. We also encode the inductive bias that Q-values may be expressed as a sum of scalar rewards and values. Specifically, TreeQN learns an action-dependent transition function that, given a state representation z l|t , predicts the next state representation z ai l+1|t for action a i \u2208 A, and the corresponding reward rai l|t . To make the distinction between internal planning steps and steps taken in the environment explicit, we write z l|t to denote the encoded state at time t after l internal transitions, starting with z 0|t for the encoding of s t . TreeQN applies this transition function recursively to construct a tree containing the state representations and rewards received for all possible sequences of actions up to some predefined depth d (\"Tree Transitioning\" in Fig. 2 ).",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4d731e37",
+                "title": "Tree Transitioning",
+                "blocks": [
+                    {
+                        "block_id": "b_24d017e6",
+                        "type": "paragraph",
+                        "text": "Value Prediction & Backup The value of each predicted state V (z) is estimated with a value function module. Using these values and the predicted rewards, TreeQN then performs a tree backup, mixing the k-step returns along each path in the tree using TD(\u03bb) (Sutton, 1988; Sutton & Barto, 1998) . This corresponds to \"Value Prediction & Backup\" in Fig. 2 and can be formalized as",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b27"
+                        ]
+                    },
+                    {
+                        "block_id": "b_dc4f5aca",
+                        "type": "paragraph",
+                        "text": "where b is a function to recursively perform the backup. For 0 < \u03bb < 1, value estimates of the intermediate states are mixed into the final Q-estimate, which encourages the intermediate nodes of the tree to correspond to meaningful states, and reduces the impact of outlier values.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_57a354ea",
+                        "type": "paragraph",
+                        "text": "When \u03bb = 1, and b is the standard hard max function, then Eq. 3 simplifies to a backup through the tree using the familiar Bellman equation:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_263031a2",
+                        "type": "paragraph",
+                        "text": "We note that even for a tree depth of only one, TreeQN imposes a significant structure on the value function by decomposing it as a sum of action-conditional reward and next-state value, and using a shared value function to evaluate each next-state representation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_33a83de3",
+                        "type": "paragraph",
+                        "text": "Crucially, during training we backpropagate all the way from the final Q-estimate, through the value prediction, tree transitioning, and encoding layers of the tree, i.e., the entire network shown in Fig. 2 . Learning these components jointly ensures that they are useful for planning on-line.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6f8d28da",
+                "title": "MODEL COMPONENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_70779f00",
+                        "type": "paragraph",
+                        "text": "In this section, we describe each of TreeQN's components in more detail.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_74581ec9",
+                        "type": "paragraph",
+                        "text": "Encoder function. As in DQN, a series of convolutional layers produces an embedding of the observed state, z 0|t = encode(s t ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_be6f420a",
+                        "type": "paragraph",
+                        "text": "Transition function. We first apply a single fully connected layer to the current state embedding, shared by all actions. This generates an intermediate representation (z env l+1|t ) that could carry information about action-agnostic changes to the environment. In addition, we use a fully connected layer per action, which is applied to the intermediate representation to calculate a next-state representation that carries information about the effect of taking action a i . We use residual connections for these layers:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_10cebdb2",
+                        "type": "paragraph",
+                        "text": "where W ai , W env \u2208 R k\u00d7k , b env \u2208 R k are learnable parameters. Note that the next-state representation is calculated for every action a i independently using the respective transition matrix W ai , but this transition function is shared for the same action throughout the tree.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b1abd5ad",
+                        "type": "paragraph",
+                        "text": "A caveat is that the model can still learn to use different parts of the latent state space in different parts of the tree, which could undermine the intended parameter sharing in the model structure. To help TreeQN learn useful transition functions that maintain quality and diversity in their latent states, we introduce a unit-length projection of the state representations by simply dividing a state's vector representation by its L2 norm before each application of the transition function, z l|t := z l|t / z l|t . This prevents the magnitude of the representation from growing or shrinking, which encourages the behaviour of the transition function to be more consistent throughout the tree.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8cf682c1",
+                        "type": "paragraph",
+                        "text": "Reward function. In addition to predicting the next state, we also predict the immediate reward for every action a i \u2208 A in state z l|t using",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2a6240fd",
+                        "type": "paragraph",
+                        "text": "where W r 1 \u2208 R m\u00d7k , W r 2 \u2208 R |A|\u00d7m and ReLU is the rectified linear unit (Nair & Hinton, 2010) , and the predicted reward for a particular action rai l|t is the i-th element of the vector r(z l|t ). Value function. The value of a state representation z is estimated as",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_05b965d7",
+                        "type": "paragraph",
+                        "text": "Backup function. We use the following function that can be recursively applied to calculate the tree backup:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7cf2655f",
+                        "type": "paragraph",
+                        "text": "Using a hard max for calculating the backup would result in gradient information only being used to update parameters along the maximal path in the tree. By contrast, the softmax allows us to use downstream gradient information to update parameters along all paths. Furthermore, it potentially reduces the impact of outlier value predictions. With a learned temperature for the softmax, this function could represent the hard max arbitrarily closely. However, we did not find an empirical difference so we left the temperature at 1.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_41c0a03e",
+                "title": "GROUNDING THE MODEL COMPONENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_7ffd2ada",
+                        "type": "paragraph",
+                        "text": "The TreeQN architecture is fully differentiable, so we can directly use it in the place of a Q-function in any deep RL algorithm with discrete actions. Differentiating through the entire tree ensures that the learned components are useful for planning on-line, as long as that planning is performed in the same way as during training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_773e8e1a",
+                        "type": "paragraph",
+                        "text": "However, it seems plausible that auxiliary objectives based on minimising the error in predicting rewards or observations could improve the performance by helping to ground the transition and reward functions to the environment. It could also encourage TreeQN to perform model-based planning in an interpretable manner. In principle, such objectives could give rise to a spectrum of methods from model-free to fully model-based. At one extreme, TreeQN without auxiliary objectives can be seen as a model-free approach that draws inspiration from tree-search planning to encode valuable inductive biases into the neural network architecture. At the other extreme, perfect, grounded reward and transition models could in principle be learned. Using them in our architecture would then correspond to standard model-based lookahead planning. The sweet spot could be an intermediate level of grounding that maintains the flexibility of end-to-end model-free learning while benefiting from the additional supervision of explicit model learning. To investigate this spectrum, we experiment with two auxiliary objectives.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5c864edf",
+                        "type": "paragraph",
+                        "text": "Reward grounding. We experiment with an L2 loss regressing ra t:t+l-1 l|t , the predicted reward at level l of the tree corresponding to the selected action sequence {a t . . . a t+l-1 }, to the true observed rewards. For each of the n timesteps of n-step Q-learning this gives:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f54e5356",
+                        "type": "paragraph",
+                        "text": "where \u03b7 r is a hyperparameter weighting the loss, and d = min(d, nj + 1) restricts the sum to rewards for which we have already observed the true value.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8d55fb13",
+                        "type": "paragraph",
+                        "text": "State grounding. We experiment with a grounding in the latent space, using an L2 loss to regress the predicted latent state z a t:t+l l|t at level l of the tree to z 0|t+l , the initial encoding of the true state corresponding to the actions actually taken:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a264873d",
+                        "type": "paragraph",
+                        "text": "By employing an additional decoder module, we could use a similar loss to regress decoded observations to the true observations. In informal experiments, joint training with such a decoder loss did not yield good performance, as also found by Oh et al. (2017) .",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fef029c0",
+                        "type": "paragraph",
+                        "text": "In Section 7.1, we present results on the use these objectives, showing that reward grounding gives better performance, but that our method for state grounding does not. The intuitions guiding the design of TreeQN are as applicable to policy search as to valuebased RL, in that a policy can use a tree planner to improve its estimates of the optimal action probabilities (Gelly & Silver, 2007; Silver et al., 2017a) . As our proposed architecture is trained end-to-end, it can be easily adapted for use as a policy network.",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e5306d51",
+                "title": "ATREEC",
+                "blocks": [
+                    {
+                        "block_id": "b_d0796086",
+                        "type": "paragraph",
+                        "text": "In particular, we propose ATreeC, an actor-critic extension of TreeQN. In this architecture, the policy network is identical to TreeQN, with an additional softmax layer that converts the Q estimates into the probabilities of a stochastic policy.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_00bf22ba",
+                        "type": "paragraph",
+                        "text": "The critic shares the encoder parameters, and predicts a scalar state value with a single fully connected layer: V cr (s) = w cr z + b cr . We used different parameters for the critic value function and the actor's tree-value-function module, but found that sharing these parameters had little effect on performance. The entire setup, shown in Fig. 3 , is trained with A2C as described in Section 2, with the addition of the same auxiliary losses used for TreeQN. Note that TreeQN could also be used in the critic, but we leave this possibility to future work.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a1dfe54e",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_3bf73289",
+                        "type": "paragraph",
+                        "text": "There is a long history of work combining model-based and model-free RL. An early example is Dyna-Q (Sutton, 1990 ) which trains a model-free algorithm with samples drawn from a learned model. Similarly, van Seijen et al. ( 2011 ) train a sparse model with some environment samples that can be used to refine a model-free Q-function. Gu et al. (2016) use local linear models to generate additional samples for their model-free algorithm. However, these approaches do not attempt to use the model on-line to improve value estimates.",
+                        "extracted_citations": [
+                            "Citation_b26",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a0b707a4",
+                        "type": "paragraph",
+                        "text": "In deep RL, value iteration networks (Tamar et al., 2016) use a learned differentiable model to plan on the fly, but require planning over the full state space, which must also possess a spatial structure with local dynamics such that convolution operations can execute the planning algorithm.",
+                        "extracted_citations": [
+                            "Citation_b30"
+                        ]
+                    },
+                    {
+                        "block_id": "b_defb337c",
+                        "type": "paragraph",
+                        "text": "The predictron (Silver et al., 2017b) instead learns abstract-state transition functions in order to predict values. However, it is restricted to policy evaluation without control. Value prediction networks (VPNs, Oh et al., 2017 ) take a similar approach but are more closely related to our work because the learned model components are used in a tree for planning. However, in their work this tree is only used to construct targets and choose actions, and not to compute the value estimates during training. Such estimates are instead produced from non-branching trajectories following on-policy action sequences. By contrast, TreeQN is a unified architecture that constructs the tree dynamically at every timestep and differentiates through it, eliminating any mismatch between the model at training and test time. Furthermore, we do not use convolutional transition functions, and hence do not impose spatial structure on the latent state representations. These differences simplify training, allow our model to be used more flexibly in other training regimes, and explain in part our substantially improved performance on the Atari benchmark. et al. (2017) propose differentiating through a stochastic programming optimisation using a probabilistic model to learn model parameters with respect to their true objective rather than a maximum likelihood surrogate. However, they do not tackle the full RL setting, and do not use the model to repeatedly or recursively refine predictions.",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_845ca950",
+                "title": "Donti",
+                "blocks": [
+                    {
+                        "block_id": "b_611289de",
+                        "type": "paragraph",
+                        "text": "Imagination-augmented agents (Weber et al., 2017) learn to improve policies by aggregating rollouts predicted by a model. However, they rely on pretraining an observation-space model, which we argue will scale poorly to more complex environments. Further, their aggregation of rollout trajectories takes the form of a generic RNN rather than a value function and tree backup, so the inductive bias based on the structure of the MDP is not explicitly present.",
+                        "extracted_citations": [
+                            "Citation_b33"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fbadf03b",
+                        "type": "paragraph",
+                        "text": "A class of value gradient methods (Deisenroth & Rasmussen, 2011; Fairbank & Alonso, 2012; Heess et al., 2015) also differentiates through models to train a policy. However, this approach does not use the model during execution to refine the policy, and requires continuous action spaces. Oh et al. (2015) and Chiappa et al. (2017) propose methods for learning observation-prediction models in the Atari domain, but use these models only to improve exploration. Variants of scheduled sampling (Bengio et al., 2015) may be used to improve robustness of these models, but scaling to complex domains has proven challenging (Talvitie, 2014) .",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b7",
+                            "Citation_b10",
+                            "Citation_b17",
+                            "Citation_b3",
+                            "Citation_b1",
+                            "Citation_b28"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1abe924d",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_4ab6835a",
+                        "type": "paragraph",
+                        "text": "We evaluate TreeQN and ATreeC in a simple box-pushing environment, as well as on the subset of nine Atari environments that Oh et al. (2017) use to evaluate VPN. The experiments are designed to determine whether or not TreeQN and ATreeC outperform DQN, A2C, and VPN, and whether they can scale to complex domains. We also investigate how to best ground the the transition function with auxiliary losses. Furthermore, we compare against alternative ways to increase the number of parameters and computations of a standard DQN architecture, and study the impact of tree depth. Full details of the experimental setup, as well as architecture and training hyperparameters, are given in the appendix.",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ff64277b",
+                        "type": "paragraph",
+                        "text": "Grounding. We perform a hyperparameter search over the coefficients \u03b7 r and \u03b7 s of the reward and state grounding auxiliary losses, on the Atari environment Seaquest. These experiments aim to determine the relevant trade-offs between the flexibility of a model-free approach and the potential benefits of a more model-based algorithm.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d28c9a28",
+                        "type": "paragraph",
+                        "text": "Box Pushing. We randomly place an agent, 12 boxes, 5 goals and 6 obstacles on the center 6 \u00d7 6 tiles of an 8 \u00d7 8 grid. The agent's goal is to push boxes into goals in as few steps as possible while avoiding obstacles. Boxes may not be pushed into each other. The obstacles, however, are 'soft' in that they are do not block movement, but generate a negative reward if the agent or a box moves onto an obstacle. This rewards better planning without causing excessive gridlock. This environment is inspired by Sokoban, as used by Weber et al. (2017) , in that poor actions can generate irreversibly  Atari. To demonstrate the general applicability of TreeQN and ATreeC to complex environments, we evaluate them on the Atari 2600 suite (Bellemare et al., 2013) . Following Oh et al. (2017) , we use their set of nine environments and a frameskip of 10 to facilitate planning over reasonable timescales.",
+                        "extracted_citations": [
+                            "Citation_b33",
+                            "Citation_b0",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d5d63944",
+                        "type": "paragraph",
+                        "text": "TreeQN adds additional parameters to a standard DQN architecture. We compare TreeQN to two baseline architectures with increased computation and numbers of parameters to verify the benefit of the additional structure and grounding. DQN-Wide doubles the size of the embedding dimension (1024 instead of 512). DQN-Deep inserts two additional fully connected layers with shared parameters and residual connections between the two fully-connected layers of DQN. This is in effect a non-branching version of the TreeQN architecture that also lacks explicit reward prediction.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e644f61b",
+                "title": "RESULTS & DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_67963722",
+                        "type": "paragraph",
+                        "text": "In this section, we present our experimental results for TreeQN and ATreeC.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ff5ddbb6",
+                        "type": "paragraph",
+                        "text": "7.1 GROUNDING Fig. 4 shows the result of a hyperparameter search on \u03b7 r and \u03b7 s , the coefficients of the auxiliary losses on the predicted rewards and latent states. An intermediate value of \u03b7 r helps performance but there is no benefit to using the latent space loss. Subsequent experiments use \u03b7 r = 1 and \u03b7 s = 0.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ba437ce8",
+                        "type": "paragraph",
+                        "text": "The predicted rewards that the reward-grounding objective encourages the model to learn appear both in its own Q-value prediction and in the target for n-step Q-learning. Consequently, we expect this auxiliary loss to be well aligned with the true objective. By contrast, the state-grounding loss (and other potential auxiliary losses) might help representation learning but would not explicitly learn any part of the desired target. It is possible that this mismatch between the auxiliary and primary objective leads to degraded performance when using this form of state grounding. One potential route to overcoming this obstacle to joint training would be pre-training a model, as done by Weber et al. (2017) . Inside TreeQN this model could then be fine-tuned to perform well inside the planner. We leave this possiblity to future work.",
+                        "extracted_citations": [
+                            "Citation_b33"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b38eb95a",
+                "title": "BOX PUSHING",
+                "blocks": [
+                    {
+                        "block_id": "b_26fa4977",
+                        "type": "paragraph",
+                        "text": "Fig. 5a shows the results of TreeQN with tree depths 1, 2, and 3, compared to a DQN baseline. In this domain, there is a clear advantage for the TreeQN architecture over DQN. TreeQN learns policies that are substantially better at avoiding obstacles and lining boxes up with goals so they can be easily  pushed in later. TreeQN also substantially speeds up learning. We believe that the greater structure brought by our architecture regularises the model, encouraging appropriate state representations to be learned quickly. Even a depth-1 tree improves performance significantly, as disentangling the estimation of rewards and next-state values makes them easier to learn. This is further facilitated by the sharing of value-function parameters across branches.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_84598a22",
+                        "type": "paragraph",
+                        "text": "When trained with n-step Q-learning, the deeper depth-2 and depth-3 trees learn faster and plateau higher than the shallow depth-1 tree. In the this domain, useful transition functions are relatively easy to learn, and the extra computation time with those transition modules can help refine value estimates, yielding advantages for additional depth.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_347f43ae",
+                        "type": "paragraph",
+                        "text": "Fig. 5b shows the results of ATreeC with tree depths 1, 2, and 3, compared to an A2C baseline. As with TreeQN, ATreeC substantially outperforms the baseline. Furthermore, thanks to its stochastic policy, it substantially outperforms TreeQN. Whereas TreeQN and DQN sometimes indecisively bounce back and forth between adjacent states, ATreeC captures this uncertainty in its policy probabilities and thus acts more decisively. However, unlike TreeQN, ATreeC shows no pronounced differences for different tree depths. This is in part due to a ceiling effect in this domain. However, ATreeC is also gated by the quality of the critic's value function, which in these experiments was a single linear layer after the state encoding as described in Section 4. Nonetheless, this result demonstrates the ease with which TreeQN can be used as a drop-in replacement for any deep RL algorithm that learns policies or value functions for discrete actions.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_79e2a3df",
+                "title": "ATARI",
+                "blocks": [
+                    {
+                        "block_id": "b_0da0f58c",
+                        "type": "paragraph",
+                        "text": "Table 1 summarises all our Atari results, while Fig. 6 shows learning curves in depth. TreeQN shows substantial benefits in many environments compared to our DQN baseline, which itself often outperforms VPN (Oh et al., 2017) . ATreeC always matches or outperforms A2C. We present the mean performance of five random seeds, while the VPN results reported by Oh et al. (2017) , shown as dashed lines in Fig. 6 , are the mean of the best five seeds of an unspecified number of trials.",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_80c09a96",
+                        "type": "paragraph",
+                        "text": "TreeQN. In all environments except Frostbite, TreeQN outperforms DQN on average, with the most significant gains in Alien, CrazyClimber, Enduro, Krull, and Seaquest. Many of these environments seem well suited to short horizon look-ahead planning, with simple dynamics that generalise well and tradeoffs between actions that become apparent only after several timesteps. For example, an incorrect action in Alien can trap the agent down a corridor with an alien. In Seaquest, looking ahead could help determine whether it is better to go deeper to collect more points or to surface for oxygen. However, even in a game with mostly reactive decisions like the racing game Enduro, TreeQN shows significant benefits.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d9625cc4",
+                        "type": "paragraph",
+                        "text": "TreeQN also outperforms the additional baselines of DQN-Wide and DQN-Deep, indicating that the additional structure and grounding of our architecture brings benefits beyond simply adding model capacity and computation. In particular, it is interesting that DQN-Deep is often outperformed by the vanilla DQN baseline, as optimisation difficulties grow with depth. In contrast, the additional   structure and auxiliary loss employed by TreeQN turn its additional depth from a liability into a strength.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6e05fe69",
+                        "type": "paragraph",
+                        "text": "ATreeC. ATreeC matches or outperforms its baseline (A2C) in all environments. Compared to TreeQN, ATreeC's performance is better across most environments, particularly on Qbert, reflecting an overall advantage for actor-critic also found by Mnih et al. (2016) and in our box-pushing experiments. However, performance is much worse on Seaquest, revealing a deficiency in exploration as policy entropy collapses too rapidly and consequently the propensity of policy gradient methods to become trapped in a local optimum.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_50365d56",
+                        "type": "paragraph",
+                        "text": "In Krull and Frostbite, most algorithms have poor performance, or high variance in returns from run to run, as agents are gated by their ability to explore. Both of these games require the completion of sub-levels in order to accumulate large scores, and none of our agents reliably explore beyond the initial stages of the game. Mean performance appears to favor TreeQN and ATreeC in Krull, and perhaps DQN in Frostbite, but the returns are too variable to draw conclusions from this number of random seeds. Combining TreeQN and ATreeC with smart exploration mechanisms is an interesting direction for future work to improve robustness of training in these types of environments.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_abf32d21",
+                        "type": "paragraph",
+                        "text": "Compared to the box-pushing domain, there is less of a clear performance difference between trees of different depths. In some environments (Amidar, MsPacman), greater depth does appear to be employed usefully by TreeQN to a small extent, resulting in the best-performing individual agents. However, for the Atari domain the embedding size for the transition function we use is much larger (512 compared to 128), and the dynamics are much more complex. Consequently, we expect that optimisation difficulties, and the challenge of learning abstract-state transition functions, impede the utility of deeper trees in some cases. We look to future work to further refine methods for learning to plan abstractly in complex domains. However, the decomposition of Q-value into reward and next-state value employed by the first tree expansion is clearly of utility in a broad range of tasks.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ba5accea",
+                        "type": "paragraph",
+                        "text": "When inspecting the learned policies and trees, we find that the values sometimes correspond to intuitive reasoning about sensible policies, scoring superior action sequences above poorer ones. However, we find that the actions corresponding to branches of the tree that are scored most highly are frequently not taken in future timesteps. The flexibility of TreeQN and ATreeC allows our agents to find any useful way to exploit the computation in the tree to refine action-value estimates. As we found no effective way to strongly ground the model components without sacrificing performance, the interpretability of learned trees is limited.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1ea128d1",
+                "title": "CONCLUSIONS & FUTURE WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_38c022a4",
+                        "type": "paragraph",
+                        "text": "We presented TreeQN and ATreeC, new architectures for deep reinforcement learning in discreteaction domains that integrate differentiable on-line tree planning into the action-value function or policy. Experiments on a box-pushing domain and a set of Atari games show the benefit of these architectures over their counterparts, as well as over VPN. In future work, we intend to investigate enabling more efficient optimisation of deeper trees, encouraging the transition functions to produce interpretable plans, and integrating smart exploration.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "The arcade learning environment: An evaluation platform for general agents Yavar Marc G Bellemare Joel Naddaf Michael Veness Bowling J. Artif. Intell. Res.(JAIR) 47 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Scheduled sampling for sequence prediction with recurrent neural networks Samy Bengio Oriol Vinyals Navdeep Jaitly Noam Shazeer Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "A survey of monte carlo tree search methods Edward Cameron B Browne Daniel Powley Whitehouse M Simon Peter I Lucas Philipp Cowling Stephen Rohlfshagen Diego Tavener Spyridon Perez Simon Samothrakis Colton IEEE Transactions on Computational Intelligence and AI in games 4 1 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Silvia Chiappa S\u00e9bastien Racaniere Daan Wierstra Shakir Mohamed arXiv:1704.02254 2017 Recurrent environment simulators. arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Efficient selectivity and backup operators in monte-carlo tree search R\u00e9mi Coulom 10.1007/978-3-540-75538-87 Computers and Games, 5th International Conference Turin, Italy 2006. May 29-31, 2006. 2006 Revised Papers",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Pilco: A model-based and data-efficient approach to policy search Marc Deisenroth Carl E Rasmussen Proceedings of the 28th International Conference on machine learning (ICML-11) the 28th International Conference on machine learning (ICML-11) 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Brandon Priya L Donti J Zico Amos Kolter arXiv:1703.04529 Task-based end-to-end model learning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Value-gradient learning Michael Fairbank Eduardo Alonso The 2012 International Joint Conference on IEEE 2012 Neural Networks (IJCNN)",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Combining online and offline knowledge in uct Sylvain Gelly David Silver Proceedings of the 24th international conference on Machine learning the 24th international conference on Machine learning ACM 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Continuous deep q-learning with model-based acceleration Shixiang Gu Timothy Lillicrap Ilya Sutskever Sergey Levine International Conference on Machine Learning 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Learning continuous control policies by stochastic value gradients Nicolas Heess Gregory Wayne David Silver Tim Lillicrap Tom Erez Yuval Tassa Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Christopher Hesse Matthias Plappert Alec Radford John Schulman Szymon Sidor Yuhuai Wu 2017 Openai baselines",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "An analysis of alpha-beta pruning E Donald Ronald W Knuth Moore Artificial intelligence 6 4 1975",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Bandit based monte-carlo planning Levente Kocsis Csaba Szepesv\u00e1ri 10.1007/1187184229 Machine Learning: ECML 2006, 17th European Conference on Machine Learning Berlin, Germany September 18-22, 2006. 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Human-level control through deep reinforcement learning Volodymyr Mnih Koray Kavukcuoglu David Silver Andrei A Rusu Joel Veness Marc G Bellemare Alex Graves Martin A Riedmiller Andreas Fidjeland Georg Ostrovski Stig Petersen Charles Beattie Amir Sadik Ioannis Antonoglou Helen King Dharshan Kumaran Daan Wierstra Shane Legg Demis Hassabis 10.1038/nature14236 Nature 518 7540 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Asynchronous methods for deep reinforcement learning Volodymyr Mnih Adri\u00e0 Puigdom\u00e8nech Badia Mehdi Mirza Alex Graves Timothy P Lillicrap Tim Harley David Silver Koray Kavukcuoglu Proceedings of the 33nd International Conference on Machine Learning the 33nd International Conference on Machine Learning New York City, NY, USA 2016. June 19-24, 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Rectified linear units improve restricted boltzmann machines Vinod Nair Geoffrey E Hinton Proceedings of the 27th International Conference on Machine Learning (ICML-10) the 27th International Conference on Machine Learning (ICML-10) Haifa, Israel June 21-24, 2010. 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Action-conditional video prediction using deep networks in atari games Junhyuk Oh Xiaoxiao Guo Honglak Lee Richard L Lewis Satinder Singh Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Junhyuk Oh Satinder Singh Honglak Lee arXiv:1707.03497 2017 Value prediction network. arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Curiosity-driven exploration by self-supervised prediction Deepak Pathak Pulkit Agrawal Alexei A Efros Trevor Darrell arXiv:1705.05363 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Temporal-difference search in computer go David Silver Richard S Sutton Martin M\u00fcller 10.1007/s10994-012-5280-0 Machine Learning 2012 87",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Mastering the game of go with deep neural networks and tree search David Silver Aja Huang Chris J Maddison Arthur Guez Laurent Sifre George Van Den Driessche Julian Schrittwieser Ioannis Antonoglou Vedavyas Panneershelvam Marc Lanctot Sander Dieleman Dominik Grewe John Nham Nal Kalchbrenner Ilya Sutskever Timothy P Lillicrap Madeleine Leach Koray Kavukcuoglu 10.1038/nature16961 Nature 529 7587 2016 Thore Graepel, and Demis Hassabis",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Mastering the game of go without human knowledge David Silver Julian Schrittwieser Karen Simonyan Ioannis Antonoglou Aja Huang Arthur Guez Thomas Hubert Lucas Baker Matthew Lai Adrian Bolton Nature 550 7676 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "The predictron: End-to-end learning and planning David Silver Matteo Hado Van Hasselt Tom Hessel Arthur Schaul Tim Guez Gabriel Harley David P Dulac-Arnold Neil Reichert Andr\u00e9 Rabinowitz Thomas Barreto Degris Proceedings of the 34th International Conference on Machine Learning the 34th International Conference on Machine Learning Sydney, NSW, Australia 2017. August 2017. 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "An analysis of uct in multi-player games Nathan R Sturtevant International Conference on Computers and Games Springer 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Learning to predict by the methods of temporal differences Richard S Sutton Machine learning 3 1 1988",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Integrated architectures for learning, planning, and reacting based on approximating dynamic programming Richard S Sutton Machine Learning, Proceedings of the Seventh International Conference on Machine Learning Austin, Texas, USA June 21-23, 1990. 1990",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Reinforcement learning: An introduction S Richard Andrew G Sutton Barto 1998 MIT press Cambridge 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Model regularization for stable sample rollouts Erik Talvitie UAI 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Self-correcting models for model-based reinforcement learning Erik Talvitie AAAI 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Value iteration networks Aviv Tamar Sergey Levine Pieter Abbeel Yi Wu Garrett Thomas Advances in Neural Information Processing Systems 29: Annual Conference on Neural Information Processing Systems Barcelona, Spain 2016. December 5-10, 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Harm van Seijen, Shimon Whiteson, Hado van Hasselt, and Marco Wiering Tijmen Tieleman Geoffrey Hinton Journal of Machine Learning Research 6 2 2012. Jun. 2011 Exploiting best-match equations for efficient reinforcement learning",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Q-learning J C H Christopher Peter Watkins Dayan 10.1007/BF00992698 Machine Learning 1992 8",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Imagination-augmented agents for deep reinforcement learning Theophane Weber S\u00e9bastien Racani\u00e8re David P Reichert Lars Buesing Arthur Guez Danilo Jimenez Rezende Adri\u00e0 Puigdom\u00e8nech Badia Oriol Vinyals Nicolas Heess Yujia Li Razvan Pascanu Peter Battaglia David Silver Daan Wierstra CoRR, abs/1707.06203 2017",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0447,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This was an interesting read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "I feel that there is a mismatch between intuition of what a model could do (based on the structure of the architecture) versus what a model does.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Just because the transition function is shared and the model could learn to construct a tree, when trained end-to-end the system is not sufficiently constrained to learn this specific behaviour.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "More to a point.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "I think the search tree perspective is interesting, but isn\u2019t this just a deeper model with shared weights?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "And a max operation?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "It seems no loss is used to force the embeddings produced by the transition model to match the embeddings that you would get if you take a particular action in a particular state, right?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Is there any specific attempt to visualize or understand the embeddings inside the tree?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "The same regarding the rewards.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "If there is no auxiliary loss attempting to force the intermediary prediction to be valid rewards, why would the model use those free latent variables to encode rewards?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "I think this is a pitfall that many deep network papers fall, where by laying out a particular structure it is directly inferred that the model discovers or follows a particular solution (where the latent have prescribed semantics).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "I would argue that is rarely the case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "When the system is learned end-to-end, the structure does not impose the behaviour of the model, and is up to the authors of the paper to prove that the trained model does anything similar to expanding a tree.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "And this is not by showing final performance on a game.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "If indeed the model does anything similar to search, than all intermediary representations should correspond to what semantically they should.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "Ignoring my verbose comment, another view is that the baseline are disadvantaged to the treeQN, because they have less parameters (and are less deep which has a huge impact on the learnability and expressivity of the deep network).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.6719,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "# Update after the rebuttal\nThank you for the rebuttal.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The authors claim that the source of objective mismatch comes from n-step Q-learning, and their method is well-justified in 1-step Q-learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "However, there is still a mismatch even with 1-step Q-learning because the bootstrapped target is also computed from the TreeQN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "More specifically, there can be a mismatch between the optimal action sequences computed from TreeQN at time t and t+1 if the depth of TreeQN is equal or greater than 2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Thus, the author's response is still not convincing to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "I like the overall idea of using a tree-structured neural network which internally performs planning as an abstraction of Q-function, which makes implementation simpler compared to VPN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "However, the particular method (TreeQN) proposed in this paper introduces a mismatch in the model learning as mentioned above.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "One could argue that TreeQN is learning an \"abstract\" planning rather than \"grounded\" planning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "However, the fact that reward prediction loss is used to train TreeQN significantly weakens this claim, and there is no such an evidence in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "In conclusion, I think the research direction is worth pursuing, but the proposed modification from VPN is not well-justified.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "# Summary\nThis paper proposes TreeQN and ATreeC which perform look-ahead planning using neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "TreeQN simulates the future by predicting rewards/values of the future states and performs tree backup to construct Q-values.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "ATreeC is an actor-critic architecture that uses a softmax over TreeQN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "The architecture is trained through n-step Q-learning with reward prediction loss.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "The proposed methods outperform DQN baseline on 2D Box Pushing domain and outperforms VPN on Atari games.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "[Pros]\n- The paper is easy to follow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "- The application to actor-critic setting (ATreeC) is novel, though the underlying idea was proposed by [O'Donoghue et al., Schulman et al.].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "[Cons]\n- The proposed method has a technical issue.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "- The proposed idea (TreeQN) and underlying motivation are almost same as those of VPN [Oh et al.], but there is no in-depth discussion that shows why TreeQN is potentially better than VPN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "- Comparison to VPN on Atari is not much convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "# Novelty and Significance\n- The underlying motivation (planning without predicting observations), the architecture (transition/reward/value functions applied to the latent state space), and the algorithm (n-step Q-learning with reward prediction loss) are same as those of VPN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "But, the paper does not provide in-depth discussion on this.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "The following is the differences that I found from this paper, so it would be important to discuss why such differences are important.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_23",
+                    "text": "1) The paper emphasizes the \"fully-differentiable tree planning\" aspect in contrast to VPN that back-propagates only through \"non-branching\" trajectories during training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_24",
+                    "text": "However, differentiating TreeQN also amounts to back-propagating through a \"single\" trajectory in the tree that gives the maximum Q-value.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_25",
+                    "text": "Thus, the only difference between TreeQN and VPN is that TreeQN follows the best (estimated) action sequence, while VPN follows the chosen action sequence in retrospect during back-propagation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_26",
+                    "text": "Can you justify why following the best estimated action sequence is better than following the chosen action sequence during back-propagation (see Technical Soundness section for discussion)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_27",
+                    "text": "2) TreeQN only sets targets for the final Q-value after tree backup, whereas VPN sets targets for all intermediate value predictions in the tree.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_28",
+                    "text": "Why is TreeQN's approach better than VPN's approach?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_29",
+                    "text": "- The application to actor-critic setting (ATreeC) is novel, though the underlying idea of combining Q-learning with policy gradient was proposed by [O'Donoghue et al.] and [Schulman et al.].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_30",
+                    "text": "# Technical Soundness\n- The proposed idea of setting targets for the final Q-value after tree backup can potentially make the temporal credit assignment difficult, because the best estimated actions during tree planning does not necessarily match with the chosen actions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_31",
+                    "text": "Suppose that TreeQN estimated \"up-right-right\" as the best future action sequence the during 3-step tree planning, while the agent actually ended up with choosing \"up-left-left\" (this is possible because the agent re-plans at every step and follows epsilon-greedy policy).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_32",
+                    "text": "Following n-step Q-learning procedure, we end up with setting target Q-value based on on-policy action sequence \"up-left-left\", while back-propagating through \"up-right-right\" action sequence in the TreeQN's plan.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_33",
+                    "text": "This causes a wrong temporal credit assignment, because TreeQN can potentially increase/decrease value estimates in the wrong direction due to the mismatch between the planned actions and chosen actions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_34",
+                    "text": "So, it is unclear why the proposed algorithm is technically correct or better than VPN's approach (i.e., back-propagating through the chosen actions in the search tree).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_35",
+                    "text": "# Quality\n- Comparison to VPN on Atari is not convincing because TreeQN-1 is actually (almost) equivalent to VPN-1, but the results show that TreeQN-1 performs much better than VPN on many games.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_36",
+                    "text": "Since the authors took the numbers from [Oh et al.] rather than replicating VPN, it is possible that the gap comes from implementation details (e.g., hyperparameter).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_37",
+                    "text": "# Clarity\n- The paper is overall easy to follow and the description of the proposed method is clear.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_b83d6a8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_592b5c04"
+        },
+        {
+            "source": "b_e5947374",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_e5947374",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_e5947374",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_e5947374",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_e5947374",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_e5947374",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_b83d6a8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e5947374"
+        },
+        {
+            "source": "b_611c2b3c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_611c2b3c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_611c2b3c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_b83d6a8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_611c2b3c"
+        },
+        {
+            "source": "b_59e1b6c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_59e1b6c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_b83d6a8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_59e1b6c3"
+        },
+        {
+            "source": "sec_b83d6a8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_babd5adf"
+        },
+        {
+            "source": "sec_b83d6a8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f7582166"
+        },
+        {
+            "source": "sec_b83d6a8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ecb1b90"
+        },
+        {
+            "source": "b_0b00abe2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_b83d6a8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0b00abe2"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e7328611"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_67b29c96"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d0cfbdfa"
+        },
+        {
+            "source": "b_2086a227",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2086a227"
+        },
+        {
+            "source": "b_1aaa5e52",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1aaa5e52"
+        },
+        {
+            "source": "b_0150f2eb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0150f2eb"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d3ef96d8"
+        },
+        {
+            "source": "b_2deb9bf9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2deb9bf9"
+        },
+        {
+            "source": "b_4c3f76bf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_4c3f76bf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_6f1a9f5e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4c3f76bf"
+        },
+        {
+            "source": "sec_6a6ebc47",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_03ece9a4"
+        },
+        {
+            "source": "b_7f0d046e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_6a6ebc47",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7f0d046e"
+        },
+        {
+            "source": "b_24d017e6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_24d017e6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "sec_4d731e37",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_24d017e6"
+        },
+        {
+            "source": "sec_4d731e37",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dc4f5aca"
+        },
+        {
+            "source": "sec_4d731e37",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_57a354ea"
+        },
+        {
+            "source": "sec_4d731e37",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_263031a2"
+        },
+        {
+            "source": "sec_4d731e37",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_33a83de3"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_70779f00"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_74581ec9"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_be6f420a"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_10cebdb2"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b1abd5ad"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8cf682c1"
+        },
+        {
+            "source": "b_2a6240fd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2a6240fd"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_05b965d7"
+        },
+        {
+            "source": "sec_6f8d28da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7cf2655f"
+        },
+        {
+            "source": "sec_41c0a03e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ffd2ada"
+        },
+        {
+            "source": "sec_41c0a03e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_773e8e1a"
+        },
+        {
+            "source": "sec_41c0a03e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5c864edf"
+        },
+        {
+            "source": "sec_41c0a03e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f54e5356"
+        },
+        {
+            "source": "sec_41c0a03e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8d55fb13"
+        },
+        {
+            "source": "b_a264873d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_41c0a03e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a264873d"
+        },
+        {
+            "source": "b_fef029c0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_41c0a03e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fef029c0"
+        },
+        {
+            "source": "sec_e5306d51",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d0796086"
+        },
+        {
+            "source": "sec_e5306d51",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_00bf22ba"
+        },
+        {
+            "source": "b_3bf73289",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_3bf73289",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_a1dfe54e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3bf73289"
+        },
+        {
+            "source": "b_a0b707a4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_a1dfe54e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a0b707a4"
+        },
+        {
+            "source": "b_defb337c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_a1dfe54e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_defb337c"
+        },
+        {
+            "source": "b_611289de",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "sec_845ca950",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_611289de"
+        },
+        {
+            "source": "b_fbadf03b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_fbadf03b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_fbadf03b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_fbadf03b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_fbadf03b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_fbadf03b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_fbadf03b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "sec_845ca950",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fbadf03b"
+        },
+        {
+            "source": "b_4ab6835a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_1abe924d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4ab6835a"
+        },
+        {
+            "source": "sec_1abe924d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff64277b"
+        },
+        {
+            "source": "b_d28c9a28",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "b_d28c9a28",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_d28c9a28",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_1abe924d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d28c9a28"
+        },
+        {
+            "source": "sec_1abe924d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d5d63944"
+        },
+        {
+            "source": "sec_e644f61b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_67963722"
+        },
+        {
+            "source": "sec_e644f61b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff5ddbb6"
+        },
+        {
+            "source": "b_ba437ce8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "sec_e644f61b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ba437ce8"
+        },
+        {
+            "source": "sec_b38eb95a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_26fa4977"
+        },
+        {
+            "source": "sec_b38eb95a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_84598a22"
+        },
+        {
+            "source": "sec_b38eb95a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_347f43ae"
+        },
+        {
+            "source": "b_0da0f58c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_0da0f58c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_79e2a3df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0da0f58c"
+        },
+        {
+            "source": "sec_79e2a3df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_80c09a96"
+        },
+        {
+            "source": "sec_79e2a3df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d9625cc4"
+        },
+        {
+            "source": "b_6e05fe69",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_79e2a3df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6e05fe69"
+        },
+        {
+            "source": "sec_79e2a3df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_50365d56"
+        },
+        {
+            "source": "sec_79e2a3df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_abf32d21"
+        },
+        {
+            "source": "sec_79e2a3df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ba5accea"
+        },
+        {
+            "source": "sec_1ea128d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_38c022a4"
+        }
+    ]
+}

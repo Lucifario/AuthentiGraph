@@ -1,0 +1,1272 @@
+{
+    "paper_metadata": {
+        "paper_id": "rk6qdGgCZ",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_54463534",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_1d67d1f1",
+                        "type": "paragraph",
+                        "text": "Adaptive gradient methods, such as AdaGrad (Duchi et al., 2011) , RMSProp (Tieleman & Hinton, 2012) , and Adam (Kingma & Ba, 2014) have become a default method of choice for training feedforward and recurrent neural networks (Xu et al., 2015; Gregor et al., 2015; Radford et al., 2015) . Nevertheless, state-of-the-art results for popular image classification datasets, such as CIFAR-10 and CIFAR-100 Krizhevsky (2009) , are still obtained by applying SGD with momentum (Huang et al., 2016; 2017; Loshchilov & Hutter, 2016; Gastaldi, 2017) . Furthermore, Wilson et al. (2017) suggested that adaptive gradient methods do not generalize as well as SGD with momentum when tested on a diverse set of deep learning tasks such as image classification, character-level language modeling and constituency parsing. Different hypotheses about the origins of this worse generalization have been investigated, such as the presence of sharp local minima (Keskar et al., 2016; Dinh et al., 2017) and inherent problems of adaptive gradient methods (Wilson et al., 2017) . In this paper, we show that a major factor in the poor generalization of the most popular adaptive gradient method, Adam, lies in its dysfunctional implementation of weight decay; the issue we identify in Adam also pertains to other adaptive gradient methods. Specifically, our analysis of Adam given in this paper leads to the following observations:",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b18",
+                            "Citation_b12",
+                            "Citation_b20",
+                            "Citation_b5",
+                            "Citation_b15",
+                            "Citation_b7",
+                            "Citation_b4",
+                            "Citation_b14",
+                            "Citation_b4",
+                            "Citation_b19",
+                            "Citation_b11",
+                            "Citation_b2",
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_51c4d372",
+                        "type": "paragraph",
+                        "text": "The standard way to implement L 2 regularization/weight decay in Adam is dysfunctional.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_467c8726",
+                        "type": "paragraph",
+                        "text": "One possible explanation why Adam and other adaptive gradient methods might be outperformed by SGD with momentum is that L 2 regularization/weight decay are implemented suboptimally in common deep learning libraries. Therefore, on tasks/datasets where the use of L 2 regularization is beneficial (e.g., on many popular image classification datasets), Adam leads to worse results than SGD with momentum (for which L 2 regularization behaves as expected). L 2 regularization and weight decay are not the same thing. Contrary to common belief, the two techniques are not equivalent. For SGD, they can be made equivalent by a reparameterization of the weight decay factor based on the learning rate; this is not the case for Adam. In particular, when combined with adaptive gradients, L 2 regularization leads to weights with large gradients being regularized less than they would be when using weight decay.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_87f43768",
+                        "type": "paragraph",
+                        "text": "Optimal weight decay is a function (among other things) of the total number of batch passes/weight updates.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_83220637",
+                        "type": "paragraph",
+                        "text": "Our empirical analysis of Adam suggests that the longer the runtime/number of batch passes to be performed, the smaller the optimal weight decay. This effect tends to be neglected because hyperparameters are often tuned for a fixed or a comparable number of training epochs. As a result, the values of the weight decay found to perform best for short runs do not generalize to much longer runs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7fc5b9e2",
+                        "type": "paragraph",
+                        "text": "Our contributions are aimed at fixing the issues described above:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2c69853d",
+                        "type": "paragraph",
+                        "text": "Decoupling weight decay from the gradient-based update (Section 2). We suggest to decouple the gradient-based update from weight decay for both SGD and Adam. The resulting SGD version SGDW decouples optimal settings of the learning rate and the weight decay factor, and the resulting Adam version AdamW generalizes substantially better than Adam. Normalizing the values of weight decay (Section 3). We propose to parameterize the weight decay factor as a function of the total number of batch passes. This leads to a greater invariance of the hyperparameter settings in the sense that the values found to perform best for short runs also perform well for many times longer runs. Adam with warm restarts and normalized weight decay (Section 4). After we fix the weight decay in Adam and design AdamW, we introduce AdamWR to obtain strong anytime performance by performing warm restarts.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c77212c5",
+                        "type": "paragraph",
+                        "text": "The main motivation of this paper is to fix the weight decay in Adam to make it competitive w.r.t. SGD with momentum even for those problems where it did not use to be competitive. We hope that as a result, practitioners do not need to switch between Adam and SGD anymore, which in turn should help to reduce the common issue of selecting dataset/task-specific training algorithms and their hyperparameters.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_23f387a7",
+                "title": "DECOUPLING THE WEIGHT DECAY FROM THE GRADIENT-BASED UPDATE",
+                "blocks": [
+                    {
+                        "block_id": "b_b6d4ea58",
+                        "type": "paragraph",
+                        "text": "In the weight decay described by Hanson & Pratt (1988) , the weights x decay exponentially as",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_465edb62",
+                        "type": "paragraph",
+                        "text": "where w t defines the rate of the weight decay at time-step t and \u2207f t (x t ) is the t-th batch gradient multiplied by a learning rate \u03b1 t . Following Hanson & Pratt (1988) , one can also modify the original batch loss f t (x t ) and consider a bias term (also referred to as the regularization term) accounting for \"costs\" on weights which are, e.g., quadratic in the weight values as for L 2 regularization:",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_38fd7c7c",
+                        "type": "paragraph",
+                        "text": "where w t defines the impact of the L 2 regularization. In order to consider the weight decay regularization, one can reformulate the objective function as in Eq. ( 2 ) or directly adjust \u2207f t (x t ) as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_db228264",
+                        "type": "paragraph",
+                        "text": "Historically, stochastic gradient descent methods inherited this way of implementing the weight decay regularization.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f3ae455e",
+                        "type": "paragraph",
+                        "text": "The currently most common way (e.g., in popular libraries such as TensorFlow, Keras, PyTorch, Torch, and Lasagne) to introduce the weight decay regularization is to use the L 2 regularization term as in Eq. ( 2 ) or, often equivalently, to directly modify the gradient as in Eq. ( 3 ). Let's first consider the simple case of SGD with momentum; Algorithm 1 demonstrates modifying the gradients directly in this method (see line 6). The weight decay term w t x t-1 will first modify g t (see line 6) and then affect the momentum term m t (see line 8). While the smoothing of the weight decay factor by \u03b2 1",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_786a8ec2",
+                        "type": "paragraph",
+                        "text": "Algorithm 1 SGD with momentum and SGDW with momentum 1: given learning rate \u03b1 t \u2208 IR, momentum factor \u03b2 1 \u2208 IR, weight decay factor w \u2208 IR 2: initialize time step t \u2190 0, parameter vector x t=0 \u2208 IR n , first moment vector m t=0 \u2190 0, schedule multiplier \u03b7 t=0 \u2208 IR 3: repeat 4:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6c6489ff",
+                        "type": "paragraph",
+                        "text": "select batch and return the corresponding gradient 6:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_afbb9ea5",
+                        "type": "paragraph",
+                        "text": "g t \u2190 \u2207f t (x t-1 ) +w t x t-1 7:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_60aac151",
+                        "type": "paragraph",
+                        "text": "\u03b7 t \u2190 SetScheduleM ultiplier(t) can be fixed, decay, be used for warm restarts 8:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c06db314",
+                        "type": "paragraph",
+                        "text": "x t \u2190 x t-1 -m t -\u03b7 t w t x t-1 10: until stopping criterion is met 11: return optimized parameters x t Algorithm 2 Adam and AdamW 1: given \u03b1 t = 0.001, \u03b2 1 = 0.9, \u03b2 2 = 0.999, = 10 -8 , w \u2208 IR 2: initialize time step t \u2190 0, parameter vector x t=0 \u2208 IR n , first moment vector m t=0 \u2190 0, second moment vector v t=0 \u2190 0, schedule multiplier \u03b7 t=0 \u2208 IR 3: repeat 4:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f629d9c6",
+                        "type": "paragraph",
+                        "text": "select batch and return the corresponding gradient 6:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_48d95833",
+                        "type": "paragraph",
+                        "text": "here and below all operations are element-wise 8:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f099ca59",
+                        "type": "paragraph",
+                        "text": "here, \u03b2 1 is taken to the power of t 10:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1afcd077",
+                        "type": "paragraph",
+                        "text": "here, \u03b2 2 is taken to the power of t 11:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8ef09fdc",
+                        "type": "paragraph",
+                        "text": "\u03b7 t \u2190 SetScheduleM ultiplier(t) can be fixed, decay, be used for warm restarts 12:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_04a36cda",
+                        "type": "paragraph",
+                        "text": "13: until stopping criterion is met 14: return optimized parameters x t (see line 8) might be a feature, we note (for simplicity, we omit \u03b7 t ) that x t will decay by \u03b1 t w t x t-1 (see line 9) and not w t x t-1 as one could expect according to the definition of the weight decay given by Eq. ( 1 ). Practically, if one wants to keep the actual weight decay \u03b1 t w t fixed while changing \u03b1 t to \u03b1 t , then w t should be modified to w t = \u03b1twt \u03b1 t",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_870708a8",
+                        "type": "paragraph",
+                        "text": ". This renders the problem of hyperparameter selection of \u03b1 t and w t non-separable.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eb137325",
+                        "type": "paragraph",
+                        "text": "We propose to fix this problem by following the original definition of weight decay given by Eq.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b939e6df",
+                        "type": "paragraph",
+                        "text": "(1) and decay the weights simultaneously with the update of x t based on gradient information in Line 9 of Algorithm 1. This yields our proposed SGD variant SGDW with momentum. Although the proposed simple modification explicitly decouples w t and \u03b1 t , some problem-dependent implicit coupling is likely to remain. In order to account for a possible scheduling of both \u03b1 t and w t , we introduce a scaling factor \u03b7 t delivered by a user-defined procedure SetScheduleM ultiplier(t). It should be noted that when L 2 regularization is used, weight decay contributes to the batch gradient and thus effectively is scheduled in the same way as the learning rate. Now, since we decouple the two we should also remember to schedule both of them with \u03b7 t .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0481355e",
+                        "type": "paragraph",
+                        "text": "Having shown that using L 2 regularization instead of weight decay already couples regularization and learning rate in the simple case of SGD with momentum, we now consider adaptive gradient optimizers, such as the Adam algorithm proposed by Kingma & Ba (2014) , in which the coupling leads to even more unintended behavior. As an adaptive gradient method, Adam maintains a vector v t responsible for storing smoothed amplitudes of parameter-wise gradients g 2 t (see line 8 in Algorithm 2). These factors are used to control parameter-wise learning rates by normalizing parameter-wise gradients by \u221a vt + in line 12 of Algorithm 2. The common way to introduce the weight decay w t x t-1 to Adam results in an update which only distantly resembles the original weight decay given by Eq. ( 1 ) because the v t vectors are not only responsible for the parameter-wise amplitudes of g t but also for the parameter-wise amplitudes of weights x t . The amplitudes are then used to renormalize mt as given in line 12 of Algorithm 2. To gain a bit of intuition, let us consider the case when t is large, causing \u03b2 t 1 and \u03b2 t 2 to go to zero and",
+                        "extracted_citations": [
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d77ce4ec",
+                        "type": "paragraph",
+                        "text": "where operations are performed parameter-wise. Not only the batch gradient \u2207f t (x t-1 ) is normalized but also the weight decay w t x t-1 itself. Since this formula normalizes updates by their typical amplitudes, the decay of weights does not account for amplitudes anymore, leading to the relative decay being weaker for weights with large gradients. This is a correct implementation of L 2 regularization, but not of weight decay. Therefore, it might be misleading to use the two terms interchangeably, as is commonly done in the literature. We note that this difference between the two mechanisms for Adam has not been investigated and/or described before. As in the case of SGDW, we propose to follow the original definition of weight decay and perform it simultaneously with the gradient-based update as shown in line 12 of Algorithm 2 for AdamW. As we will demonstrate experimentally (in Section 5.2), AdamW generalizes much better than Adam.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d4bec1c3",
+                "title": "NORMALIZED WEIGHT DECAY",
+                "blocks": [
+                    {
+                        "block_id": "b_859a9402",
+                        "type": "paragraph",
+                        "text": "Since our preliminary experiments showed that different weight decay factors are optimal for different computational budgets (defined in terms of the number of batch passes), we introduce a normalized weight decay to reduce this dependence. At iteration t, w t is set as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_98acb961",
+                        "type": "paragraph",
+                        "text": "where b t is the batch size, B is the total number of training points to be used in one epoch and T i is the total number of epochs within the i-th run/restart of the algorithm. Thus, w norm can be interpreted as the weight decay to be used if only one batch pass is allowed. We note a recent relevant observation of Li et al. (2017) who demonstrated that a smaller batch size (for the same total number of epochs) leads to the shrinking effect of weight decay being more pronounced. Here, we propose to address that effect with normalized weight decay.",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_41f1b2d1",
+                "title": "ADAM WITH WARM RESTARTS AND NORMALIZED WEIGHT DECAY",
+                "blocks": [
+                    {
+                        "block_id": "b_35e0c0ff",
+                        "type": "paragraph",
+                        "text": "We now apply warm restarts to Adam, following the recent work of Loshchilov & Hutter (2016) .",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_72bd519a",
+                        "type": "paragraph",
+                        "text": "There, the authors proposed Stochastic Gradient Descent with Warm Restarts (SGDR) to improve anytime performance of SGD by quickly cooling down the learning rate and periodically increasing it. SGDR has been successfully adopted to lead to new state-of-the-art results for popular image classification benchmarks (Huang et al., 2017; Gastaldi, 2017) , and we therefore tried extending it to Adam. However, while our initial version of Adam with warm restarts had better anytime performance than Adam, it was not competitive with SGD with warm restarts, precisely because of Adam's dysfunctional weight decay. Now, having fixed weight decay regularization (Section 2) and also having introduced normalized weight decay (Section 3), the work of Loshchilov & Hutter (2016) on warm restarts directly carries over, and we use it to construct AdamWR to fully benefit from warm restarts.",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b4",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_61d4d5fb",
+                        "type": "paragraph",
+                        "text": "In the interest of keeping the presentation self-contained, we briefly describe how SGDR schedules the change of the effective learning rate in order to accelerate the training of DNNs. Here, we decouple the initial learning rate and its multiplier \u03b7 t used to obtain the actual learning rate at iteration t (see, e.g., line 8 in Algorithm 1). In SGDR, we simulate a new warm-started run/restart of SGD once T i epochs are performed, where i is the index of the run. Importantly, the restarts are not performed from scratch but emulated by increasing \u03b7 t while the old value of x t is used as an initial solution. The amount by which \u03b7 t is increases controls to which extent the previously acquired information (e.g., momentum) is used. Within the i-th run, the value of \u03b7 t decays according to the cosine annealing (Loshchilov & Hutter, 2016) for each batch as follows:",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e8521833",
+                        "type": "paragraph",
+                        "text": "max are ranges for the multiplier and T cur accounts for how many epochs have been performed since the last restart. T cur is updated at each batch iteration t and is thus not constrained to integer values. Adjusting (e.g., decreasing) \u03b7 (i) min and \u03b7 (i) max at every i-th restart (see also Smith ( 2016 )) could potentially improve performance, but we do not consider that option in our experiments because it would involve additional hyperparameters. For \u03b7 (i) max = 1 and \u03b7 (i) min = 0, one can simplify Eq. ( 6 ) to \u03b7 t = 0.5 + 0.5 cos(\u03c0T cur /T i ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e195f0c4",
+                        "type": "paragraph",
+                        "text": "In order to maintain a good anytime performance, one can start with an initially small T i (e.g., from 1% to 10% of the expected total budget) and multiply it by a factor of T mult (e.g., T mult = 2) at every restart. The (i + 1)-th restart is triggered when T cur = T i by setting T cur to 0. An example setting of the schedule multiplier is given in Section 1.1 of the supplementary material. Note that the effective learning rate is controlled by \u03b7 t \u03b1 t where \u03b1 t is set to the initial learning rate and stays constant in our experimental setup. The reason why we employ \u03b1 t and not simply \u03b1 is to account for possible practical extensions, e.g., to adapt \u03b1 t as a function of batch size in (scheduled) large-batch settings.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_60b09e27",
+                        "type": "paragraph",
+                        "text": "Our proposed AdamWR algorithm represents AdamW given in Algorithm 2 with \u03b7 t following Eq. ( 7 ) and w t computed at each iteration using normalized weight decay according to Eq. ( 5 ). We note that normalized weight decay allowed us to use a constant parameter setting across short and long runs performed within AdamWR. Equivalently to AdamWR, we define SGDWR as SGDW with warm restarts.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f0345c60",
+                "title": "EXPERIMENTAL VALIDATION",
+                "blocks": [
+                    {
+                        "block_id": "b_3b1952dc",
+                        "type": "paragraph",
+                        "text": "Our experimental setup follows that of Gastaldi (2017) , who proposed, in addition to L 2 regularization, to apply the new Shake-Shake regularization to a 3-branch residual neural network. Gastaldi (2017) showed that this regularization allowed to achieve new state-of-the-art results of 2.86% on the CIFAR-10 dataset (Krizhevsky, 2009) and of 15.85% on CIFAR-100. The network was trained by SGDR with batch size 128 for 1800 epochs (T 0 = 1800) without restarts with the learning rate scheduled by Eq. ( 6 ). The regular data augmentation procedure used for the CIFAR datasets was applied. We used the same model/source code based on fb.resnet.torch 1 . The base networks are a 26 2x64d ResNet (i.e. the network has a depth of 26, 2 residual branches and the first residual block has a width of 64) and 26 2x96d ResNet with 11.6M and 25.6M parameters, respectively. For a detailed description of the network and the Shake-Shake method, we refer the interested reader to Gastaldi (2017).",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0ce83c15",
+                "title": "DECOUPLING THE WEIGHT DECAY AND INITIAL LEARNING RATE PARAMETERS",
+                "blocks": [
+                    {
+                        "block_id": "b_32a8092f",
+                        "type": "paragraph",
+                        "text": "In order to verify our hypothesis about the coupling of the initial learning rate \u03b1 t and the weight decay factor w t , we trained a 2x64d ResNet with cosine annealing for 100 epochs with different settings of \u03b1 t and w t . Throughout this paper, we scheduled the learning rate with cosine annealing because it leads to better results than a fixed learning rate (see SuppFigure 1 in the supplementary material). Figure 1 compares SGD vs. SGDW (top row) and Adam vs. AdamW (bottom row). For the case of SGD (Figure 1 , top left), weight decay is not decoupled from the learning rate (the common way as described in Algorithm 1), and the figure clearly shows that the basin of best hyperparameter settings (depicted by color and top-10 hyperparameter settings by black circles) is not aligned with the x-axis or y-axis but lies on the diagonal. This suggests that the two hyperparameters are interdependent and need to be changed simultaneously, while only changing one of them might substantially worsen results. Consider, e.g., the setting at the top left black circle (\u03b1 t = 1/2, w t = 1/8 * 0.001); only changing either \u03b1 t or w t by itself would worsen results, while changing both of them could still yield clear improvements. We note that this coupling of initial learning rate and weight decay factor might have contributed to SGD's reputation of being very sensitive to its hyperparameter settings.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2b5fc25e",
+                        "type": "paragraph",
+                        "text": "In contrast, the results for our new SGDW in Figure 1 (top right) show that SGDW decouples weight decay and initial learning rate. The proposed approach renders the two hyperparameters more separable: even if the learning rate is not well tuned yet (e.g., consider the value of 1/1024 in Figure 1 , top right), leaving it fixed and only optimizing the weight decay factor would yield a good value (of 1/4*0.001). This is not the case for the original SGD shown in Figure 1 (top left).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ea800dc7",
+                        "type": "paragraph",
+                        "text": "The results for different hyperparameter settings of the original Adam are given in Figure 1 (bottom left). Adam's best hyperparameter settings performed clearly worse than SGD's best ones (compare Figure 1 , top left). While both methods use the original way to employ weight decay, the original Adam did not benefit from it at all: its best results obtained for non-zero weight decay values were comparable to the best ones obtained without the weight decay regularization, i.e., when w t = 0.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4b064b8f",
+                        "type": "paragraph",
+                        "text": "Similarly to the original SGD, the shape of the hyperparameter landscape suggests that the two hyperparameters are coupled.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_29cd9a79",
+                        "type": "paragraph",
+                        "text": "In contrast, the results for our new AdamW in Figure 1 (bottom right) show that AdamW largely decouples weight decay and learning rate. The results for the best hyperparameter settings were substantially better than the best ones of the original Adam and rivaled those of SGD and SGDW. In summary, the experimental results in Figure 1 support our hypothesis that the weight decay and learning rate hyperparameters can be decoupled, and that this in turn simplifies the problem of hyperparameter tuning in SGD and improves Adam's performance to be competitive w.r.t. SGD with momentum.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e87abb00",
+                "title": "BETTER GENERALIZATION OF ADAMW",
+                "blocks": [
+                    {
+                        "block_id": "b_a7c2682b",
+                        "type": "paragraph",
+                        "text": "While the previous experiment suggested that the basin of optimal hyperparameters of AdamW is broader and deeper than the one of Adam, we next investigated the results for much longer runs of 1800 epochs to compare the generalization capabilities of AdamW and Adam.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5b3b40d7",
+                        "type": "paragraph",
+                        "text": "We fixed the initial learning rate to 0.001 which represents both the default learning rate for Adam and the one which showed reasonably good results in our experiments. Figure 2 shows the results for 12 settings of the weight decay of Adam and 7 settings of the normalized weight decay of AdamW. Interestingly, while the dynamics of the learning curves of Adam and AdamW often coincided for the first half of the training run, AdamW often led to lower training loss and test errors (see Figure 2 top left and top right, respectively). Importantly, the use of weight decay in Adam did not yield as good results as in AdamW (see also Figure 2 , bottom left). Next, we investigated whether AdamW's better results were only due to better convergence or due to better generalization. The results in Figure 2 (bottom right) for the best settings of Adam and AdamW suggest that AdamW did not only yield better training loss but also yielded better generalization performance for similar training loss values. The results on ImageNet32x32 (see SuppFigure 4 in the supplementary material) lead to the same conclusion of substantially improved generalization performance.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_93d1fcb5",
+                "title": "EASIER HYPERPARAMETER SELECTION DUE TO NORMALIZED WEIGHT DECAY",
+                "blocks": [
+                    {
+                        "block_id": "b_e50b6077",
+                        "type": "paragraph",
+                        "text": "Our experimental results with Adam and SGD suggested that the total runtime in terms of the number of epochs affect the basin of optimal hyperparameters (see SuppFigure 3 in the supplementary material). More specifically, the greater the total number of epochs the smaller the values of the weight decay should be. SuppFigure 3 shows that our remedy for this problem, the normalized weight decay defined in Eq. ( 7 ), simplifies hyperparameter selection because the optimal values observed for short runs are similar to the ones for much longer runs. While our initial experiments on CIFAR-10 suggested the square root fit we proposed in Eq. ( 7 ), to double-check that this is not a coincidence, we also performed experiments on the ImageNet32x32 dataset (Chrabaszcz et al., 2017) , a downsampled version of the original ImageNet dataset with 1.2 million 32\u00d732 pixels images, where an epoch is 24 times longer than on CIFAR-10. This experiment also supported the square root scaling: the best values of the normalized weight decay observed on CIFAR-10 represented nearly optimal values for ImageNet32x32 (see SuppFigure 3). In contrast, had we used the same raw weight decay values w t for ImageNet32x32 as for CIFAR-10 and for the same number of epochs, without the proposed normalization, w t would have been roughly 5 greater than optimal for ImageNet32x32, leading to much worse performance. The optimal normalized weight decay values were also very similar (e.g., w norm = 0.025 and w norm = 0.05) across SGDW and AdamW.",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_bf5da5af",
+                        "type": "paragraph",
+                        "text": "We investigated whether the use of much longer runs (1800 epochs) of the original Adam with L 2 regularization makes the use of cosine annealing unnecessary. The results of Adam without cosine annealing (i.e., with fixed learning rate) for a 4 by 4 logarithmic grid of hyperparameter settings are given in SuppFigure 5 in the supplementary material. Even after taking into account the low resolution of the grid, the results appear to be at best comparable to the ones obtained with AdamW with 18 times less epochs and a smaller network (see SuppFigure 2). These results are not very surprising given Figure 1 (which demonstrates the effectiveness of AdamW) and SuppFigure 2 (which demonstrates the necessity to use some learning rate schedule such as cosine annealing).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_56c09791",
+                "title": "ADAMWR WITH WARM RESTARTS FOR BETTER ANYTIME PERFORMANCE",
+                "blocks": [
+                    {
+                        "block_id": "b_b80067a8",
+                        "type": "paragraph",
+                        "text": "Finally, we investigated the strong anytime performance AdamWR obtains from warm restarts (using normalized weight decay to avoid the need for a different weight decay factor for restarts with longer annealing schedules). As Figure 3 shows, AdamWR greatly sped up AdamW on CIFAR-10 and ImageNet32x32, up to a factor of 10 (see the results at the first restart). For the default learning rate of 0.001, AdamW achieved 15% relative improvement in test errors compared to Adam both on CIFAR-10 (also see Figure 2 ) and ImageNet32x32 (also see SuppFigure 4). AdamWR achieved the same improved results but with a much better anytime performance. These improvements closed most of the gap between Adam and SGDWR on CIFAR-10 and yielded comparable performance on ImageNet32x32.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_47796164",
+                "title": "DISCUSSION AND CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_f4ec6ae4",
+                        "type": "paragraph",
+                        "text": "Following suggestions that adaptive gradient methods such as Adam might lead to worse generalization than SGD with momentum (Wilson et al., 2017) , we identified at least one possible explanation to this phenomenon: the dysfunctional use of L 2 regularization and weight decay. We proposed a simple fix to deal with this issue, yielding substantially better generalization performance in our AdamW variant. We also proposed normalized weight decay and warm restarts for Adam, showing that a more robust hyperparameteer selection and a better anytime performance can be achieved in our new AdamWR variant.",
+                        "extracted_citations": [
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b0de6b03",
+                        "type": "paragraph",
+                        "text": "Our preliminary results obtained with AdamW and AdamWR on image classification datasets must be verified on a wider range of tasks, especially the ones where the use of regularization is expected to be important. It would be interesting to integrate our findings on weight decay into other methods which attempt to improve Adam, e.g, normalized direction-preserving Adam (Zhang et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_87da63f7",
+                        "type": "paragraph",
+                        "text": "While we focussed our experimental analysis on Adam, we believe that similar results also hold for other adaptive gradient methods, such as AdaGrad (Duchi et al., 2011) and RMSProp (Tieleman & Hinton, 2012) .",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b632ff28",
+                        "type": "paragraph",
+                        "text": "The results shown in Figure 2 suggest that Adam and AdamW follow very similar curves most of the time until the third phase of the run where AdamW starts to branch out to outperform Adam.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eb774398",
+                        "type": "paragraph",
+                        "text": "As pointed out by an anonymous reviewer, it would be interesting to investigate what causes this branching and whether the desired effects are observed at the bottom of the landscape. One could investigate this using the approach of Im et al. (2016) to switch from Adam to AdamW at a given epoch index. Since it is quite possible that the effect of regularization is not that pronounced in the early stages of training, one could think of designing a version of Adam which exploits this by being fast in the early stages and well-regularized in the late stages of training. The latter might be achieved with a custom schedule of the weight decay factor.",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c6291374",
+                        "type": "paragraph",
+                        "text": "In this paper, we argue that the popular interpretation that weight decay = L 2 regularization is not precise. Instead, the difference between the two leads to the following important consequences. Two algorithms as different as SGD and Adam will exhibit different effective rates of weight decay even if the same regularization coefficient is used to include L 2 regularization in the objective function. Moreover, when decoupled weight decay is applied, two algorithms as different as SGDW and AdamW will optimize two effectively different objective functions even if the same weight decay factor is used. Our findings suggest that the original Adam algorithm with L 2 regularization affects effective rates of weight decay in a way that precludes effective regularization, and that effective regularization is achievable by decoupling the weight decay.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2b682bc7",
+                        "type": "paragraph",
+                        "text": "Advani & Saxe (2017) analytically showed that in the limited data regime of deep networks the presence of eigenvalues that are zero forms a frozen subspace in which no learning occurs and thus smaller (e.g., zero) initial weight norms should be used to achieve best generalization results. Our future work shall consider adapting initial weight norms or weight norm constraints (Salimans & Kingma, 2016) at each warm restart. Kawaguchi et al. (2017) proposed a family of regularization techniques which are specific to the current batch and its size. Similarly to L 2 regularization and weight decay, the latter techniques might be attempted to be transformed to act directly on weights.",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b10"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "High-dimensional dynamics of generalization error in neural networks S Madhu Andrew M Advani Saxe arXiv:1710.03667 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Patryk Chrabaszcz Ilya Loshchilov Frank Hutter arXiv:1707.08819 A downsampled variant of ImageNet as an alternative to the CIFAR datasets 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Sharp minima can generalize for deep nets Laurent Dinh Razvan Pascanu Samy Bengio Yoshua Bengio arXiv:1703.04933 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Adaptive subgradient methods for online learning and stochastic optimization John Duchi Elad Hazan Yoram Singer The Journal of Machine Learning Research 12 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Xavier Gastaldi arXiv:1705.07485 Shake-Shake regularization 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Draw: A recurrent neural network for image generation Karol Gregor Ivo Danihelka Alex Graves Danilo Jimenez Rezende Daan Wierstra arXiv:1502.04623 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Comparing biases for minimal network construction with back-propagation Stephen Jos\u00e9 Hanson Lorien Y Pratt Proceedings of the 1st International Conference on Neural Information Processing Systems the 1st International Conference on Neural Information Processing Systems 1988",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Gao Huang Zhuang Liu Kilian Q Weinberger arXiv:1608.06993 Densely connected convolutional networks 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Gao Huang Yixuan Li Geoff Pleiss Zhuang Liu John E Hopcroft Kilian Q Weinberger arXiv:1704.00109 Snapshot ensembles: Train 1, get m for free 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "An empirical analysis of deep network loss surfaces Jiwoong Daniel Michael Im Kristin Tao Branson arXiv:1612.04010 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Kenji Kawaguchi Leslie Pack Kaelbling Yoshua Bengio arXiv:1710.05468 Generalization in deep learning 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Nitish Shirish Keskar Dheevatsa Mudigere Jorge Nocedal Mikhail Smelyanskiy Tak Peter Tang arXiv:1609.04836 On large-batch training for deep learning: Generalization gap and sharp minima 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Alex Krizhevsky. Learning multiple layers of features from tiny images Diederik Kingma Jimmy Ba Adam arXiv:1412.6980 A method for stochastic optimization 2014. 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Hao Li Zheng Xu Gavin Taylor Tom Goldstein arXiv:1712.09913 Visualizing the loss landscape of neural nets 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "SGDR: stochastic gradient descent with warm restarts Ilya Loshchilov Frank Hutter arXiv:1608.03983 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Unsupervised representation learning with deep convolutional generative adversarial networks Alec Radford Luke Metz Soumith Chintala arXiv:1511.06434 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Weight normalization: A simple reparameterization to accelerate training of deep neural networks Tim Salimans P Diederik Kingma Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Cyclical learning rates for training neural networks N Leslie Smith arXiv:1506.01186v3 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Lecture 6.5-rmsprop: Divide the gradient by a running average of its recent magnitude. COURSERA: Neural networks for machine learning Tijmen Tieleman Geoffrey Hinton 2012 4",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "The marginal value of adaptive gradient methods in machine learning Rebecca Ashia C Wilson Mitchell Roelofs Nathan Stern Benjamin Srebro Recht arXiv:1705.08292 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Rich Zemel, and Yoshua Bengio. Show, attend and tell: Neural image caption generation with visual attention Kelvin Xu Jimmy Ba Ryan Kiros Kyunghyun Cho Aaron Courville Ruslan Salakhudinov International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Zijun Zhang Lin Ma Zongpeng Li Chuan Wu arXiv:1709.04546 2017",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.1769,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "At the heart of the paper, there is a single idea: to decouple the weight decay from the number of steps taken by the optimization process (the paragraph at the end of page 2 is the key to the paper).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "This is an important and largely overlooked area of implementation and most off-the-shelf optimization algorithms, unfortunately, miss this point, too.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "I think that the proposed implementation should be taken seriously, especially in conjunction with the discussion that has been carried out with the work of Wilson et al., 2017 (https://arxiv.org/abs/1705.08292).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The introduction does a decent job explaining why it is necessary to pay attention to the norm of the weights as the training progresses within its scope.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "However, I would like to add a couple more points to the discussion: \n- \"Optimal weight decay is a function (among other things) of the total number of epochs / batch passes.\" in principle, it is a function of weight updates.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Clearly, it depends on the way the decay process is scheduled.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "However, there is a bad habit in DL where time is scaled by the number of epochs rather than the number of weight updates which sometimes lead to misleading plots (for instance, when comparing two algorithms with different batch sizes).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "- Another ICLR 2018 submission has an interesting take on the norm of the weights and the algorithm (https://openreview.net/forum?id=HkmaTz-0W&noteId=HkmaTz-0W).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Figure 3 shows the histograms of SGD/ADAM with and without WD (the *un-fixed* version), and it clearly shows how the landscape appear misleadingly different when one doesn't pay attention to the weight distribution in visualizations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "- In figure 2, it appears that the training process has three phases, an initial decay, a steady progress, and a final decay that is more pronounced in AdamW.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "This final decay also correlates with the better test error of the proposed method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "This third part also seems to correspond to the difference between Adam and AdamW through the way they branch out after following similar curves.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "One wonders what causes this branching and whether the key the desired effects are observed at the bottom of the landscape.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "- The paper concludes with \"Advani & Saxe (2017) analytically showed that in the limited data regime of deep networks the presence of eigenvalues that are zero forms a frozen subspace in which no learning occurs and thus smaller (e.g., zero) initial weight norms should be used to achieve best generalization results.\" Related to this there is another ICLR 2018 submission (https://openreview.net/forum?id=rJrTwxbCb), figure 1 shows that the eigenvalues of the Hessian of the loss have zero forms at the bottom of the landscape, not at the beginning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "Back to the previous point, maybe that discussion should focus on the second and third phases of the training, not the beginning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "- Finally, it would also be interesting to discuss the relation of the behavior of the weights at the last parts of the training and its connection to pruning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "I'm aware that one can easily go beyond the scope of the paper by adding more material.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "Therefore, it is not completely reasonable to expect all such possible discussions to take place at once.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "The paper as it stands is reasonably self-contained and to the point.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "Just a minor last point that is irrelevant to the content of the work: The slash punctuation mark that is used to indicate 'or' should be used without spaces as in 'epochs/batch'.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "Edit: Thanks very much for the updates and refinements.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "I stand by my original score and would like to indicate my support for this style of empirical work in scientific conferences.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.8695,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper investigates weight decay issues lied in the SGD variants, especially Adam.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "Current implementations of adaptive gradient algorithms implicitly contain a crucial flaw, by which \bweight decay in these methods does not correspond to L2 regularization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "To fix this issue, this paper proposes the decoupling method between weight decay and the gradient-based update.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "Overall, this paper is well-written and contain sufficient references to note the overview of recent adaptive gradient-based methods for DNN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "In addition, this paper investigates the crucial issue in the recent adaptive gradient methods and find the problem in weight decay.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "This is an interesting finding.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "And the proposed method to fix this issue is simple and reasonable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Their experimental results to validate the effectiveness of their proposed method are well-organized.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "In particular, the investigation on hyperparameter spaces shows the strong advantage of the proposed methods.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.3364,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "The paper presents an alternative way to implement weight decay in Adam.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Empirical results are shown to support this idea.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The idea presented in the paper is interesting, but I have some concerns about it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "First, the authors argue that the weight decay should be implemented in a way different from the minimization of a L2 regularization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "This seems a very weird statement to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "In fact, it easy to see that what the authors propose is to minimize two different objective functions in SGDW and AdamW!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "I am not even sure how I should interpret what they propose.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "The fact is that SGD and Adam are optimization algorithms, so we cannot just change the update rule in the same way in both algorithms and expect them to behave in the same way just because the added terms have the same shape!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Second, the equation (5) that re-normalize the weight decay parameter as been obtained on one dataset, as the author admit, and tested only on another one.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "I am not sure this is enough to be considered as a scientific proof.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "Also, the empirical experiments seem to use the cosine annealing of the learning rate.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "This means that the only thing the authors proved is that their proposed change yields better results when used with a particular setting of the cosine annealing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "What happens in the other cases?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "To summarize, I think the idea is interesting but the paper might not be ready to be presented in a scientific conference.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_1d67d1f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_54463534",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d67d1f1"
+        },
+        {
+            "source": "sec_54463534",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_51c4d372"
+        },
+        {
+            "source": "sec_54463534",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_467c8726"
+        },
+        {
+            "source": "sec_54463534",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_87f43768"
+        },
+        {
+            "source": "sec_54463534",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_83220637"
+        },
+        {
+            "source": "sec_54463534",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7fc5b9e2"
+        },
+        {
+            "source": "sec_54463534",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2c69853d"
+        },
+        {
+            "source": "sec_54463534",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c77212c5"
+        },
+        {
+            "source": "b_b6d4ea58",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b6d4ea58"
+        },
+        {
+            "source": "b_465edb62",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_465edb62"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_38fd7c7c"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_db228264"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f3ae455e"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_786a8ec2"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6c6489ff"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_afbb9ea5"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_60aac151"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c06db314"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f629d9c6"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_48d95833"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f099ca59"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1afcd077"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ef09fdc"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_04a36cda"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_870708a8"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb137325"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b939e6df"
+        },
+        {
+            "source": "b_0481355e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0481355e"
+        },
+        {
+            "source": "sec_23f387a7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d77ce4ec"
+        },
+        {
+            "source": "sec_d4bec1c3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_859a9402"
+        },
+        {
+            "source": "b_98acb961",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_d4bec1c3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_98acb961"
+        },
+        {
+            "source": "b_35e0c0ff",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_41f1b2d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_35e0c0ff"
+        },
+        {
+            "source": "b_72bd519a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_72bd519a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_72bd519a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_41f1b2d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_72bd519a"
+        },
+        {
+            "source": "b_61d4d5fb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_41f1b2d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_61d4d5fb"
+        },
+        {
+            "source": "sec_41f1b2d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e8521833"
+        },
+        {
+            "source": "sec_41f1b2d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e195f0c4"
+        },
+        {
+            "source": "sec_41f1b2d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_60b09e27"
+        },
+        {
+            "source": "b_3b1952dc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_3b1952dc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_f0345c60",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3b1952dc"
+        },
+        {
+            "source": "sec_0ce83c15",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_32a8092f"
+        },
+        {
+            "source": "sec_0ce83c15",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b5fc25e"
+        },
+        {
+            "source": "sec_0ce83c15",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ea800dc7"
+        },
+        {
+            "source": "sec_0ce83c15",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4b064b8f"
+        },
+        {
+            "source": "sec_0ce83c15",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_29cd9a79"
+        },
+        {
+            "source": "sec_e87abb00",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a7c2682b"
+        },
+        {
+            "source": "sec_e87abb00",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5b3b40d7"
+        },
+        {
+            "source": "b_e50b6077",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_93d1fcb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e50b6077"
+        },
+        {
+            "source": "sec_93d1fcb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bf5da5af"
+        },
+        {
+            "source": "sec_56c09791",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b80067a8"
+        },
+        {
+            "source": "b_f4ec6ae4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_47796164",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f4ec6ae4"
+        },
+        {
+            "source": "b_b0de6b03",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_47796164",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b0de6b03"
+        },
+        {
+            "source": "b_87da63f7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_87da63f7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_47796164",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_87da63f7"
+        },
+        {
+            "source": "sec_47796164",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b632ff28"
+        },
+        {
+            "source": "b_eb774398",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_47796164",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb774398"
+        },
+        {
+            "source": "sec_47796164",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c6291374"
+        },
+        {
+            "source": "b_2b682bc7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_2b682bc7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_47796164",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b682bc7"
+        }
+    ]
+}

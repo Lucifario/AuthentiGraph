@@ -1,0 +1,1690 @@
+{
+    "paper_metadata": {
+        "paper_id": "336",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Accepted",
+        "total_reviews_available": 12
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_874018dc",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_a881711f",
+                        "type": "paragraph",
+                        "text": "The PixelCNN, introduced by van den Oord et al. (2016b) , is a generative model of images with a tractable likelihood. The model fully factorizes the probability density function on an image x over all its sub-pixels (color channels in a pixel) as p(x) = i p(x i |x <i ). The conditional distributions p(x i |x <i ) are parameterized by convolutional neural networks and all share parameters. The Pixel-CNN is a powerful model as the functional form of these conditionals is very flexible. In addition it is computationally efficient as all conditionals can be evaluated in parallel on a GPU for an observed image x. Thanks to these properties, the PixelCNN represents the current state-of-the-art in generative modeling when evaluated in terms of log-likelihood. Besides being used for modeling images, the PixelCNN model was recently extended to model audio (van den Oord et al., 2016a) , video (Kalchbrenner et al., 2016b ) and text (Kalchbrenner et al., 2016a) .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8ac4f76f",
+                        "type": "paragraph",
+                        "text": "For use in our research, we developed our own internal implementation of PixelCNN and made a number of modifications to the base model to simplify its structure and improve its performance. We now release our implementation at https://github.com/openai/pixel-cnn, hoping that it will be useful to the broader community. Our modifications are discussed in Section 2, and evaluated experimentally in Section 3. State-of-the-art log-likelihood results confirm their usefulness.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cf3041f8",
+                "title": "MODIFICATIONS TO PIXELCNN",
+                "blocks": [
+                    {
+                        "block_id": "b_d3e92c63",
+                        "type": "paragraph",
+                        "text": "We now describe the most important modifications we have made to the PixelCNN model architecure as described by van den Oord et al. (2016c) . For complete details see our code release at https://github.com/openai/pixel-cnn.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a54f5fb6",
+                "title": "DISCRETIZED LOGISTIC MIXTURE LIKELIHOOD",
+                "blocks": [
+                    {
+                        "block_id": "b_0533770c",
+                        "type": "paragraph",
+                        "text": "The standard PixelCNN model specifies the conditional distribution of a sub-pixel, or color channel of a pixel, as a full 256-way softmax. This gives the model a lot of flexibility, but it is also very costly in terms of memory. Moreover, it can make the gradients with respect to the network parameters very sparse, especially early in training. With the standard parameterization, the model does not know that a value of 128 is close to a value of 127 or 129, and this relationship first has to be learned before the model can move on to higher level structures. In the extreme case where a particular sub-pixel value is never observed, the model will learn to assign it zero probability. This would be especially problematic for data with higher accuracy on the observed pixels than the usual 8 bits: In the extreme case where very high precision values are observed, the PixelCNN, in its current form, would require a prohibitive amount of memory and computation, while learning very slowly. We therefore propose a different mechanism for computing the conditional probability of the observed discretized pixel values. In our model, like in the VAE of Kingma et al. (2016) , we assume there is a latent color intensity \u03bd with a continuous distribution, which is then rounded to its nearest 8-bit representation to give the observed sub-pixel value x. By choosing a simple continuous distribution for modeling \u03bd (like the logistic distribution as done by Kingma et al. ( 2016 )) we obtain a smooth and memory efficient predictive distribution for x. Here, we take this continuous univariate distribution to be a mixture of logistic distributions which allows us to easily calculate the probability on the observed discretized value x, as shown in equation ( 2 ). For all sub-pixel values x excepting the edge cases 0 and 255 we have:",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2ff04286",
+                        "type": "paragraph",
+                        "text": "where \u03c3() is the logistic sigmoid function. For the edge case of 0, replace x -0.5 by -\u221e, and for 255 replace x + 0.5 by +\u221e. Our provided code contains a numerically stable implementation for calculating the log of the probability in equation 2.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_076c1e66",
+                        "type": "paragraph",
+                        "text": "Our approach follows earlier work using continuous mixture models (Domke et al., 2008; Theis et al., 2012; Uria et al., 2013; Theis & Bethge, 2015) , but avoids allocating probability mass to values outside the valid range of [0, 255] by explicitly modeling the rounding of \u03bd to x. In addition, we naturally assign higher probability to the edge values 0 and 255 than to their neighboring values, which corresponds well with the observed data distribution as shown in Figure 1 . Experimentally, we find that only a relatively small number of mixture components, say 5, is needed to accurately model the conditional distributions of the pixels. The output of our network is thus of much lower dimension, yielding much denser gradients of the loss with respect to our parameters. In our experiments this greatly sped up convergence during optimization, especially early on in training. However, due to the other changes in our architecture compared to that of van den Oord et al.",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b14",
+                            "Citation_b15",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_95a4b9e9",
+                        "type": "paragraph",
+                        "text": "(2016c) we cannot say with certainty that this would also apply to the original PixelCNN model.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7d78d96b",
+                        "type": "paragraph",
+                        "text": "Figure 1 : Marginal distribution of all sub-pixel values in CIFAR-10. The edge value of 255 is much more frequent than its neighbouring values: This is easy to model using our rounding based approach, but harder using continuous or truncated distributions.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3b36ba1f",
+                "title": "CONDITIONING ON WHOLE PIXELS",
+                "blocks": [
+                    {
+                        "block_id": "b_57f5a636",
+                        "type": "paragraph",
+                        "text": "The pixels in a color image consist of three real numbers, giving the intensities of the red, blue and green colors. The original PixelCNN factorizes the generative model over these 3 sub-pixels. This allows for very general dependency structure, but it also complicates the model: besides keeping track of the spatial location of feature maps, we now have to separate out all feature maps in 3 groups depending on whether or not they can see the R/G/B sub-pixel of the current location. This added complexity seems to be unnecessary as the dependencies between the color channels of a pixel are likely to be relatively simple and do not require a deep network to model. Therefore, we instead condition only on whole pixels up and to the left in an image, and output joint predictive distributions over all 3 channels of a predicted pixel. The predictive distribution on a pixel itself can be interpreted as a simple factorized model: We first predict the red channel using a discretized mixture of logistics as described in section 2.1. Next, we predict the green channel using a predictive distribution of the same form. Here we allow the means of the mixture components to linearly depend on the value of the red sub-pixel. Finally, we model the blue channel in the same way, where we again only allow linear dependency on the red and green channels. For the pixel (r i,j , g i,j , b i,j ) at location (i, j) in our image, the distribution conditional on the context C i,j , consisting of the mixture indicator and the previous pixels, is thus",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9238604c",
+                        "type": "paragraph",
+                        "text": "with \u03b1, \u03b2, \u03b3 scalar coefficients depending on the mixture component and previous pixels.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_87bd7980",
+                        "type": "paragraph",
+                        "text": "The mixture indicator is shared across all 3 channels; i.e. our generative model first samples a mixture indicator for a pixel, and then samples the color channels one-by-one from the corresponding mixture component. Had we used a discretized mixture of univariate Gaussians for the sub-pixels, instead of logistics, this would have been exactly equivalent to predicting the complete pixel using a (discretized) mixture of 3-dimensional Gaussians with full covariance. The logistic and Gaussian distributions are very similar, so this is indeed very close to what we end up doing. For full implementation details we refer to our code at https://github.com/openai/pixel-cnn.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f2b1d690",
+                "title": "DOWNSAMPLING VERSUS DILATED CONVOLUTION",
+                "blocks": [
+                    {
+                        "block_id": "b_1b9ff65f",
+                        "type": "paragraph",
+                        "text": "The original PixelCNN only uses convolutions with small receptive field. Such convolutions are good at capturing local dependencies, but not necessarily at modeling long range structure. Although we find that capturing these short range dependencies is often enough for obtaining very good log-likelihood scores (see Table 2 ), explicitly encouraging the model to capture long range dependencies can improve the perceptual quality of generated images (compare Figure 3 Here, we instead propose to use downsampling by using convolutions of stride 2. Downsampling accomplishes the same multi-resolution processing afforded by dilated convolutions, but at a reduced computational cost: where dilated convolutions operate on input of ever increasing size (due to zero padding), downsampling reduces the input size by a factor of 4 (for stride of 2 in 2 dimensions) at every downsampling. The downside of using downsampling is that it loses information, but we can compensate for this by introducing additional short-cut connections into the network as explained in the next section. With these additional short-cut connections, we found the performance of downsampling to be the same as for dilated convolution.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fdd3ad16",
+                "title": "ADDING SHORT-CUT CONNECTIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_770eb13f",
+                        "type": "paragraph",
+                        "text": "For input of size 32 \u00d7 32 our suggested model consists of 6 blocks of 5 ResNet layers. In between the first and second block, as well as the second and third block, we perform subsampling by strided convolution. In between the fourth and fifth block, as well as the fifth and sixth block, we perform upsampling by transposed strided convolution. This subsampling and upsampling process loses information, and we therefore introduce additional short-cut connections into the model to recover 2016c ), our model follows a two-stream (downward, and downward+rightward) convolutional architecture with residual connections; however, there are two significant differences in connectivity. First, our architecture incorporates downsampling and upsampling, such that the inner parts of the network operate over larger spatial scale, increasing computational efficiency. Second, we employ long-range skip-connections, such that each k-th layer provides a direct input to the (K -k)-th layer, where K is the total number of layers in the network. The network is grouped into sequences of six layers, where most sequences are separated by downsampling or upsampling.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e3bbef07",
+                "title": "REGULARIZATION USING DROPOUT",
+                "blocks": [
+                    {
+                        "block_id": "b_4d30761a",
+                        "type": "paragraph",
+                        "text": "The PixelCNN model is powerful enough to overfit on training data. Moreover, rather than just reproducing the training images, we find that overfitted models generate images of low perceptual quality, as shown in Figure 8 . One effective way of regularizing neural networks is dropout (Srivastava et al., 2014) . For our model, we apply standard binary dropout on the residual path after the first convolution. This is similar to how dropout is applied in the wide residual networks of Zagoruyko & Komodakis (2016) . Using dropout allows us to successfully train high capacity models while avoiding overfitting and producing high quality generations (compare figure 8 and figure 3 ).",
+                        "extracted_citations": [
+                            "Citation_b12",
+                            "Citation_b20"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f3d239dc",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_eb60a8da",
+                        "type": "paragraph",
+                        "text": "We apply our model to modeling natural images in the CIFAR-10 data set. We achieve state-of-theart results in terms of log-likelihood, and generate images with coherent global structure.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6bb6dec3",
+                "title": "UNCONDITIONAL GENERATION ON CIFAR-10",
+                "blocks": [
+                    {
+                        "block_id": "b_30f89fa4",
+                        "type": "paragraph",
+                        "text": "We apply our PixelCNN model, with the modifications as described above, to generative modeling of the images in the CIFAR-10 data set. For the encoding part of the PixelCNN, the model uses 3 Resnet blocks consisting of 5 residual layers, with 2 \u00d7 2 downsampling in between. The same architecture is used for the decoding part of the model, but with upsampling instead of downsampling in between blocks. All residual layers use 192 feature maps and a dropout rate of 0.5. Table 1 shows the stateof-the-art test log-likelihood obtained by our model. Figure 3 shows some samples generated by the model. 5.40 NICE (Dinh et al., 2014) 4.48 DRAW (Gregor et al., 2015) 4.13 Deep GMMs (van den Oord & Dambre, 2015) 4.00 Conv DRAW (Gregor et al., 2016) 3.58 Real NVP (Dinh et al., 2016) 3.49 PixelCNN (van den Oord et al., 2016b) 3.14 VAE with IAF (Kingma et al., 2016) 3.11 Gated PixelCNN (van den Oord et al., 2016c) 3.03 PixelRNN (van den Oord et al., 2016b) 3.00 PixelCNN++ 2.92",
+                        "extracted_citations": [
+                            "Citation_b0",
+                            "Citation_b3",
+                            "Citation_b4",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_067866a5",
+                        "type": "paragraph",
+                        "text": "Table 1 : Negative log-likelihood for generative models on CIFAR-10 expressed as bits per sub-pixel.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d5c67317",
+                "title": "CLASS-CONDITIONAL GENERATION",
+                "blocks": [
+                    {
+                        "block_id": "b_a940385f",
+                        "type": "paragraph",
+                        "text": "Next, we follow van den Oord et al. (2016c) in making our generative model conditional on the class-label of the CIFAR-10 images. This is done by linearly projecting a one-hot encoding of the class-label into a separate class-dependent bias vector for each convolutional unit in our network. We find that making the model class-conditional makes it harder to avoid overfitting on the training data: our best test log-likelihood is 2.94 in this case. Figure 4 shows samples from the class-conditional model, with columns 1-10 corresponding the 10 classes in CIFAR-10. The images clearly look qualitatively different across the columns and for a number of them we can clearly identify their class label. Here we present the surprising finding that in fact a PixelCNN with rather small receptive field can attain competitive generative modelling performance on CIFAR-10 as long as it has enough capacity. Specifically, we experimented with our proposed PixelCNN++ model without downsampling blocks and reduce the number of layers to limit the receptive field size. We investigate two receptive field sizes: 11x5 and 15x8, and a receptive field size of 11x5, for example, means that the conditional distribution of a pixel can depends on a rectangle above the pixel of size 11x5 as well as 11-1 2 = 5x1 block to the left of the pixel.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f29730f1",
+                        "type": "paragraph",
+                        "text": "As we limit the size of the receptive field, the capacity of the network also drops significantly since it contains many fewer layers than a normal PixelCNN. We call the type of PixelCNN that's simply limited in depth \"Plain\" Small PixelCNN. Interestingly, this model already has better performance than the original PixelCNN in van den Oord et al. (2016b) which had a blind spot. To increase capacity, we introduced two simple variants that make Small PixelCNN more expressive without growing the receptive field:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fb1f7f68",
+                        "type": "paragraph",
+                        "text": "\u2022 NIN (Network in Network): insert additional gated ResNet blocks with 1x1 convolution between regular convolution blocks that grow receptive field. In this experiment, we inserted 3 NIN blocks between every other layer.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aba41d23",
+                        "type": "paragraph",
+                        "text": "\u2022 Autoregressive Channel: skip connections between sets of channels via 1x1 convolution gated ResNet block.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_140aeba6",
+                        "type": "paragraph",
+                        "text": "Both modifications increase the capacity of the network, resulting in improved log-likelihood as shown in Table 2 . Although the model with small receptive field already achieves an impressive likelihood score, its samples do lack global structure, as seen in Figure 5 .  In order to test the effect of our modifications to PixelCNN, we run a number of ablation experiments where for each experiment we remove a specific modification.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ddad0829",
+                "title": "SOFTMAX LIKELIHOOD INSTEAD OF DISCRETIZED LOGISTIC MIXTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_e11ce19e",
+                        "type": "paragraph",
+                        "text": "In order to test the contribution of our mixture likelihood, we re-run our CIFAR-10 experiment with the 256-way softmax as the output distribution instead. We allow the 256 logits for each sub-pixel to linearly depend on the observed value of previous sub-pixels, with coefficients that are given as output by the model. Our model with softmax likelihood is thus strictly more flexible than our model with logistic mixture likelihood, although the parameterization is quite different from that used by van den Oord et al. (2016c) . The model now outputs 1536 numbers per pixel, describing the logits on the 256 potential values for each sub-pixel, as well as the coefficients for the dependencies between the sub-pixels. Figure 6 shows that this model trains more slowly than our original model. In addition, the running time per epoch is significantly longer for our tensorflow implementation. For our architecture, the logistic mixture model thus clearly performs better. Since our architecture differs from that of van den Oord et al. (2016c) in other ways as well, we cannot say whether this would also apply to their model.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e9a541fb",
+                "title": "CONTINUOUS MIXTURE LIKELIHOOD INSTEAD OF DISCRETIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_04ffc330",
+                        "type": "paragraph",
+                        "text": "Instead of directly modeling the discrete pixel values in an image, it is also possible to de-quantize them by adding noise from the standard uniform distribution, as used by Uria et al. (2013) and others, and modeling the data as being continuous. The resulting model can be interpreted as a variational autoencoder (Kingma & Welling, 2013; Rezende et al., 2014) , where the dequantized pixels z form a latent code whose prior distribution is captured by our model. Since the original discrete pixels x can be perfectly reconstructed from z under this model, the usual reconstruction term vanishes from the variational lower bound. The entropy of the standard uniform distribution is zero, so the term that remains is the log likelihood of the dequantized pixels, which thus gives us a variational lower bound on the log likelihood of our original data.",
+                        "extracted_citations": [
+                            "Citation_b15",
+                            "Citation_b7",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9b087530",
+                        "type": "paragraph",
+                        "text": "We re-run our model for CIFAR-10 using the same model settings as those used for the 2.92 bits per dimension result in Table 1 , but now we remove the discretization in our likelihood model and instead add standard uniform noise to the image data. The resulting model is a continuous mixture model in the same class as that used by Theis et al. (2012) ; Uria et al. (2013) ; Theis & Bethge (2015) and others. After optimization, this model gives a variational lower bound on the data log likelihood of 3.11 bits per dimension. The difference with the reported 2.92 bits per dimension shows the benefit of using discretization in the likelihood model.",
+                        "extracted_citations": [
+                            "Citation_b14",
+                            "Citation_b15",
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_288a9813",
+                "title": "NO SHORT-CUT CONNECTIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_1b3728aa",
+                        "type": "paragraph",
+                        "text": "Next, we test the importance of the additional parallel short-cut connections in our model, indicated by the dotted lines in Figure 2 . We re-run our unconditional CIFAR-10 experiment, but remove the short-cut connections from the model. As seen in Figure 7 , the model fails to train without these connections. The reason for needing these extra short-cuts is likely to be our use of sub-sampling, which discards information that otherwise cannot easily be recovered,",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2a9fda46",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_450b2dc0",
+                        "type": "paragraph",
+                        "text": "We presented PixelCNN++, a modification of PixelCNN using a discretized logistic mixture likelihood on the pixels among other modifications. We demonstrated the usefulness of these modifications with state-of-the-art results on CIFAR-10. Our code is made available at https: //github.com/openai/pixel-cnn and can easily be adapted for use on other data sets.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Laurent Dinh David Krueger Yoshua Bengio Nice arXiv:1410.8516 Non-linear independent components estimation 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Laurent Dinh Jascha Sohl-Dickstein Samy Bengio arXiv:1605.08803 Density estimation using real nvp 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Who killed the directed model? Justin Domke Alap Karapurkar Yiannis Aloimonos Computer Vision and Pattern Recognition IEEE 2008. 2008 CVPR 2008. IEEE Conference on",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Draw: A recurrent neural network for image generation Karol Gregor Ivo Danihelka Alex Graves Daan Wierstra Proceedings of the 32nd International Conference on Machine Learning the 32nd International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Karol Gregor Frederic Besse Danilo Jimenez Rezende Ivo Danihelka Daan Wierstra arXiv:1604.08772 Towards conceptual compression 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Nal Kalchbrenner Lasse Espeholt Karen Simonyan Aaron Van Den Oord Alex Graves Koray Kavukcuoglu arXiv:1610.10099 Neural machine translation in linear time 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Nal Kalchbrenner Aaron Van Den Oord Karen Simonyan Ivo Danihelka arXiv:1610.00527 Oriol Vinyals, Alex Graves, and Koray Kavukcuoglu. Video pixel networks 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Auto-Encoding Variational Bayes P Diederik Max Kingma Welling Proceedings of the 2nd International Conference on Learning Representations the 2nd International Conference on Learning Representations 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Improving variational inference with inverse autoregressive flow P Diederik Tim Kingma Rafal Salimans Xi Jozefowicz Ilya Chen Max Sutskever Welling Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Stochastic backpropagation and approximate inference in deep generative models Shakir Danilo J Rezende Daan Mohamed Wierstra ICML 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "U-net: Convolutional networks for biomedical image segmentation Olaf Ronneberger Philipp Fischer Thomas Brox International Conference on Medical Image Computing and Computer-Assisted Intervention Springer 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Deep unsupervised learning using nonequilibrium thermodynamics Jascha Sohl-Dickstein Eric A Weiss Niru Maheswaranathan Surya Ganguli Proceedings of the 32nd International Conference on Machine Learning the 32nd International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Dropout: a simple way to prevent neural networks from overfitting Nitish Srivastava Geoffrey E Hinton Alex Krizhevsky Ilya Sutskever Ruslan Salakhutdinov Journal of Machine Learning Research 15 1 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Generative image modeling using spatial lstms Lucas Theis Matthias Bethge Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Mixtures of conditional gaussian scale mixtures applied to multiscale image representations Lucas Theis Reshad Hosseini Matthias Bethge PloS one 7 7 39857 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Rnade: The real-valued neural autoregressive density-estimator Benigno Uria Iain Murray Hugo Larochelle Advances in Neural Information Processing Systems 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Locally-connected transformations for deep gmms Aaron Van Den Oord Joni Dambre International Conference on Machine Learning (ICML) : Deep learning Workshop 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Aaron Van Den Oord Sander Dieleman Heiga Zen Karen Simonyan Oriol Vinyals Alex Graves Nal Kalchbrenner Andrew Senior Koray Kavukcuoglu Wavenet arXiv:1609.03499 A generative model for raw audio 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Pixel recurrent neural networks Aaron Van Den Oord Nal Kalchbrenner Koray Kavukcuoglu International Conference on Machine Learning (ICML) 2016 b",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Aaron Van Den Oord Nal Kalchbrenner Oriol Vinyals Lasse Espeholt Alex Graves Koray Kavukcuoglu arXiv:1606.05328 Conditional image generation with pixelcnn decoders 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Sergey Zagoruyko Nikos Komodakis arXiv:1605.07146 Wide residual networks 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0178,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "Summary:\nThis paper on autoregressive generative models explores various extensions of PixelCNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The proposed changes are to replace the softmax function with a logistic mixture model, to use dropout for regularization, to use downsampling to increase receptive field size, and the introduction of particular skip connections.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The authors find that this allows the PixelCNN to outperform a PixelRNN on CIFAR-10, the previous state-of-the-art model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The authors further explore the performance of PixelCNNs with smaller receptive field sizes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Review:\nThis is a useful contribution towards better tractable image models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "In particular, autoregressive models can be quite slow at test time, and the more efficient architectures described here should help with that.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "My main criticism regards the severe neglect of related work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "Mixture models have been used a lot in autoregressive image modeling, including for multivariate conditional densities and including downsampling to increase receptive field size, albeit in a different manner: Domke (2008), Hosseini et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "(2010), Theis et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "(2012), Uria et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "(2013), Theis et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "Note that the logistic distribution is a special case of the Gaussian scale mixture (West, 1978).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "The main difference seems to be the integration of the density to model integers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "While this is clearly a good idea and the right way forward, the authors claim but do not support that not doing this has \u201cproved to be a problem for earlier models based on continuous distributions\u201d.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "Please elaborate, add a reference, or ideally report the performance achieved by PixelCNN++ without integration (and instead adding uniform noise to make the variables continuous).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "60,000 images are not a lot in a high-dimensional space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "While I can see the usefulness of regularization for specialized content \u2013 and this can serve as a good example to demonstrate the usefulness of dropout \u2013 why not use \u201c80 million tiny images\u201d (superset of CIFAR-10) for natural images?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "Semi-supervised learning should be fairly trivial here (because the model\u2019s likelihood is tractable), so this data could even be used in the class-conditional case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "It would be interesting to know how fast the different models are at test time (i.e., when generating images).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.6525,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The authors acknowledge that the ideas in the paper are incremental, but assert these are not-trivial improvements upon prior work on pixel CNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The reviewers tended to agree with this characterization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The paper presents SOTA pixel likelihood results on CIFAR-10.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "This work is also coupled with a high quality source code contribution, which also appears to have already been well received by the github community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "Reviewer 1 made the point that in terms of raw novelty this work is probably a little below the bar for an oral presentation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "A public reviewer rated this paper as a strong accept.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "Given the statistics, quality and originality of the other papers in my AC batch I recommend poster.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.8246,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "It is refreshing that OpenAI has taken the time to resurrect classic heuristics like down-sampling and dropout into PixelCNN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "Some sort of AR technique like PixelCNN probably holds the missing keys needed to eventually have decent originally-created images from CIFAR10 or other real-life data-sets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "So any engineering streamlining, as in this paper, is welcome to the general public, especially when helping to avoid expensive clusters of GPUs, only DeepMind can afford.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "In this sense, OpenAI is fulfilling its mission and we are all very grateful!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "Thus the paper is a welcome addition and we hope it finds its way into what appears to be an experimental CS conference anyway.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "On a more conceptual level, our hope is that OpenAI, with so talented a team, will stop competing in these contrived contests to improve by basis points certain obscure log-likelihoods and instead focus on the bigger picture problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "Why for example, almost two years later, the class-conditional CIFAR10 samples, as on the left of Figure 4 in this paper (column 8 - class of horses), are still inferior to, say, the samples on Figure 4 of reference [2]?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "Forgive the pun, but aren't we beating a dead horse here?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "Yes, resolution and sharpness have improved, due to good engineering but nobody in the general public will take these samples seriously!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "Despite the claims put forward by some on the DeepMind team, PixelCNN is not a \"fully-generative\" neural net (as rigorously defined in section 3 of reference [1]), but merely a perturbative net, in the vain of the Boltzmann machine.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "After the Procrustean experience of lost decades on Boltzmann machines, the time perhaps has come to think more about the fundamentals and less about the heuristics?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.5587,
+            "aspect_scores": {
+                "originality": 5,
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "Apologies for the late submission of this review, and thank you for the author\u2019s responses to earlier questions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "This submission proposes an improved implementation of the PixelCNN generative model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "Most of the improvements are small and can be considered as specific technical details such as the use of dropout and skip connections, while others are slightly more substantial such as the use of a different likelihood model and multiscale analysis.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "The submission demonstrates state-of-the-art likelihood results on CIFAR-10.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "My summary of the main contribution:\nAutoregressive-type models - of which PixelCNN is an example - are a nice class of models as their likelihood can be evaluated in closed form.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_5",
+                    "text": "A main differentiator for this type of models is how the conditional likelihood of one pixel conditioned on its causal neighbourhood is modelled:\n\n- In one line of work such as (Theis et al, 2012 MCGSM, Theis et al 2015 Spatial LSTM) the conditional distribution is modelled as a continuous density over real numbers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_6",
+                    "text": "This approach has limitations: We know that in observed data pixel intensities are quantized to a discrete integer representation so a discrete distribution could give better likelihoods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_7",
+                    "text": "Furthermore these continuous distributions have a tail and assign some probability mass outside the valid range of pixel intensities, which may hurt the likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_8",
+                    "text": "- In more recent work by van den Oord and colleagues the conditional likelihood is modelled as an arbitrary discrete distribution over the 256 possible values for pixel intensities.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_9",
+                    "text": "This does not suffer from the limitations of continuous likelihoods, but it also seems wasteful and is not very data efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_10",
+                    "text": "The authors propose something in the middle by keeping the discretized nature of the conditional likelihood, but restricting the discrete distribution to ones whose CDF that can be modeled as a linear combination of sigmoids.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_11",
+                    "text": "This approach makes sense to me, and is new in a way, but it doesn\u2019t appear to be very revolutionary or significant to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_12",
+                    "text": "The second somewhat significant modification is the use of downsampling and multiscale modelling (as opposed to dilated convolutions).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_13",
+                    "text": "The main motivation for the authors to do this is saving computation time while keeping the multiscale flexibility of the model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_14",
+                    "text": "The authors also introduce shortcut connections to compensate for the potential loss of information as they perform downsampling.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_15",
+                    "text": "Again, I feel that this modification not particularly revolutionary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_16",
+                    "text": "Multiscale image analysis with autoregressive generative models has been done for example in (Theis et al, 2012) and several other papers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_17",
+                    "text": "Overall I felt that this submission falls short on presenting substantially new ideas, and reads more like documentation for a particular implementation of an existing idea.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.6416,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": "Not Discussed",
+                "clarity": 5,
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "# Review\nThis paper proposes five modifications to improve PixelCNN, a generative model with tractable likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "The authors empirically showed the impact of each of their proposed modifications using a series of ablation experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "They also reported a new state-of-the-art result on CIFAR-10.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "Improving generative models, especially for images, is an active research area and this paper definitely contributes to it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "# Pros\nThe authors motivate each modification well they proposed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "They also used ablation experiments to show each of them is important.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "The authors use a discretized mixture of logistic distributions to model the conditional distribution of a sub-pixel instead of a 256-way softmax.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "This allows to have a lower output dimension and to be better suited at learning ordinal relationships between sub-pixel values.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "The authors also mentioned it speeded up training time (less computation) as well as the convergence during the optimization of the model (as shown in Fig.6).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "The authors make an interesting remark about how the dependencies between the color channels of a pixel are likely to be relatively simple and do not require a deep network to model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "This allows them to have a simplified architecture where you don't have to separate out all feature maps in 3 groups depending on whether or not they can see the R/G/B sub-pixel of the current location.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_11",
+                    "text": "# Cons\nIt is not clear to me what the predictive distribution for the green channel (and the blue) looks like.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_12",
+                    "text": "More precisely, how are the means of the mixture components linearly depending on the value of the red sub-pixel?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_13",
+                    "text": "I would have liked to see the equations for them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_14",
+                    "text": "# Minor Comments\nIn Fig.2 it is written \"Sequence of 6 layers\" but in the text (Section 2.4) it says 6 blocks of 5 ResNet layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_15",
+                    "text": "What is the remaining layer?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_16",
+                    "text": "In Fig.2 what does the first \"green square -> blue square\" which isn't in the white rectangle represents?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_17",
+                    "text": "Is there any reason why the mixture indicator is shared across all three channels?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_6",
+            "type": "Human",
+            "liang_alpha_score": 0.0178,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_6_s_0",
+                    "text": "Summary:\nThis paper on autoregressive generative models explores various extensions of PixelCNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_1",
+                    "text": "The proposed changes are to replace the softmax function with a logistic mixture model, to use dropout for regularization, to use downsampling to increase receptive field size, and the introduction of particular skip connections.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_2",
+                    "text": "The authors find that this allows the PixelCNN to outperform a PixelRNN on CIFAR-10, the previous state-of-the-art model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_3",
+                    "text": "The authors further explore the performance of PixelCNNs with smaller receptive field sizes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_4",
+                    "text": "Review:\nThis is a useful contribution towards better tractable image models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_5",
+                    "text": "In particular, autoregressive models can be quite slow at test time, and the more efficient architectures described here should help with that.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_6",
+                    "text": "My main criticism regards the severe neglect of related work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_7",
+                    "text": "Mixture models have been used a lot in autoregressive image modeling, including for multivariate conditional densities and including downsampling to increase receptive field size, albeit in a different manner: Domke (2008), Hosseini et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_8",
+                    "text": "(2010), Theis et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_9",
+                    "text": "(2012), Uria et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_10",
+                    "text": "(2013), Theis et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_11",
+                    "text": "Note that the logistic distribution is a special case of the Gaussian scale mixture (West, 1978).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_12",
+                    "text": "The main difference seems to be the integration of the density to model integers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_13",
+                    "text": "While this is clearly a good idea and the right way forward, the authors claim but do not support that not doing this has \u201cproved to be a problem for earlier models based on continuous distributions\u201d.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_14",
+                    "text": "Please elaborate, add a reference, or ideally report the performance achieved by PixelCNN++ without integration (and instead adding uniform noise to make the variables continuous).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_15",
+                    "text": "60,000 images are not a lot in a high-dimensional space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_16",
+                    "text": "While I can see the usefulness of regularization for specialized content \u2013 and this can serve as a good example to demonstrate the usefulness of dropout \u2013 why not use \u201c80 million tiny images\u201d (superset of CIFAR-10) for natural images?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_17",
+                    "text": "Semi-supervised learning should be fairly trivial here (because the model\u2019s likelihood is tractable), so this data could even be used in the class-conditional case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_18",
+                    "text": "It would be interesting to know how fast the different models are at test time (i.e., when generating images).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_11",
+            "type": "Human",
+            "liang_alpha_score": 0.0178,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_11_s_0",
+                    "text": "Summary:\nThis paper on autoregressive generative models explores various extensions of PixelCNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_1",
+                    "text": "The proposed changes are to replace the softmax function with a logistic mixture model, to use dropout for regularization, to use downsampling to increase receptive field size, and the introduction of particular skip connections.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_2",
+                    "text": "The authors find that this allows the PixelCNN to outperform a PixelRNN on CIFAR-10, the previous state-of-the-art model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_3",
+                    "text": "The authors further explore the performance of PixelCNNs with smaller receptive field sizes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_4",
+                    "text": "Review:\nThis is a useful contribution towards better tractable image models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_5",
+                    "text": "In particular, autoregressive models can be quite slow at test time, and the more efficient architectures described here should help with that.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_6",
+                    "text": "My main criticism regards the severe neglect of related work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_7",
+                    "text": "Mixture models have been used a lot in autoregressive image modeling, including for multivariate conditional densities and including downsampling to increase receptive field size, albeit in a different manner: Domke (2008), Hosseini et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_8",
+                    "text": "(2010), Theis et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_9",
+                    "text": "(2012), Uria et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_10",
+                    "text": "(2013), Theis et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_11",
+                    "text": "Note that the logistic distribution is a special case of the Gaussian scale mixture (West, 1978).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_12",
+                    "text": "The main difference seems to be the integration of the density to model integers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_13",
+                    "text": "While this is clearly a good idea and the right way forward, the authors claim but do not support that not doing this has \u201cproved to be a problem for earlier models based on continuous distributions\u201d.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_14",
+                    "text": "Please elaborate, add a reference, or ideally report the performance achieved by PixelCNN++ without integration (and instead adding uniform noise to make the variables continuous).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_15",
+                    "text": "60,000 images are not a lot in a high-dimensional space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_16",
+                    "text": "While I can see the usefulness of regularization for specialized content \u2013 and this can serve as a good example to demonstrate the usefulness of dropout \u2013 why not use \u201c80 million tiny images\u201d (superset of CIFAR-10) for natural images?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_17",
+                    "text": "Semi-supervised learning should be fairly trivial here (because the model\u2019s likelihood is tractable), so this data could even be used in the class-conditional case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_18",
+                    "text": "It would be interesting to know how fast the different models are at test time (i.e., when generating images).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_12",
+            "type": "Human",
+            "liang_alpha_score": 0.6525,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_12_s_0",
+                    "text": "The authors acknowledge that the ideas in the paper are incremental, but assert these are not-trivial improvements upon prior work on pixel CNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_1",
+                    "text": "The reviewers tended to agree with this characterization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_2",
+                    "text": "The paper presents SOTA pixel likelihood results on CIFAR-10.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_3",
+                    "text": "This work is also coupled with a high quality source code contribution, which also appears to have already been well received by the github community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_4",
+                    "text": "Reviewer 1 made the point that in terms of raw novelty this work is probably a little below the bar for an oral presentation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_5",
+                    "text": "A public reviewer rated this paper as a strong accept.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_6",
+                    "text": "Given the statistics, quality and originality of the other papers in my AC batch I recommend poster.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.8246,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "It is refreshing that OpenAI has taken the time to resurrect classic heuristics like down-sampling and dropout into PixelCNN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "Some sort of AR technique like PixelCNN probably holds the missing keys needed to eventually have decent originally-created images from CIFAR10 or other real-life data-sets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "So any engineering streamlining, as in this paper, is welcome to the general public, especially when helping to avoid expensive clusters of GPUs, only DeepMind can afford.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "In this sense, OpenAI is fulfilling its mission and we are all very grateful!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "Thus the paper is a welcome addition and we hope it finds its way into what appears to be an experimental CS conference anyway.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_5",
+                    "text": "On a more conceptual level, our hope is that OpenAI, with so talented a team, will stop competing in these contrived contests to improve by basis points certain obscure log-likelihoods and instead focus on the bigger picture problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_6",
+                    "text": "Why for example, almost two years later, the class-conditional CIFAR10 samples, as on the left of Figure 4 in this paper (column 8 - class of horses), are still inferior to, say, the samples on Figure 4 of reference [2]?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_7",
+                    "text": "Forgive the pun, but aren't we beating a dead horse here?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_8",
+                    "text": "Yes, resolution and sharpness have improved, due to good engineering but nobody in the general public will take these samples seriously!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_9",
+                    "text": "Despite the claims put forward by some on the DeepMind team, PixelCNN is not a \"fully-generative\" neural net (as rigorously defined in section 3 of reference [1]), but merely a perturbative net, in the vain of the Boltzmann machine.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_10",
+                    "text": "After the Procrustean experience of lost decades on Boltzmann machines, the time perhaps has come to think more about the fundamentals and less about the heuristics?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_15",
+            "type": "Human",
+            "liang_alpha_score": 0.5587,
+            "aspect_scores": {
+                "originality": 5,
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_15_s_0",
+                    "text": "Apologies for the late submission of this review, and thank you for the author\u2019s responses to earlier questions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_1",
+                    "text": "This submission proposes an improved implementation of the PixelCNN generative model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_2",
+                    "text": "Most of the improvements are small and can be considered as specific technical details such as the use of dropout and skip connections, while others are slightly more substantial such as the use of a different likelihood model and multiscale analysis.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_3",
+                    "text": "The submission demonstrates state-of-the-art likelihood results on CIFAR-10.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_4",
+                    "text": "My summary of the main contribution:\nAutoregressive-type models - of which PixelCNN is an example - are a nice class of models as their likelihood can be evaluated in closed form.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_5",
+                    "text": "A main differentiator for this type of models is how the conditional likelihood of one pixel conditioned on its causal neighbourhood is modelled:\n\n- In one line of work such as (Theis et al, 2012 MCGSM, Theis et al 2015 Spatial LSTM) the conditional distribution is modelled as a continuous density over real numbers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_6",
+                    "text": "This approach has limitations: We know that in observed data pixel intensities are quantized to a discrete integer representation so a discrete distribution could give better likelihoods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_7",
+                    "text": "Furthermore these continuous distributions have a tail and assign some probability mass outside the valid range of pixel intensities, which may hurt the likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_8",
+                    "text": "- In more recent work by van den Oord and colleagues the conditional likelihood is modelled as an arbitrary discrete distribution over the 256 possible values for pixel intensities.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_9",
+                    "text": "This does not suffer from the limitations of continuous likelihoods, but it also seems wasteful and is not very data efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_10",
+                    "text": "The authors propose something in the middle by keeping the discretized nature of the conditional likelihood, but restricting the discrete distribution to ones whose CDF that can be modeled as a linear combination of sigmoids.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_11",
+                    "text": "This approach makes sense to me, and is new in a way, but it doesn\u2019t appear to be very revolutionary or significant to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_12",
+                    "text": "The second somewhat significant modification is the use of downsampling and multiscale modelling (as opposed to dilated convolutions).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_13",
+                    "text": "The main motivation for the authors to do this is saving computation time while keeping the multiscale flexibility of the model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_14",
+                    "text": "The authors also introduce shortcut connections to compensate for the potential loss of information as they perform downsampling.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_15",
+                    "text": "Again, I feel that this modification not particularly revolutionary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_16",
+                    "text": "Multiscale image analysis with autoregressive generative models has been done for example in (Theis et al, 2012) and several other papers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_17",
+                    "text": "Overall I felt that this submission falls short on presenting substantially new ideas, and reads more like documentation for a particular implementation of an existing idea.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_16",
+            "type": "Human",
+            "liang_alpha_score": 0.6416,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": "Not Discussed",
+                "clarity": 5,
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_16_s_0",
+                    "text": "# Review\nThis paper proposes five modifications to improve PixelCNN, a generative model with tractable likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_1",
+                    "text": "The authors empirically showed the impact of each of their proposed modifications using a series of ablation experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_2",
+                    "text": "They also reported a new state-of-the-art result on CIFAR-10.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_3",
+                    "text": "Improving generative models, especially for images, is an active research area and this paper definitely contributes to it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_4",
+                    "text": "# Pros\nThe authors motivate each modification well they proposed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_5",
+                    "text": "They also used ablation experiments to show each of them is important.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_6",
+                    "text": "The authors use a discretized mixture of logistic distributions to model the conditional distribution of a sub-pixel instead of a 256-way softmax.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_7",
+                    "text": "This allows to have a lower output dimension and to be better suited at learning ordinal relationships between sub-pixel values.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_8",
+                    "text": "The authors also mentioned it speeded up training time (less computation) as well as the convergence during the optimization of the model (as shown in Fig.6).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_9",
+                    "text": "The authors make an interesting remark about how the dependencies between the color channels of a pixel are likely to be relatively simple and do not require a deep network to model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_10",
+                    "text": "This allows them to have a simplified architecture where you don't have to separate out all feature maps in 3 groups depending on whether or not they can see the R/G/B sub-pixel of the current location.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_11",
+                    "text": "# Cons\nIt is not clear to me what the predictive distribution for the green channel (and the blue) looks like.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_12",
+                    "text": "More precisely, how are the means of the mixture components linearly depending on the value of the red sub-pixel?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_13",
+                    "text": "I would have liked to see the equations for them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_14",
+                    "text": "# Minor Comments\nIn Fig.2 it is written \"Sequence of 6 layers\" but in the text (Section 2.4) it says 6 blocks of 5 ResNet layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_15",
+                    "text": "What is the remaining layer?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_16",
+                    "text": "In Fig.2 what does the first \"green square -> blue square\" which isn't in the white rectangle represents?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_17",
+                    "text": "Is there any reason why the mixture indicator is shared across all three channels?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_17",
+            "type": "Human",
+            "liang_alpha_score": 0.0178,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_17_s_0",
+                    "text": "Summary:\nThis paper on autoregressive generative models explores various extensions of PixelCNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_1",
+                    "text": "The proposed changes are to replace the softmax function with a logistic mixture model, to use dropout for regularization, to use downsampling to increase receptive field size, and the introduction of particular skip connections.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_2",
+                    "text": "The authors find that this allows the PixelCNN to outperform a PixelRNN on CIFAR-10, the previous state-of-the-art model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_3",
+                    "text": "The authors further explore the performance of PixelCNNs with smaller receptive field sizes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_4",
+                    "text": "Review:\nThis is a useful contribution towards better tractable image models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_5",
+                    "text": "In particular, autoregressive models can be quite slow at test time, and the more efficient architectures described here should help with that.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_6",
+                    "text": "My main criticism regards the severe neglect of related work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_7",
+                    "text": "Mixture models have been used a lot in autoregressive image modeling, including for multivariate conditional densities and including downsampling to increase receptive field size, albeit in a different manner: Domke (2008), Hosseini et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_8",
+                    "text": "(2010), Theis et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_9",
+                    "text": "(2012), Uria et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_10",
+                    "text": "(2013), Theis et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_11",
+                    "text": "Note that the logistic distribution is a special case of the Gaussian scale mixture (West, 1978).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_12",
+                    "text": "The main difference seems to be the integration of the density to model integers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_13",
+                    "text": "While this is clearly a good idea and the right way forward, the authors claim but do not support that not doing this has \u201cproved to be a problem for earlier models based on continuous distributions\u201d.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_14",
+                    "text": "Please elaborate, add a reference, or ideally report the performance achieved by PixelCNN++ without integration (and instead adding uniform noise to make the variables continuous).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_15",
+                    "text": "60,000 images are not a lot in a high-dimensional space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_16",
+                    "text": "While I can see the usefulness of regularization for specialized content \u2013 and this can serve as a good example to demonstrate the usefulness of dropout \u2013 why not use \u201c80 million tiny images\u201d (superset of CIFAR-10) for natural images?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_17",
+                    "text": "Semi-supervised learning should be fairly trivial here (because the model\u2019s likelihood is tractable), so this data could even be used in the class-conditional case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_18",
+                    "text": "It would be interesting to know how fast the different models are at test time (i.e., when generating images).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_874018dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a881711f"
+        },
+        {
+            "source": "sec_874018dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ac4f76f"
+        },
+        {
+            "source": "sec_cf3041f8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d3e92c63"
+        },
+        {
+            "source": "b_0533770c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_a54f5fb6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0533770c"
+        },
+        {
+            "source": "sec_a54f5fb6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2ff04286"
+        },
+        {
+            "source": "b_076c1e66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_076c1e66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_076c1e66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_076c1e66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_a54f5fb6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_076c1e66"
+        },
+        {
+            "source": "sec_a54f5fb6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_95a4b9e9"
+        },
+        {
+            "source": "sec_a54f5fb6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7d78d96b"
+        },
+        {
+            "source": "sec_3b36ba1f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_57f5a636"
+        },
+        {
+            "source": "sec_3b36ba1f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9238604c"
+        },
+        {
+            "source": "sec_3b36ba1f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_87bd7980"
+        },
+        {
+            "source": "sec_f2b1d690",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1b9ff65f"
+        },
+        {
+            "source": "sec_fdd3ad16",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_770eb13f"
+        },
+        {
+            "source": "b_4d30761a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_4d30761a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_e3bbef07",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4d30761a"
+        },
+        {
+            "source": "sec_f3d239dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb60a8da"
+        },
+        {
+            "source": "b_30f89fa4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_30f89fa4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_30f89fa4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_30f89fa4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_6bb6dec3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_30f89fa4"
+        },
+        {
+            "source": "sec_6bb6dec3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_067866a5"
+        },
+        {
+            "source": "sec_d5c67317",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a940385f"
+        },
+        {
+            "source": "sec_d5c67317",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f29730f1"
+        },
+        {
+            "source": "sec_d5c67317",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fb1f7f68"
+        },
+        {
+            "source": "sec_d5c67317",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aba41d23"
+        },
+        {
+            "source": "sec_d5c67317",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_140aeba6"
+        },
+        {
+            "source": "sec_ddad0829",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e11ce19e"
+        },
+        {
+            "source": "b_04ffc330",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_04ffc330",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_04ffc330",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_e9a541fb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_04ffc330"
+        },
+        {
+            "source": "b_9b087530",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_9b087530",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_9b087530",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_e9a541fb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9b087530"
+        },
+        {
+            "source": "sec_288a9813",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1b3728aa"
+        },
+        {
+            "source": "sec_2a9fda46",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_450b2dc0"
+        }
+    ]
+}

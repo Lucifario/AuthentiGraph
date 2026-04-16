@@ -1,0 +1,1373 @@
+{
+    "paper_metadata": {
+        "paper_id": "746",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Rejected",
+        "total_reviews_available": 4
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_da5e331e",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_f520880e",
+                        "type": "paragraph",
+                        "text": "Many algorithmic tasks can be described as discrete input-output mappings, but this \"black-box\" vision hides all the fundamental questions that explain how and why the task can be optimally solved, which is the starting point of the study of algorithms and complexity. A powerful and general framework that breaks into this vision is the principle that many tasks have some degree of scale invariance or self-similarity, meaning that the ability to solve the task for a certain input size is essentially all that is needed in order to solve it for larger sizes. This principle is the basis of dynamic programming and is ubiquitous in most areas of discrete mathematics, from geometry to graph theory. In the case of images and audio signals, invariance principles are also critical for success: CNNs exploit both translation invariance and scale separation with multilayer, localized convolutional operators, which breaks the curse of dimensionality and brings the essential inductive bias explaining the success of CNNs. In our scenario of discrete algorithmic tasks, we build our model on the principle of divide and conquer, which provides us with a form of parameter sharing across scales akin to that of CNNs across space or RNNs across time.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b9eb4873",
+                        "type": "paragraph",
+                        "text": "While neural networks have been successful so far at providing flexible models for discrete regression and prediction tasks, mostly in Natural Language processing and discrete Reinforcement Learning, they are typically unaware and uninterested in complexity questions. Whereas some models are trained and tested at a fixed input/output scale (such as regression problems with generic fully connected neural networks), authors have explored ways to make training and testing less dependent of the input scale. The most prominent examples are Convolutional architectures, that exploit translation invariance to accept variable size inputs by averaging their predictions at the last layer; and recurrent neural networks, that operate in an auto-regressive fashion to summarize any variable sized-input into a fixed-dimensional embedding. These two examples are paradigms of models whose complexity scales linearly with the input size.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5dabc041",
+                        "type": "paragraph",
+                        "text": "Whereas CNN and RNN models define algorithms with linear complexity, attention mechanisms Bahdanau et al. (2014) generally correspond to quadratic complexity, with notable exceptions Andrychowicz & Kurach (2016) . This can result in a mismatch between the intrinsic complexity required to solve a given task and the complexity that is given to the neural network to solve it. Our motivation is that learning cannot be 'complete' until these complexities match, and we start this quest by first focusing on problems for which the intrinsic complexity is well known and understood.",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8e738aff",
+                        "type": "paragraph",
+                        "text": "In this paper, we attempt to incorporate the complexity as yet another quantity that one wishes to minimize while training a model. We achieve this by using an architecture that learns recursively how to split a given input and learns how to merge each of the partial responses into a final output. Although these two steps could -and should -eventually be combined, in this work we start by exploring each of these architectures separately. We do so by only observing input-output pairs, getting away with the need to provide each of our artificial smaller problems with their correct output. This is a form of 'weak' supervision that is shown to work on tasks that are scale invariant, i.e. that can be addressed by divide and conquer. Another side benefit of our dynamic programming networks is their ability to generalize to larger scales. By construction, our model learns the same decision at each scale, and therefore can generalize well whenever the task is compatible with that inductive bias.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_30efca47",
+                "title": "Summary of Contributions:",
+                "blocks": [
+                    {
+                        "block_id": "b_43a0acf5",
+                        "type": "paragraph",
+                        "text": "\u2022 We introduce a recursive split and merge architecture, and a learning framework that optimizes it not only for accuracy but also for computational complexity in a fully differentiable manner, using only input-output example pairs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0bd094be",
+                        "type": "paragraph",
+                        "text": "\u2022 We provide preliminary empirical evidence that the dynamic programming principle can be efficiently learnt on simple tasks such as sorting and planar convex hull.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d0597076",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_73aac23d",
+                        "type": "paragraph",
+                        "text": "Using neural networks to solve algorithmic tasks is an active area of current research, but its models can be traced back to context free grammars Fanty (1994) . In particular, dynamic learning appears in works such as Pollack (1991) and Tabor (2000) .",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b10",
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_779573d4",
+                        "type": "paragraph",
+                        "text": "The current research in the area is dominated by Recurrent Neural Networks Joulin & Mikolov (2015) ; Grefenstette et al. (2015) , LSTMs Hochreiter & Schmidhuber (1997) Zaremba & Sutskever (2015) . We refer the reader to Joulin & Mikolov (2015) and references therein for a more exhaustive and detailed account of related work.",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b5",
+                            "Citation_b20",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ed59c246",
+                        "type": "paragraph",
+                        "text": "Amongst these works, we highlight some that are particularly relevant to us. Neural GPU Kaiser & Sutskever (2015) defines a neural architecture that acts convolutionally with respect to the input and is applied iteratively o(n) times, where n is the input size.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6ab00daf",
+                "title": "DIVIDE AND CONQUER WITH NEURAL NETWORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_f505953d",
+                        "type": "paragraph",
+                        "text": "In this section we present our basic model architecture with its core Split and Merge blocks, and then describe how to build the global dynamic programming network. In our formulation, we choose generic data structures for split and merge. The split module accepts sets of elements as input, and outputs a disjoint partition of this set. The merge module accepts two ordered sets \u2126 1 and \u2126 2 as input, and produces a subset \u039b \u2286 \u2126 1 \u222a \u2126 2 of their union that respects the partial ordering; i.e, if",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d7796fcf",
+                        "type": "paragraph",
+                        "text": "3.1 SPLIT Split blocks receive an input set of elements \u2126, and output a partition \u2126 = \u2126 1 \u222a \u2126 2 . The corresponding neural network architecture is permutation invariant. We use a simple block that computes nonlinear moments of the input. Denote n = |\u2126| and assume the elements of \u2126 to be in R d . Define the matrix x \u2208 R d\u00d7n as the elements in \u2126 organized in columns under an arbitrary ordering and x i as the i-th column. This architecture must take sets as inputs, i.e, (S(x, \u03b8)) \u03c3 = S(x \u03c3 , \u03b8) \u2200\u03c3 \u2208 S n (where \u03c3 acts in rows). We propose a \u0398(n) architecture in Appendix A, a somewhat simpler version of similar set-to-set models such as those in Vinyals et al. (2015a) ; Sukhbaatar et al. (2016) .",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_61364aa6",
+                        "type": "paragraph",
+                        "text": "We can compute both subsets either by sampling from the output probabilities or taking the mode (1[p i \u2265 0.5]).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_bdf441fa",
+                "title": "MERGE",
+                "blocks": [
+                    {
+                        "block_id": "b_f0b77f2a",
+                        "type": "paragraph",
+                        "text": "Merge blocks receive two ordered inputs and produce a subset of their union that preserves the partial ordering. We can visualize the merge block as having two different tasks:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_960a48b6",
+                        "type": "paragraph",
+                        "text": "\u2022 Choose a mask over each input to rule out some elements.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_54a8ef29",
+                        "type": "paragraph",
+                        "text": "\u2022 Merge both subsets preserving the partial ordering.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7c1b1dd3",
+                        "type": "paragraph",
+                        "text": "In this paper, for simplicity, we only learn the first task of the merge block and leave the learnability of the second for future work. Let y 1 and y 2 be two ordered sequences of elements in R d of lengths n 1 and n 2 respectively. We parametrize the first part of the merge block using Bi-directional LSTMs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7e0fa8f1",
+                        "type": "paragraph",
+                        "text": "The input of the merge block will be a sequence of vectors in R d+1 . The first d dimensions of the elements in the sequence will correspond to the concatenation of y 1 and y 2 . The last dimension of each element in the input sequence will be a boolean indicating to which sequence the element belongs. We produce the element-wise probabilities by concatenating the hidden states at every element and computing",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8fe97789",
+                        "type": "paragraph",
+                        "text": "where b is a scalar bias and w is a vector in R 2n h with n h being the number of hidden units of each LSTM. We can also compute both subsets either by sampling from these probabilities or taking the mode (1[p i \u2265 0.5]).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9d486aa3",
+                        "type": "paragraph",
+                        "text": "To merge the chosen subsets we will use a deterministic procedure which will produce the correct output if both subsets are correct and will be stable for small errors in the mask. This procedure will be specific for each task and we explain our choice in the experiments section when addressing the convex hull task.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_82255613",
+                "title": "BUILDING THE MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_89b53ec3",
+                        "type": "paragraph",
+                        "text": "Figure 1 illustrates our architecture. The divide and conquer principle is implemented by successively splitting inputs until the input x 0 of size |x 0 | = n is broken into a collection of sets {x v } v\u2208Vi , i \u2264 l such that they reach a critical size K 0 . At that critical scale we consider that the task at hand can be solved with a generic mapping with constant complexity to produce the outputs {x v } v\u2208V l . We consider problems where the outputs are defined as partially ordered subsets of the input. The second phase consists in merging this collection of outputs into the global solution. As described earlier, in this work we consider the two phases separately, and leave the joint training of split and merge operations for future work.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_28ecb306",
+                        "type": "paragraph",
+                        "text": "The model has parameters for each split and merge, but these parameters are shared across all the instances. Also, the structure of the binary tree is dynamic: each input determines the respective sizes of the split, which in turn determine the length of each corresponding branch of the tree.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5fe63a00",
+                        "type": "paragraph",
+                        "text": "Figure 1 : Instantiation of our Dynamic Programming Net. An input instance is recurrently split into smaller instances until we reach a critical scale. The merge procedure works in the opposite direction. We highlight the fact that split and merge sizes can vary and are data dependent, and therefore the binary tree is sample-dependent. All split blocks share the same parameters \u03b8 and similarly for the merge blocks with \u03c6.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8c999d31",
+                "title": "LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_78e33966",
+                        "type": "paragraph",
+                        "text": "The training objective is to both maximize the accuracy at the output, but also to be able to do so with minimal complexity. This section describes how our dynamic architecture allows to optimize both objectives with gradient descent.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b7e1bf4e",
+                "title": "ADJUSTING COMPLEXITY WITH GRADIENT DESCENT",
+                "blocks": [
+                    {
+                        "block_id": "b_47df2f4d",
+                        "type": "paragraph",
+                        "text": "The average case complexity of the split phase satisfies the following recursion:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_66f2b1b9",
+                        "type": "paragraph",
+                        "text": "where (\u03b1 s , 1 -\u03b1 s ) are the fraction of input elements that are respectively sent to each output and A \u2022 n is the cost of running our split module described in Section 3.1. Since this fraction is inputdependent, the average case is obtained by taking expectations with respect to the underlying input distribution. Assuming without loss of generality that E(\u03b1 s ) \u2265 0.5, the resulting complexity is of the order of",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bd4cd040",
+                        "type": "paragraph",
+                        "text": "The overall complexity of the resulting model can be thus partially controlled by enforcing \u03b1 s to be as close as possible to 0.5. The range \u03b1 s \u2208 [0.5, 1) gives us the ability to span complexities between \u0398(n log 2 n) (perfectly balanced trees) and \u0398(n 2 ) (perfectly unbalanced trees with n -1 and 1 elements).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_39ab8139",
+                        "type": "paragraph",
+                        "text": "Similarly, our merge selection phase performs a selection of a subset of the union of its two inputs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5e5f0ec3",
+                        "type": "paragraph",
+                        "text": "Let n = |\u2126 1 | + |\u2126 2 | be the total amount of incoming data at any given node and \u03b1 m = |\u039b| n denote the fraction of elements that is sent to the next level. If we assume an execution tree given by a split phase with factor \u03b1 s , we verify that the resulting complexity satisfies",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5025b93d",
+                        "type": "paragraph",
+                        "text": "When E\u03b1 m < 1, by applying the Akra-Bazzi method Akra & Bazzi (1998) this results in",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_dbb7a3d7",
+                        "type": "paragraph",
+                        "text": "and EC M (n) = \u0398(n log n) when E\u03b1 m = 1. The merge block thus operates in linear time as soon as each merge operation removes a constant fraction of its inputs at each scale. We shall impose that E\u03b1 m \u2265 E\u03b1 s to ensure that the merge decisions do not reach the target size before the tree has reached its end. This creates an incentive to make decisions to discard elements early in the process, but as we shall see in the next section, this is offset by the fact that labeled information exists only at the bottom of the merge process. In the next subsections we shall see how to control the branching factors in a differentiable fashion, enabling learning by simple gradient descent.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8dc1519d",
+                "title": "WEAK VERSUS STRONG SUPERVISION",
+                "blocks": [
+                    {
+                        "block_id": "b_3e20f74d",
+                        "type": "paragraph",
+                        "text": "A key requirement of our approach is the ability to learn only from input-output pairs of training examples. Since the examples have arbitrary size, in general we have no supervision for each individual instance of split and merge operations. The challenge is that each of these blocks sends information to the next by making discrete sampling decisions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ef8eff76",
+                        "type": "paragraph",
+                        "text": "One possibility is to embark in optimization strategies that differentiate under sampling, such as those arising in Reinforcement Learning and in particular the REINFORCE. However, these optimization methods involve gradient estimates with large variance, resulting in poor sample complexity. We study an alternative that exploits the powerful inductive bias given by sharing parameters at all scales and also the fact that we optimize for both accuracy and complexity, and requires only backpropagation and no intermediate sampling.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_23af8dc6",
+                        "type": "paragraph",
+                        "text": "We first focus on the training of each split and merge phase separately, and we assume first that we have available labels at the output of each of these phases. That is, we assume we have a dataset",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f8ec1548",
+                        "type": "paragraph",
+                        "text": "In the case of the split phase, we assume that x k is a set of n k (possibly varying with k) elements, and y k is an ordered partition of x k . In the case of the merge, x k represents an ordered partition of a certain set z k , and y k is a certain (ordered) subset of z k . Each of these subproblems already contains the challenge of training several instances of split and merge connected through discrete, non-differentiable sampling operations. We shall now describe in detail our strategy to compute gradients with respect to parameters \u03b8 (split) and \u03c6 (merge) just with backpropagation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_aae3bbbb",
+                "title": "TRAINING SPLIT",
+                "blocks": [
+                    {
+                        "block_id": "b_e245ab43",
+                        "type": "paragraph",
+                        "text": "In order to train the split block we must create artificial targets at every node of the generated tree from the available final target partition, which is an ordered sequence of disjoint subsets of the input.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d030895c",
+                        "type": "paragraph",
+                        "text": "Figure 1 shows that every scale of the generated tree corresponds to a partition of the final target, and every node of the tree at that scale corresponds to one of the sets of the partition, whose size equals the length of the input at that node.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b188d491",
+                        "type": "paragraph",
+                        "text": "For simplicity, we drop here the superscript denoting the training instance. Let us denote by \u2126 v = x v \u2229 y v the intersection of the input x v at node v, and the corresponding target subset y v . The elements in that intersection will provide gradient signal to update \u03b8 for each node as follows. The split block at v with current parameters computes the vector of probabilities p v (\u03b8, x), encoding the probability that each element in x v will be sent towards the first output or the second. In order to create targets for these outputs, we first sample from p v (\u03b8, x) to obtain a partition of x v :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ebfc1060",
+                        "type": "paragraph",
+                        "text": "Similarly, we consider the target partition of the same size defined by the order in the target subset",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d2dfce31",
+                        "type": "paragraph",
+                        "text": "As described in Section 4.1, besides providing targets corresponding to correct solutions, we also attempt to minimize the average complexity of the model. The contribution of node v to the loss is thus",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1f06eb3e",
+                        "type": "paragraph",
+                        "text": "is a regularization term similar to an empirical variance which will encourage the split block to partition the input into equal parts when maximized. Increasing \u03b2 S will give more preference to split inputs into equal parts, but using a large value can make the performance go down.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_848d49e8",
+                        "type": "paragraph",
+                        "text": "We can finally define the total loss by aggregating the losses across all the nodes of the tree:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_16641183",
+                        "type": "paragraph",
+                        "text": "where V i is the set of vertices at depth i, and \u03b7 = (\u03b7 1 , . . . , \u03b7 l ) is a vector of dynamic hyperparameters that can be changed during training and \u03b2 S is a real positive hyperparameter.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cc3c5f7a",
+                        "type": "paragraph",
+                        "text": "REMARK: if \u2126 v = \u2205, the corresponding node will not be trained because we can't create a target for it.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6357ca75",
+                        "type": "paragraph",
+                        "text": "We will consider \u03b7 as being a binary vector, but non-binary \u03b7 can make sense in some situations. Its role is to dynamically control which scales are trained and which are not, so putting \u03b7 i = 1 will make the i-th scale trainable. Observe that there is a hierarchy in the generated tree, i.e, the ability to discriminate at a given node will strongly depend on the performance at smaller depths. This ability can be quantified by |\u2126 v |, which will increase as performance of previous nodes becomes better. This observation encourages us to give more preference at the top nodes at the beginning of the training, which motivates the definition of the dynamic hyperparameter \u03b7, and is a form of automatic curriculum learning, since by construction the model has to first learn to do well at the coarsest scales before targets can be defined at the finer scales.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e23650e9",
+                        "type": "paragraph",
+                        "text": "REMARK: If we just train the split architecture neglecting the merge, there is no need to first split recursively the input storing the activations at every node and train all the nodes afterwards. We can train the nodes while we are generating the tree. This training procedure reduces considerably the amount of storing space needed for every batch. However, our goal in future work is to train both architectures together. In this case, we must save the activations because the final target for the split will only be available after a full forward pass through split and merge.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0f43ce3c",
+                "title": "TRAINING MERGE",
+                "blocks": [
+                    {
+                        "block_id": "b_c15e4b10",
+                        "type": "paragraph",
+                        "text": "We describe here the procedure to learn how to perform the merging selection described in Section 3.2. Analogously to the split, the key point on the merge training is how to build proper targets at every node of the tree having only the final target available y. In this case, this question is more complicated because the merge block not only merges the two inputs preserving the inner ordering of each, but also rules some of them out. Since we only observe input-output pairs, input elements that are not in the target should be ruled out, but we don't know at which scale of the tree they should be discarded. Let us describe how again thanks to the scale invariance and with appropriate regularization, we can train these operation with only external supervision.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a3f4bb0c",
+                        "type": "paragraph",
+                        "text": "The input x of the merge architecture will be an ordered sequence of disjoint subsets. They correspond to an underlying split tree, so they can be seen as the leaves of a binary tree. First we forward the input to the architecture and merge the outputs of each block recursively storing the activations at every node until we reach the root node. To create the output mask from the probabilities at every node, we always pick the elements belonging to the final convex hull, and the rest will be sampled according to the probabilities. This way, the target elements will always appear in one node at every scale. Denote by x 1 v , x 2 v the inputs at node v and",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4b0247f9",
+                        "type": "paragraph",
+                        "text": ") denote the probability computed by the merge model that element x i is discarded at node v. The contribution of node v to the total loss is defined as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_51b46d42",
+                        "type": "paragraph",
+                        "text": "Here, \u03b2 M is the hyperparameter controlling the tradeoff between accuracy and complexity, and \u03b1 M is a shrinkage factor that models the rate by which each input is shrunk at each scale. This shrinkage rate depends on the task at hand and we have not enough supervision in our setup to estimate it from the data. We thus settle for a rate that is scale invariant, that is the total amount of elements at scale i will follow a law of the form \u03b1 i M . Notice that the cross-entropy term is unbalanced: it only penalizes false negatives, since false positives can be recovered at other scales, but not false negatives.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6b028fdd",
+                        "type": "paragraph",
+                        "text": "Finally, we define the total loss of the architecture as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b2898939",
+                        "type": "paragraph",
+                        "text": "On the last node of the tree we can penalize for both false positives and negatives because its node target corresponds to the final target.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8e215d60",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_6b02922f",
+                        "type": "paragraph",
+                        "text": "Experiments are implemented in Tensorflow, with reproducible code soon available at https: //github.com/alexnowakvila/DP.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4bd547c4",
+                "title": "SORTING",
+                "blocks": [
+                    {
+                        "block_id": "b_4331a329",
+                        "type": "paragraph",
+                        "text": "We implemented the split architecture for the task of sorting. This is a good task to test the split block because we can solve it using an oracle splitting block (quicksort), which consists in finding a centered pivot -such as the median. The final targets will be the sorted vector and the input will be the set of elements of the vector. In this case, the dimensionality of the input is d = 1 because we are sorting scalars.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_94a11017",
+                        "type": "paragraph",
+                        "text": "We train the model for vectors of length n = 256 and train until depth 8. We use 40 layers for the sorting block defined in Appendix A, resulting in a total of 240 parameters for the architecture in a whole. The dataset has 4096 input-output pairs and we train during 5 epochs, by varying the input distribution; see Figure 2 . The training is performed using batches of size 32. At the beginning we only train the first two scales and train one step deeper every 100 batches.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c280c61b",
+                        "type": "paragraph",
+                        "text": "As described in Appendix A, we normalize the input set before feeding it into the next block using the empirical mean and standard deviation. This normalization is lossless if one also feeds these two empirical moments to the split block, as explained in Appendix A, but we observed no noticeable change in the performance in the sorting case. This is consistent with the fact that sorting is invariant to affine transformations of the input. Similarly as in Ioffe & Szegedy (2015) , normalizing the input by its first two moments reduces the effect of numerical instabilities and reduces covariate shift.",
+                        "extracted_citations": [
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a071f3d4",
+                        "type": "paragraph",
+                        "text": "We sample from the output probabilities during training to connect different blocks. Sampling is shown to be helpful during the first steps of training because it provides some exploration and avoids the probabilities to get stuck. However, we observed an increase in performance using the mode at test time. We measure our accuracy using the ratio between the inversions of the output and the mean number of inversions. We denote it by Inversions Ratio (IR):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1a0d7fcd",
+                        "type": "paragraph",
+                        "text": ". We trained the model using normal and exponential distributions. If we use a uniform distribution the splitting task reduces to split by the mean and this can be achieved with a much simpler block. The results show an impressive generalization performance with input length and robustness with respect to input distribution. It is remarkable to achieve this only using weak supervision (i.e, input-output pairs). Figure 2 presents our numerical results and its analysis.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_90e03c92",
+                "title": "PLANAR CONVEX HULL",
+                "blocks": [
+                    {
+                        "block_id": "b_24ffb9c9",
+                        "type": "paragraph",
+                        "text": "We trained the merge architecture for the planar convex hull with both weak and strong supervision assuming an oracle split, i.e, the inputs are disjoint convex hulls. By now, for simplicity, the model only learns how to choose a subset of each of both inputs, but not how to merge both subsets. The deterministic policy to merge both chosen subsets is the following. The procedure will compute angles between the vector that goes from the barycenter to every point and the unit vector (-1, 0). The merged ordered sequence will be the points sorted by the corresponding angles. This policy will produce outputs which are stable for small errors in the masking. We used 15 hidden units for each LSTM, giving a total number of parameters of 2511. We trained with batches of size 16 over a training set of size 1024. Average depths. We plot the average depths of the generated tree. The depth is logarithmic with respect to the size of the input. The curve is independent of the test distribution and the regularization term is key to make the complexity of the algorithm be close to the optimal.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4a9f74ab",
+                        "type": "paragraph",
+                        "text": "It is important to prevent the model to learn the resulting convex hull just by the absolute position of the points. For instance, if the points were drawn from a unit distribution on the unit square, then the model could guess if a point belongs to the convex hull just using its absolute position. As the loss in the weak supervision framework only discriminates between points belonging to the final convex hull, using the absolute position can lead to a bad performance in the intermediate scales. In order to get around this problem, our points were drawn from a uniform distribution on a half unit square [0.5, 0.5] 2 whose center is a random point in the square [0.25, 0.75] 2 . This way, we reduce considerably the reliability of the absolute position to solve the task.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_541d47fe",
+                        "type": "paragraph",
+                        "text": "We first train the model using strong supervision, i.e, every node of the tree will use the correct target and all inputs at all nodes will be the correct convex hulls. We can think of strong supervision as a sort of curriculum learning, but here, the block is simultaneously learning with different lengths.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1ff86234",
+                        "type": "paragraph",
+                        "text": "At test time, we create the output mask by taking the mode of each output probability (can also try with probabilities). To train using weak supervision, we must put a prior for the complexity of the whole algorithm using \u03b1 M . Its optimal value is unknown if just using input-output pairs, and in fact, it depends on the scale and the data distribution. However, we estimate it by \u03b1",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_008742cf",
+                        "type": "paragraph",
+                        "text": "where \u2126 t is the target, \u2126 i is the i-th input and l is the number of scales.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dfedad53",
+                        "type": "paragraph",
+                        "text": "At test time, we measure the accuracy of the model with the following quantity: Accuracy = |\u2126t\u2229 \u03a9| |\u2126t\u222a \u03a9| . We adjusted the hyperparameter \u03b2 M by making the gradient norms of the first part of the loss 8 to be of the same magnitude of the gradient norms of the regularization term. We found the optimal \u03b2 M to be 10 -2 . We observed a much worse convergence using a \u03b2 M larger than the optimal in the case of 3 scales. We also confirmed the necessity of the regularization term for the model to converge (see Figure 3 ). The average training time per epoch depends on the total number of scales and the experimental \u03b1 M . For instance, the model trained using WS takes about 1:30 min and 2 min in average for 2 and 3 scales respectively. However, when training using WS for 3 scales without regularization term, the probabilities get stuck at 1, producing an increase in complexity of the model and a training time per epoch of 6 min.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ced7996a",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_25243427",
+                        "type": "paragraph",
+                        "text": "We have presented a framework that has the ability to leverage an important smoothness prior present in many discrete algorithmic tasks, namely the scale invariance or the ability to divide and conquer.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_130af047",
+                        "type": "paragraph",
+                        "text": "Similarly as the local translation invariance prior when learning with images using CNNs, exploiting this inductive bias breaks the curse of dimensionality and provides a solid foundation to learn complex functional dependencies.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3efc671d",
+                        "type": "paragraph",
+                        "text": "Our approach is an attempt to mimic the behavior of dynamic programming algorithms with neural networks. It is instantiated with two atomic operations -split an input into two, and merge two outputs into a single one -that are recursively applied. This framework allows us to train the system using weak supervision (that is, by only observing input-output pairs), and gives us another bullet: the ability to optimize not only for accuracy but also for complexity, all in a fully differentiable setup. Our numerical results are by all means preliminary, and much is still to be done before this architecture becomes competitive. In particular, we are considering the following directions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_31cb808b",
+                        "type": "paragraph",
+                        "text": "Current work: We are currently working in two major aspects. The first one is to generalize the merge step so that it can not only perform the selection but also the concatenation in a fully learnt manner. This operation can also be implemented with o(n) architectures since the partial order at the output respects the partial order in each of the two inputs. The second one is to perform the joint training of both split and merge blocks, which will allow us to learn with really weak supervision.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c21e10db",
+                        "type": "paragraph",
+                        "text": "For that purpose, it is necessary to perform target propagation to provide suitable targets for the split block. Lastly, we are in the process of comparing our results with standard baselines that do not exploit the dynamic structure of the problem.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d019f26b",
+                "title": "Future work:",
+                "blocks": [
+                    {
+                        "block_id": "b_0ad40f54",
+                        "type": "paragraph",
+                        "text": "The number of extensions and applicability of this model is vast. In particular, we want to extend split and merge architectures in graph problems such as shortest paths or spanning trees. For that purpose, we will use Graph Neural Networks Scarselli et al. (2009) ; Sukhbaatar et al. (2016) as atomic models to handle the data. We also want to explore more generic architectures for the atomic split and merge, perhaps with \u0398(n log n) complexity, to cover more territory between linear and quadratic complexity, and to test the ability of the model to learn good approximations in tasks that are NP-hard. Another question that this model raises is the consistency of weak supervision thanks to the scale invariance. A byproduct of our scale invariance seems to be the ability to propagate and diffuse the available targets at the coarsest scale at all scales, leading to 'selfconsistent' supervision. We believe this is a profound question. Finally, we want to explore the links between these ideas and that of the hierarchical Reinforcement learning, which is an extreme form of very weak supervision. Designing intermediate rewards is akin to our setup of defining suitable targets at intermediate scales, albeit with an extra degree of difficulty. We observe that the accuracy is lower for 3 scales. This is due to the tree structure and how the errors propagate through it. In the case of SS, the merge block is not able to correct mistakes coming from previous layers because the model is always trained with correct inputs. For WS, we also observe a lower accuracy for 3 scales, however, the decrease is smaller than using strong supervision. We claim that the reason for this is that the block is able to correct mistakes from previous layers because the inputs of the blocks during training are not perfect convex hulls. We also show that without regularization the model is not able to learn with WS. (b): Analysis of \u03b1 M . We plot the average number of masked elements at every scale over a batch of size 16. The theoretical masks are computed using the correct dynamic algorithm, the estimate masks are the ones computed using the prior \u03b1 M used during training and the experimental corresponds to the masks when doing a forward pass using the trained model.",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "On the solution of linear recurrence equations Mohamad Akra Louay Bazzi Computational Optimization and Applications 10 2 1998",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Learning efficient algorithms with hierarchical attentive memory Marcin Andrychowicz Karol Kurach arXiv:1602.03218 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Neural machine translation by jointly learning to align and translate Dzmitry Bahdanau Kyunghyun Cho Yoshua Bengio arXiv:1409.0473 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Context-free parsing in connectionist networks. Parallel natural language processing Mark Fanty 1994",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Alex Graves Greg Wayne Ivo Danihelka arXiv:1410.5401 Neural turing machines 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Learning to transduce with unbounded memory Edward Grefenstette Karl Moritz Hermann Mustafa Suleyman Phil Blunsom Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Long short-term memory Sepp Hochreiter J\u00fcrgen Schmidhuber Neural computation 9 8 1997",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Batch normalization: Accelerating deep network training by reducing internal covariate shift Sergey Ioffe Christian Szegedy arXiv:1502.03167 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Inferring algorithmic patterns with stack-augmented recurrent nets Armand Joulin Tomas Mikolov Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "\u0141ukasz Kaiser Ilya Sutskever arXiv:1511.08228 Neural gpus learn algorithms 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "The induction of dynamical recognizers B Jordan Pollack arXiv:1511.06279 Machine Learning 1991. 2015 7 Neural programmer-interpreters. arXiv preprint Scott Reed and Nando de Freitas",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "The graph neural network model Franco Scarselli Marco Gori Ah Chung Tsoi Markus Hagenbuchner Gabriele Monfardini IEEE Transactions on Neural Networks 20 1 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "End-to-end memory networks Sainbayar Sukhbaatar Arthur Szlam Jason Weston Rob Fergus Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Sainbayar Sukhbaatar Arthur Szlam Rob Fergus arXiv:1605.07736 Learning multiagent communication with backpropagation 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Sequence to sequence learning with neural networks Ilya Sutskever Oriol Vinyals Quoc V Le Advances in neural information processing systems 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Fractal encoding of context-free grammars in connectionist networks Whitney Tabor Expert Systems 17 1 2000",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Order matters: Sequence to sequence for sets Oriol Vinyals Samy Bengio Manjunath Kudlur arXiv:1511.06391 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Pointer networks Oriol Vinyals Meire Fortunato Navdeep Jaitly Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Jason Weston Sumit Chopra Antoine Bordes arXiv:1410.3916 2014 Memory networks. arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Learning to execute Wojciech Zaremba Ilya Sutskever arXiv:1410.4615 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Reinforcement learning neural turing machines-revised Wojciech Zaremba Ilya Sutskever arXiv:1505.00521 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.2321,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "The basic idea of this contribution is very nice and worth pursuing: how to use the powerful \u201cdivide and conquer\u201d algorithm design strategy to learn better programs for tasks such as sorting or planar convex hull.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "However, the execution of this idea is not convincing and needs polishing before acceptance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "As it is right now, the paper has a proof-of-concept feel that makes it great for a workshop contribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "My main concern is that the method presented is currently not easily applicable to other tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "Typically, demonstrations of program induction from input-output examples on well known tasks serves the purpose of proving, that a generic learning machine is able to solve some well known tasks, and will be useful on other tasks due to its generality.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_5",
+                    "text": "This contribution, however, presents a learning machine that is very hand-tailored to the two chosen tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_6",
+                    "text": "The paper essentially demonstrates that with enough engineering (hardcoding the recurrency structure, designing problem-specific rules of supervision at lower recurrency levels) one can get a partially trainable sorter or convex hull solver.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_7",
+                    "text": "I found the contribution relatively hard to understand.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_8",
+                    "text": "High level ideas are mixed with low-level tricks required to get the model to work and it is not clear either how the models operate, nor how much of them was actually learned, and how much was designed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_9",
+                    "text": "The answer to the questions did hep, nut didn't make it into the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_10",
+                    "text": "Mixing the descriptions of the tricks required to solve the two tasks makes things even more confusing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_11",
+                    "text": "I believe that the paper would be much more accessible if instead of promising a general solution it clearly stated the challenges faced by the authors and the possible solutions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_12",
+                    "text": "Highlights:\n+ Proof-of-concept of a partially-trainable implementation of the important \u201cdivide and conquer\u201d paradigm\n++ Explicit reasoning about complexity of induced programs\n- The solution isn\u2019t generic enough to be applicable to unknown problems - the networks require tricks specific to each problem\n- The writing style pictures the method as very general, but falls back on very low level details specific to each task",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.6712,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "I find this paper extremely hard to read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "The main promise of the paper is to train models for combinatorial search procedures, especially for dynamic programming to learn where to split and merge.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "The present methodology is supposed to make use of some form of scale invariance property which is scarcely motivated for most problems this approach should be relevant for.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "However, the general research direction is fruitful and important.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "The paper would be much more readable if it would start with a clear, formal problem formulation, followed by some schematic view on the overall flow and description on which parts are supervised, which parts are not.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "Also a tabular form and sample of the various kinds problems solved by this method could be listed in the beginning as a motivation with some clear description on how they fit the central paradigm and motivate the rest of the paper in a more concrete manner.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "Instead, the paper is quite chaotic, switching between low-level and high level details, problem formulations and their solutions in a somewhat random, hard to parse order.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "Both split and merge phases seem to make a lot of discrete choices in a hierarchical manner during training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "The paper does not explain how those discrete choices are backpropagated through the network in an unbiased manner, if that is the case at all.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "In general, the direction this paper is exciting, but the paper itself is a frustrating read in its present form.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "I have spent several hours on it without having to manage to achieve a clear mental image on how all the presented pieces fit together.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_11",
+                    "text": "I would revise my score if the paper would be improved greatly from a readability perspective, but I think it would require a major rewrite.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_13",
+            "type": "Human",
+            "liang_alpha_score": 0.2321,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_13_s_0",
+                    "text": "The basic idea of this contribution is very nice and worth pursuing: how to use the powerful \u201cdivide and conquer\u201d algorithm design strategy to learn better programs for tasks such as sorting or planar convex hull.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_1",
+                    "text": "However, the execution of this idea is not convincing and needs polishing before acceptance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_2",
+                    "text": "As it is right now, the paper has a proof-of-concept feel that makes it great for a workshop contribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_3",
+                    "text": "My main concern is that the method presented is currently not easily applicable to other tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_4",
+                    "text": "Typically, demonstrations of program induction from input-output examples on well known tasks serves the purpose of proving, that a generic learning machine is able to solve some well known tasks, and will be useful on other tasks due to its generality.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_5",
+                    "text": "This contribution, however, presents a learning machine that is very hand-tailored to the two chosen tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_6",
+                    "text": "The paper essentially demonstrates that with enough engineering (hardcoding the recurrency structure, designing problem-specific rules of supervision at lower recurrency levels) one can get a partially trainable sorter or convex hull solver.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_7",
+                    "text": "I found the contribution relatively hard to understand.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_8",
+                    "text": "High level ideas are mixed with low-level tricks required to get the model to work and it is not clear either how the models operate, nor how much of them was actually learned, and how much was designed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_9",
+                    "text": "The answer to the questions did hep, nut didn't make it into the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_10",
+                    "text": "Mixing the descriptions of the tricks required to solve the two tasks makes things even more confusing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_11",
+                    "text": "I believe that the paper would be much more accessible if instead of promising a general solution it clearly stated the challenges faced by the authors and the possible solutions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_12",
+                    "text": "Highlights:\n+ Proof-of-concept of a partially-trainable implementation of the important \u201cdivide and conquer\u201d paradigm\n++ Explicit reasoning about complexity of induced programs\n- The solution isn\u2019t generic enough to be applicable to unknown problems - the networks require tricks specific to each problem\n- The writing style pictures the method as very general, but falls back on very low level details specific to each task",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.6712,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "I find this paper extremely hard to read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "The main promise of the paper is to train models for combinatorial search procedures, especially for dynamic programming to learn where to split and merge.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "The present methodology is supposed to make use of some form of scale invariance property which is scarcely motivated for most problems this approach should be relevant for.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "However, the general research direction is fruitful and important.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "The paper would be much more readable if it would start with a clear, formal problem formulation, followed by some schematic view on the overall flow and description on which parts are supervised, which parts are not.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_5",
+                    "text": "Also a tabular form and sample of the various kinds problems solved by this method could be listed in the beginning as a motivation with some clear description on how they fit the central paradigm and motivate the rest of the paper in a more concrete manner.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_6",
+                    "text": "Instead, the paper is quite chaotic, switching between low-level and high level details, problem formulations and their solutions in a somewhat random, hard to parse order.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_7",
+                    "text": "Both split and merge phases seem to make a lot of discrete choices in a hierarchical manner during training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_8",
+                    "text": "The paper does not explain how those discrete choices are backpropagated through the network in an unbiased manner, if that is the case at all.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_9",
+                    "text": "In general, the direction this paper is exciting, but the paper itself is a frustrating read in its present form.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_10",
+                    "text": "I have spent several hours on it without having to manage to achieve a clear mental image on how all the presented pieces fit together.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_11",
+                    "text": "I would revise my score if the paper would be improved greatly from a readability perspective, but I think it would require a major rewrite.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_da5e331e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f520880e"
+        },
+        {
+            "source": "sec_da5e331e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b9eb4873"
+        },
+        {
+            "source": "b_5dabc041",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_5dabc041",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_da5e331e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5dabc041"
+        },
+        {
+            "source": "sec_da5e331e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8e738aff"
+        },
+        {
+            "source": "sec_30efca47",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_43a0acf5"
+        },
+        {
+            "source": "sec_30efca47",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0bd094be"
+        },
+        {
+            "source": "b_73aac23d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_73aac23d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_73aac23d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_d0597076",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_73aac23d"
+        },
+        {
+            "source": "b_779573d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_779573d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_779573d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_779573d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_d0597076",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_779573d4"
+        },
+        {
+            "source": "sec_d0597076",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ed59c246"
+        },
+        {
+            "source": "sec_6ab00daf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f505953d"
+        },
+        {
+            "source": "b_d7796fcf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_6ab00daf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d7796fcf"
+        },
+        {
+            "source": "sec_6ab00daf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_61364aa6"
+        },
+        {
+            "source": "sec_bdf441fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0b77f2a"
+        },
+        {
+            "source": "sec_bdf441fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_960a48b6"
+        },
+        {
+            "source": "sec_bdf441fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_54a8ef29"
+        },
+        {
+            "source": "sec_bdf441fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7c1b1dd3"
+        },
+        {
+            "source": "sec_bdf441fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7e0fa8f1"
+        },
+        {
+            "source": "sec_bdf441fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8fe97789"
+        },
+        {
+            "source": "sec_bdf441fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d486aa3"
+        },
+        {
+            "source": "sec_82255613",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_89b53ec3"
+        },
+        {
+            "source": "sec_82255613",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28ecb306"
+        },
+        {
+            "source": "sec_82255613",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5fe63a00"
+        },
+        {
+            "source": "sec_8c999d31",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_78e33966"
+        },
+        {
+            "source": "sec_b7e1bf4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47df2f4d"
+        },
+        {
+            "source": "sec_b7e1bf4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_66f2b1b9"
+        },
+        {
+            "source": "sec_b7e1bf4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bd4cd040"
+        },
+        {
+            "source": "sec_b7e1bf4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_39ab8139"
+        },
+        {
+            "source": "sec_b7e1bf4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e5f0ec3"
+        },
+        {
+            "source": "b_5025b93d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_b7e1bf4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5025b93d"
+        },
+        {
+            "source": "sec_b7e1bf4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dbb7a3d7"
+        },
+        {
+            "source": "sec_8dc1519d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3e20f74d"
+        },
+        {
+            "source": "sec_8dc1519d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ef8eff76"
+        },
+        {
+            "source": "sec_8dc1519d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_23af8dc6"
+        },
+        {
+            "source": "sec_8dc1519d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f8ec1548"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e245ab43"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d030895c"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b188d491"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ebfc1060"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d2dfce31"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1f06eb3e"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_848d49e8"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_16641183"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cc3c5f7a"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6357ca75"
+        },
+        {
+            "source": "sec_aae3bbbb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e23650e9"
+        },
+        {
+            "source": "sec_0f43ce3c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c15e4b10"
+        },
+        {
+            "source": "sec_0f43ce3c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a3f4bb0c"
+        },
+        {
+            "source": "sec_0f43ce3c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4b0247f9"
+        },
+        {
+            "source": "sec_0f43ce3c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_51b46d42"
+        },
+        {
+            "source": "sec_0f43ce3c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6b028fdd"
+        },
+        {
+            "source": "sec_0f43ce3c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b2898939"
+        },
+        {
+            "source": "sec_8e215d60",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6b02922f"
+        },
+        {
+            "source": "sec_4bd547c4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4331a329"
+        },
+        {
+            "source": "sec_4bd547c4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_94a11017"
+        },
+        {
+            "source": "b_c280c61b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_4bd547c4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c280c61b"
+        },
+        {
+            "source": "sec_4bd547c4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a071f3d4"
+        },
+        {
+            "source": "sec_4bd547c4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1a0d7fcd"
+        },
+        {
+            "source": "sec_90e03c92",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_24ffb9c9"
+        },
+        {
+            "source": "sec_90e03c92",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4a9f74ab"
+        },
+        {
+            "source": "sec_90e03c92",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_541d47fe"
+        },
+        {
+            "source": "sec_90e03c92",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1ff86234"
+        },
+        {
+            "source": "sec_90e03c92",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_008742cf"
+        },
+        {
+            "source": "sec_90e03c92",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dfedad53"
+        },
+        {
+            "source": "sec_ced7996a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_25243427"
+        },
+        {
+            "source": "sec_ced7996a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_130af047"
+        },
+        {
+            "source": "sec_ced7996a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3efc671d"
+        },
+        {
+            "source": "sec_ced7996a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_31cb808b"
+        },
+        {
+            "source": "sec_ced7996a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c21e10db"
+        },
+        {
+            "source": "b_0ad40f54",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_0ad40f54",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_d019f26b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ad40f54"
+        }
+    ]
+}

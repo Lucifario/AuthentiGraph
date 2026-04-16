@@ -1,0 +1,2683 @@
+{
+    "paper_metadata": {
+        "paper_id": "703",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Rejected",
+        "total_reviews_available": 20
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_e90ada5a",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_39fc870b",
+                        "type": "paragraph",
+                        "text": "It is only recently that commodity computing hardware in the form of graphics processors delivered the performance necessary for practical, large scale Deep Neural Network applications Krizhevsky et al. (2012) . At the same time, the end of Dennard Scaling in semiconductor technology Esmaeilzadeh et al. (2011) makes it difficult to deliver further advances in hardware performance using existing general purpose designs. It seems that further advances in DNN sophistication would have to rely mostly on algorithmic and in general innovations at the software level which can be helped by innovations in hardware design. Accordingly, hardware DNN accelerators have emerged. The DianNao accelerator family was the first to use a wide single-instruction single-data (SISD) architecture to process up to 4K operations in parallel on a single chip Chen et al. (2014a; b) outperforming graphics processors by two orders of magnitude. Development in hardware accelerators has since proceeded in two directions: either toward more general purpose accelerators that can support more machine learning algorithms while keeping performance mostly on par with DaDian-Nao (DaDN) Chen et al. (2014b) , or toward further specialization of specific layers or classes of DNNs with the goal of outperforming DaDN in execution time and/or energy efficiency, e.g., Han et al. (2016) ; Albericio et al. (2016a) ; Judd et al. (2016a) ; Chen, Yu-Hsin and Krishna, Tushar and Emer, Joel and Sze, Vivienne (2016); Reagen et al. (2016) . This work is along the second direction. Section 5 reviews several other accelerator designs. While DaDN's functional units process 16-bit fixed-point values, DNNs exhibit varying precision requirements across and within layers, e.g., Judd et al. (2015) . Accordingly, it is possible to use shorter, per layer representations for activations and/or weights. However, with existing bit-parallel functional units doing so does not translate into a performance nor an energy advantage as the values are expanded into the native hardware precision inside the unit. This work presents Tartan (TRT), a massively parallel hardware accelerator whose execution time for fully-connected and convolutional layers scales with the precision p used to represent the input values. TRT uses hybrid bit-serial/bit-parallel functional units and exploits the abundant parallelism of typical DNN layers with the goal of exceeding DaDN's execution time performance and energy efficiency. Ideally Tartan can improve execution time by 16  p where p is the precision used for the activations in convolutional layers, and for the activations and weights in fully-connected layers. Every bit of precision that can be eliminated ideally reduces execution time and increases energy efficiency. TRT builds upon the Stripes (STR) accelerator Judd et al. (2016c; a) which improves execution time and energy efficiency only for convolutional layers.",
+                        "extracted_citations": [
+                            "Citation_b19",
+                            "Citation_b8",
+                            "Citation_b9",
+                            "Citation_b25",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_424daad0",
+                        "type": "paragraph",
+                        "text": "This work evaluates TRT on a set of convolutional neural networks (CNNs) for image classification. On average TRT reduces inference time by 1.61\u00d7, 1.91\u00d7 and 1.90\u00d7 over DaDN for the fullyconnected, the convolutional, and all layers respectively. Energy efficiency compared to DaDN with TRT is 0.92\u00d7, 1.18\u00d7 and 1.17\u00d7 respectively. TRT enables trading off accuracy for improving execution time and energy efficiency. For example, on average for the fully-connected layers, accepting a 1% loss in accuracy improves performance to 1.73\u00d7 and energy efficiency to 1.00\u00d7 compared to DaDN.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_359ced86",
+                        "type": "paragraph",
+                        "text": "The rest of this document is organized as follows: Section 2 illustrates the key concepts behind TRT via an example. Section 3 reviews the DaDN architecture and presents an equivalent Tartan configuration. Section 4 presents the experimental results. Section 5 reviews related work and discusses the limitations of this study and the potential challenges with TRT. Section 6 concludes.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6f9500d9",
+                        "type": "paragraph",
+                        "text": "2 Tartan: A SIMPLIFIED EXAMPLE This section illustrates at a high-level the TRT design by showing how it would process two purposely trivial cases: 1) a fully-connected layer (FCL) with a single input activation producing two output activations, and 2) a convolutional layer (CVL) with two input activations and one singleweight filter producing two output activations. The per layer calculations are:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_37f8b46f",
+                        "type": "paragraph",
+                        "text": "Where f 1 , f 2 , c 1 and c 2 are output activations, w 1 , w 2 , and w are weights, and a 1 , a 2 and a are input activations. For clarity all values are assumed to be represented in 2 bits of precision.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_70ea7ed3",
+                "title": "CONVENTIONAL BIT-PARALLEL PROCESSING",
+                "blocks": [
+                    {
+                        "block_id": "b_f8b03563",
+                        "type": "paragraph",
+                        "text": "Figure 2 .1a shows a bit-parallel processing engine representative of DaDN. Every cycle, the engine can calculate the product of two 2-bit inputs, i (weight) and v (activation) and accumulate or store it into the output register OR. Parts (b) and (c) of the figure show how this unit can calculate the example CVL over two cycles. In part (b) and during cycle 0, the unit accepts along the v input bits 0 and 1 of a 1 (noted as a1/0 and a1/1 respectively on the figure), and along i bits 0 and 1 of w and produces both bits of output c 1 . Similarly, during cycle 1 (part (c)), the unit processes a 2 and w to produce c 2 . In total, over two cycles, the engine produced two 2b \u00d7 2b products. Processing the example FCL also takes two cycles: In the first cycle w 1 and a produce f 1 , and in the second cycle w 2 and a produce f 2 . This process is not shown in the interest of space.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a2c3076e",
+                "title": "Tartan'S APPROACH",
+                "blocks": [
+                    {
+                        "block_id": "b_9b859c73",
+                        "type": "paragraph",
+                        "text": "Figure 2 shows how a TRT-like engine would process the example CVL. Figure 2a shows the engine's structure which comprises two subunits. The two subunits accept each one bit of an activation per cycle through inputs v0 and v1 respectively and as before, there is a common 2-bit weight input (i1, i0). In total, the number of input bits is 4, identical to the bit-parallel engine.  Each subunit contains three 2-bit registers: a shift-register AR, a parallel load register BR, and an parallel load output register OR. Each cycle each subunit can calculate the product of its single bit v i input with BR which it can write or accumulate into its OR. There is no bit-parallel multiplier since the subunits process a single activation bit per cycle. Instead, two AND gates, a shift-and-add functional unit, and OR form a shift-and-add multiplier/accumulator. Each AR can load a single bit per cycle from one of the i wires, and BR can be parallel loaded from AR or from the i wires.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a05813c3",
+                        "type": "paragraph",
+                        "text": "Convolutional Layer: Figure 2b through Figure 2d show how the CVL is processed. The figures abstract away the unit details showing only the register contents. As Figure 2b shows, during cycle 1, the w synapse is loaded in parallel to the BRs of both subunits via the i1 and i0 inputs. During cycle 2, bits 0 of a 1 and of a 2 are sent via the v0 and v1 inputs respectively to the first and second subunit. The subunits calculate concurrently a 1 /0 \u00d7 w and a 2 /0 \u00d7 w and accumulate these results into their ORs. Finally, in cycle 3, bit 1 of a 1 and a 2 appear respectively on v0 and v1. The subunits calculate respectively a 1 /1 \u00d7 w and a 2 /1 \u00d7 w accumulating the final output activations c 1 and c 2 into their ORs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d1c7b907",
+                        "type": "paragraph",
+                        "text": "In total it took 3 cycles to process the layer. However, at the end of the third cycle, another w could have been loaded into the BRs (the i are idle) allowing a new set of outputs to commence computation during cycle 4. That is loading a new weight can be hidden during the processing of the current output activation for all but the first time. In the steady state, when the input activations are represented in two bits, this engine will be producing two 2b \u00d7 2b terms every two cycles thus matching the bandwidth of the bit-parallel engine.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e6a486db",
+                        "type": "paragraph",
+                        "text": "If the activations a 1 and a 2 could be represented in just one bit, then this engine would be producing two output activations per cycle, twice the bandwidth of the bit-parallel engine. The latter is incapable of exploiting the reduced precision. In general, if the bit-parallel hardware was using P base bits to represent the activations while only P a bits were enough, TRT would outperform the bit-parallel engine by P base PTRT . Fully-Connected Layer: Figure 3 shows how a TRT-like unit would process the example FCL. As Figure 3a shows, in cycle 1, bit 1 of w 1 and of w 2 appear respectively on lines i1 and i0. The left subunit's AR is connected to i1 while the right subunit's AR is connected to i0. The ARs shift in the corresponding bits into their least significant bit sign-extending to the vacant position (shown as a 0 bit on the example). During cycle 2, as Figure 3b shows, bits 0 of w1 and of w2 appear on the respective i lines and the respective ARs shift them in. At the end of the cycle, the left subunit's AR contains the full 2-bit w 1 and the right subunit's AR the full 2-bit w 2 . In cycle 3, Figure 3c shows that the contents of AR are copied to BR in each subunit. From the next cycle, calculating the products can now proceed similarly to what was done for the CVL. In this case, however, each BR contains a different weight whereas in the CVL all BRs held the same w value. The shift capability of the ARs coupled with the different i wire per subunit connection allowed us to load a different weight bit-serially over two cycles. Figure 3d and Figure 3e show cycles 4 and 5 respectively. During cycle 4, bit 0 of a1 appears on both v inputs and is multiplied with the BR in each subunit. In cycle 5, bit 1 of a1 appears on both v inputs and the subunits complete the calculation of f 1 and f 2 . It takes two cycles to produce the two 2b \u00d7 2b products once the correct inputs appear into the BRs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d637d6c6",
+                        "type": "paragraph",
+                        "text": "While in our example no additional inputs nor outputs are shown, it would have been possible to overlap the loading of a new set of w inputs into the ARs while processing the current weights stored into the BRs. That is the loading into ARs, copying into BRs, and the bit-serial multiplication of the BRs with the activations is a 3-stage pipeline where each stage can take multiple cycles. In general, assuming that both activations and weights are represented using 2 bits, this engine would match the performance of the bit-parallel engine in the steady state. When both set of inputs i and v can be represented with fewer bits, 1 in this case, the engine would produce two terms per cycle, twice the bandwidth of the bit-parallel engine of the previous section.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9b02908d",
+                "title": "Summary:",
+                "blocks": [
+                    {
+                        "block_id": "b_bbf4f2d0",
+                        "type": "paragraph",
+                        "text": "In general, if P base the precision of the bit-parallel engine, and P L a and P L w the precisions that can be used respectively for activations and weights for layer L, a TRT engine can ideally outperform an equivalent bit parallel engine by P base P L a for CVLs, and by P base max(P L a ,P L w ) for FCLs. This example used the simplest TRT engine configuration. Since typical layers exhibit massive parallelism, TRT can be configured with many more subunits while exploiting weight reuse for CVLs and activation reuse for FCLs. The next section describes the baseline state-of-the-art DNNs accelerator and presents an equivalent TRT configuration.  3 Tartan ARCHITECTURE This work presents TRT as a modification of the state-of-the-art DaDianNao accelerator. Accordingly, Section 3.1 reviews DaDN's design and how it can process FCLs and CVLs. For clarity, in what follows the term brick refers to a set of 16 elements of a 3D activation or weight array 1 input which are contiguous along the i dimension, e.g., a(x, y, i)...a(x, y, i + 15). Bricks will be denoted by their origin element with a B subscript, e.g., a B (x, y, i). The size of a brick is a design parameter.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_75812a57",
+                "title": "BASELINE SYSTEM: DADIANNAO",
+                "blocks": [
+                    {
+                        "block_id": "b_f1b3ab50",
+                        "type": "paragraph",
+                        "text": "TRT is demonstrated as a modification of the DaDianNao accelerator (DaDN) proposed by Chen et al. (2014b) . Figure 4a shows a DaDN tile which processes 16 filters concurrently calculating 16 activation and weight products per filter for a total of 256 products per cycle. Each cycle the tile accepts 16 weights per filter for total of 256 synapses and 16 input activations. The tile multiplies each weight with only one activation whereas each activation is multiplied with 16 weights, one per filter. The tile reduces the 16 products into a single partial output activation per filter, for a total of 16 partial output activations for the tile. Each DaDN chip comprises 16 such tiles, each processing a different set of 16 filters per cycle. Accordingly, each cycle, the whole chip processes 16 activations and 256 \u00d7 16 = 4K weights producing 16 \u00d7 16 = 256 partial output activations, 16 per tile.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d24ac32e",
+                        "type": "paragraph",
+                        "text": "Internally, each tile has: 1) a synapse buffer (SB) that provides 256 weights per cycle one per weight lane, 2) an input neuron buffer (NBin) which provides 16 activations per cycle through 16 neuron lanes, and 3) a neuron output buffer (NBout) which accepts 16 partial output activations per cycle.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_06dbee48",
+                        "type": "paragraph",
+                        "text": "In the tile's datapath each activation lane is paired with 16 weight lanes one from each filter. Each synapse and neuron lane pair feeds a multiplier, and an adder tree per filter lane reduces the 16 per filter products into a partial sum. In all, the filter lanes produce each a partial sum per cycle, for a total of 16 partial output activations per Once a full window is processed, the 16 resulting sums, are fed through a non-linear activation function, f , to produce the 16 final output activations. The multiplications and reductions needed per cycle are implemented via 256 multipliers one per weight lane and sixteen 17-input (16 products plus the partial sum from NBout) adder trees one per filter lane.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b47e502c",
+                        "type": "paragraph",
+                        "text": "Figure 5a shows an overview of the DaDN chip. There are 16 processing tiles connected via an interconnect to a shared central eDRAM Neuron Memory (NM). DaDN's main goal was minimizing off-chip bandwidth while maximizing on-chip compute utilization. To avoid fetching weights from off-chip, DaDN uses a 2MB eDRAM Synapse Buffer (SB) for weights per tile for a total of 32MB eDRAM. All inter-layer activation outputs except for the initial input and the final output are stored in NM which is connected via a broadcast interconnect to the 16 Input Neuron Buffers (NBin) buffers. All values are 16-bit fixed-point, hence a 256-bit wide interconnect can broadcast a full activation brick in one step. Off-chip accesses are needed only for reading: 1) the input image, 2) the weight once per layer, and 3) for writing the final output.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8d237dc4",
+                        "type": "paragraph",
+                        "text": "Processing starts by reading from external memory the first layer's filter weights, and the input image. The weights are distributed over the SBs and the input is stored into NM. Each cycle an input activation brick is broadcast to all units. Each units reads 16 weight bricks from its SB and produces a partial output activation brick which it stores in its NBout. Once computed, the output activations are stored through NBout to NM and then fed back through the NBins when processing the next layer. Loading the next set of weights from external memory can be overlapped with the processing of the current layer as necessary.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f229b586",
+                "title": "Tartan",
+                "blocks": [
+                    {
+                        "block_id": "b_0919cd18",
+                        "type": "paragraph",
+                        "text": "As Section 2 explained, TRT processes activations bit-serially multiplying a single activation bit with a full weight per cycle. Each DaDN tile multiplies 16 16-bit activations with 256 weights each cycle.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a7e1ad90",
+                        "type": "paragraph",
+                        "text": "To match DaDN's computation bandwidth, TRT needs to multiply 256 1-bit activations with 256 weights per cycle. Figure 4b shows the TRT tile. It comprises 256 Serial Inner-Product Units (SIPs) organized in a 16\u00d716 grid. Similar to DaDN each SIP multiplies 16 weights with 16 activations and reduces these products into a partial output activation. Unlike DaDN, each SIP accepts 16 single-bit activation inputs. Each SIP has two registers, each a vector of 16 16-bit subregisters: 1) the Serial Weight Register (SWR), and 2) the Weight Register (WR). These correspond to AR and BR of the example of Section 2. NBout remains as in DaDN, however, it is distributed along the SIPs as shown.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_57cf8272",
+                        "type": "paragraph",
+                        "text": "Convolutional Layers: Processing starts by reading in parallel 256 weights from the SB as in DaDN, and loading the 16 per SIP row weights in parallel to all SWRs in the row. Over the next P L a cycles, the weights are multiplied by the bits of an input activation brick per column. TRT exploits weight reuse across 16 windows sending a different input activation brick to each column. For example, for a CVL with a stride of 4 a TRT tile will processes 16 activation bricks a B (x, y, i), a B (x + 4, y, i) through a B (x + 63, y, i) in parallel a bit per cycle. Assuming that the tile processes filters f i though f i+15 , after P L a cycles it would produce the following partial output activations: o B (x/4, y/4, f i ), through o B (x/4 + 15, y/4, f i ), that is 16 contiguous on the x dimension output activation bricks. Whereas DaDN would process 16 activations bricks over 16 cycles, TRT processes them concurrently but bit-serially over P L a cycles. If P L a is less than 16, TRT will outperform DaDN by 16/P L a , and when P L a is 16, TRT will match DaDN's performance. Fully-Connected Layers: Processing starts by loading bit-serially and in parallel over P L w cycles, 4K weights into the SWRs. Each SWR per row gets a different set of 16 weights as each subregister is connected to one out of the 256 wires of the SB output bus for the SIP row. Once the weights have been loaded, the SWRs are copied to the SWs and multiplication with the input activations can then proceed bit-serially over P L a cycles. Assuming that there are enough output activations so that a different output activation can be assigned to each SIP, the same input activation brick can be broadcast to all SIP columns. For example, for an FCL a TRT tile will process one activation brick a B (i) bit-serially to produce 16 output activation bricks o B (i) through o B (i \u00d7 16) one per SIP column. Loading the next set of weights can be done in parallel with processing the current set, thus execution time is constrained by P L max = max(P L a , P L w ). Thus, a TRT tile produces 256 partial For TRT to be fully utilized an FCL must have at least 4K output activations. Some of the networks studied have a layer with as little as 2K output activations. To avoid underutilization, the SIPs along each row are cascaded into a daisy-chain, where the output of one can feed into an input of the next via a multiplexer. This way, the computation of an output activation can be sliced over the SIPs along the same row. In this case, each SIP processes only a portion of the input activations resulting into several partial output activations along the SIPs on the same row. Over the next np cycles, where np the number of slices used, the np partial outputs can be reduced into the final output activation. The user can chose any number of slices up to 16, so that TRT can be fully utilized even with fullyconnected layers of just 256 outputs. For example, in NeuralTalk Karpathy & Li (2014) the smallest layers can have 600 outputs or fewer.",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8bdf9d94",
+                        "type": "paragraph",
+                        "text": "Other Layers: TRT like DaDN can process the additional layers needed by the studied networks. For this purpose the tile includes additional hardware support for max pooling similar to DaDN. An activation function unit is present at the output of NBout in order to apply nonlinear activations before the output neurons are written back to NM.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4d456073",
+                "title": "SIP AND OTHER COMPONENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_88d11957",
+                        "type": "paragraph",
+                        "text": "SIP: Bit-Serial Inner-Product Units: Figure 6 shows TRT's Bit-Serial Inner-Product Unit (SIP). Each SIP multiplies 16 activations by 16 weights to produce an output activation. Each SIP has two registers, a Serial Weight Register (SWR) and a Weight Registers (WR), each containing 16 16-bit subregisters. Each SWR subregister is a shift register with a single bit connection to one of the weight bus wires that is used to read weights bit-serially for FCLs. Each WR subregister can be parallel loaded from either the weight bus or the corresponding SWR subregister, to process CVLs or FCLs respectively. Each SIP includes 256 2-input AND gates that multiply the weights in the WR with the incoming activation bits, and a 16 \u00d7 16b adder tree that sums the partial products. A final adder plus a shifter accumulate the adder tree results into an output register. In each SIP, a multiplexer at the first input of the adder tree implements the cascade mode supporting slicing the output activation computation along the SIPs of a single row. To support signed 2's complement neurons, the SIP can subtract the weight corresponding to the most significant bit (MSB) from the partial sum when the MSB is 1. This is done with negation blocks for each weight before the adder tree. Each SIP also includes a comparator (max) to support max pooling layers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7d54be62",
+                        "type": "paragraph",
+                        "text": "Dispatcher and Reducers: Figure 5b shows an overview of the full TRT system. As in DaDN there is a central NM and 16 tiles. A Dispatcher unit is tasked with reading input activations from NM always performing eDRAM-friendly wide accesses. It transposes each activation and communicates each a bit a time over the global interconnect. For CVLs the dispatcher has to maintain a pool of multiple activation bricks, each from different window, which may require fetching multiple rows from NM. However, since a new set of windows is only needed every P L a cycles, the dispatcher can keep up for the layers studied. For FCLs one activation brick is sufficient. A Reducer per title is tasked with collecting the output activations and writing them to NM. Since output activations take multiple cycles to produce, there is sufficient bandwidth to sustain all 16 tiles.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a1951fe9",
+                "title": "PROCESSING SEVERAL BITS AT ONCE",
+                "blocks": [
+                    {
+                        "block_id": "b_1742dcfa",
+                        "type": "paragraph",
+                        "text": "In order to improve TRT's area and power efficiency, the number of bits processed at once can be parameterized. In this case, the weights are multiplied with several activation bits at once, and the multiplication results are partially shifted before they are inserted into their corresponding adder tree.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b612ad0d",
+                        "type": "paragraph",
+                        "text": "In order to load the weights on time, the SWR subregister has to be modified so it can load several bits in parallel, and shift that number of positions every cycle. The negation block (for 2's complement support) will operate only over the most significant product result.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5f43f79e",
+                        "type": "paragraph",
+                        "text": "The chief advantage of such a design is that less SIPs are needed in order to achieve the same throughput -for example, processing 2 bits at once allows reducing the number of columns from 16 to 8. Although the total number of bus wires is similar, the distance they have to cover is significantly reduced. Likewise, the total number of adders required stays similar, but they are clustered closer together.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_84be4d9f",
+                        "type": "paragraph",
+                        "text": "A drawback of this design is the limitation to precisions that are exact multiples of the number of bits processed at once.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d71c8c19",
+                "title": "EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_36e0449c",
+                        "type": "paragraph",
+                        "text": "This section evaluates TRT's performance, energy and area and explores the trade-off between accuracy and performance comparing to DaDN.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2995640c",
+                "title": "METHODOLOGY",
+                "blocks": [
+                    {
+                        "block_id": "b_62a28b3d",
+                        "type": "paragraph",
+                        "text": "Numerical Representation Requirements Analysis: The per layer precision profiles are found via the methodology of Judd et al. Judd et al. (2015) . Caffe Jia et al. (2014) was used to measure how reducing the precision of each FCL affects the network's overall top-1 prediction accuracy over 5000 images. The network definitions and pre-trained synaptic weights are taken from the Caffe Model Zoo Jia (2015) . Since TRT's performance for FCLs is bound by the maximum of the weight and activation precisions, our exploration was limited to the cases where both are the same. The search procedure is a gradient descent where a given layer's precision is iteratively decremented one bit at a time, until the network's accuracy drops. For weights, the fixed point numbers are set to represent values between -1 and 1. For activations, the number of fractional bits is fixed to a previouslydetermined value known not to hurt accuracy, as per Judd et al. (2015) . While both activations and weights use the same number of bits, their precisions and ranges differ.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b11",
+                            "Citation_b10",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_72b6cd2e",
+                        "type": "paragraph",
+                        "text": "Performance, Area and Energy: DaDN, STR and TRT were modeled using the same methodology for consistency. A custom cycle-accurate simulator models execution time. Computation was scheduled as described by Judd et al. (2016a) to maximize energy efficiency for DaDN. The logic components of the both systems were synthesized with the Synopsys Design Compiler Synopsys for a TSMC 65nm library to report power and area. The circuit is clocked at 980 MHz. The NBin and NBout SRAM buffers were modelled using CACTI Muralimanohar & Balasubramonian. The eDRAM area and energy were modelled with Destiny Poremba et al. (2015) .",
+                        "extracted_citations": [
+                            "Citation_b24"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_06a0b55d",
+                "title": "RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_449d3792",
+                        "type": "paragraph",
+                        "text": "Fully-Connected Layer Precisions: Table 1 reports the per layer precisions for the CVLs and FCLs of the networks studied along with the speedup over DaDN that would be ideally possible. The discussion in this section focuses solely on FCLs. The precisions that can be used vary from 8 up to 10 bits vs. the 16 bits DaDN uses. The ideal speedup ranges from 63% to 66% with no accuracy loss. Additional exploration of the precision space may yield even shorter precisions without sacrificing accuracy. Modest additional improvements are possible with a loss of 1% in accuracy. -9-9-8-12-10-10-12-13-11-12-13-13-13-13-13 1.57 10-9-8 1.63 and the whole network. For the 100% profile, where no accuracy is lost, TRT yields, on average, a speedup of 1.61\u00d7 over DaDN on FCLs. With the 99% profile, it improves to 1.73\u00d7.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_15f5b754",
+                "title": "Execution Time:",
+                "blocks": [
+                    {
+                        "block_id": "b_ba8414ca",
+                        "type": "paragraph",
+                        "text": "There are two main reasons the ideal speedup can't be reached in practice: dispatch overhead and underutilization. Dispatch overhead occurs on the initial P L w cycles of execution, where the serial weight loading process prevents any useful products to be performed. In practice, this overhead is less than 2% for any given network, although it can be as high as 6% for the smallest layers. Underutilization can happen when the number of output neurons is not a power of two, or lower than 256. The last classifier layers of networks designed towards recognition of ImageNet (Russakovsky et al. (2014) ) categories all provide 1000 output neurons, which leads to 2.3% of the SIPs being idle.",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8f6f3e17",
+                        "type": "paragraph",
+                        "text": "We have also performed an evaluation of NeuralTalk LSTM Karpathy & Li (2014) which uses long short-term memory to automatically generate image captions. Precision can be reduced down to 11 bits withouth affecting the accuracy of the predictions (measured as the BLEU score when compared to the ground truth) resulting in a ideal performance improvement of 1.45\u00d7 translating into a 1.38\u00d7 speedup with TRT.",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b7334af6",
+                        "type": "paragraph",
+                        "text": "Energy Efficiency: This section compares the energy efficiency or simply efficiency of TRT and DaDN. Energy Efficiency is the inverse of the relative energy consumption of the two designs. The average efficiency improvement with TRT across all networks and layers for the 100% profile is 1.17\u00d7. In the FCLs, TRT is not as efficient as DaDN, however, the energy efficiency for CVLs more than compensates when whole networks are considered except for VGG 19. Regardless, performance would not scale linearly if DaDN was to include more tiles in an attempt to match TRT's performance: under-utilization for most layers in these networks would severely reduce any performance improvements delivered via additional tiles under DaDN. Overall, efficiency primarily comes from the reduction in effective computation following the use of reduced precision arithmetic for the inner product operations. Furthermore, the amount of data that has to be transmitted from the SB and the traffic between the central eDRAM and the SIPs is decreased proportionally to the chosen TRT area (mm 2 ) TRT 2-bit area (mm 2 ) DaDN area (mm  Area Overhead: Table 3 reports the area breakdown of TRT and DaDN. Over the full chip, TRT needs 1.49\u00d7 the area compared to DaDN while delivering on average a 1.90\u00d7 improvement in speed. Generally, performance would scale sublinearly with area for DaDN due to underutilization. The 2-bit variant, which has a lower area overhead, is described in detail in the next section.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_74eff2dc",
+                "title": "TWO-BIT AT ONCE PERFORMANCE EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_62d21518",
+                        "type": "paragraph",
+                        "text": "We evaluate the performance for a multi-bit design as described in section 3.4, where 2 bits are processed every cycle in as half as many total SIPs. The precisions used are the same as indicated in Table 1 for 100% accuracy, rounded up to the next multiple of two. The results are shown in Table 4 . The 2-bit TRT always improves performance compared to DaDN as the \"vs. DaDN\" columns show. Compared to the 1-bit TRT performance is slightly lower however given that the area of the 2-bit TRT is much lower, this can be a good trade-off. Overall, there are two forces at work that shape performance relative to the 1-bit TRT. There is performance potential lost due to rounding all precisions to an even number, and there is performance benefit by requiring less parallelism. The time needed to serially load the first bundle of weights is also reduced. In VGG 19 the performance benefit due to the lower parallelism requirement outweights the performance loss due to precision rounding. In all other cases, the reverse is true.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5ea637a4",
+                        "type": "paragraph",
+                        "text": "A hardware synthesis and layout of both DaDN and TRT's 2-bit variant using TSMC 65nm typical case libraries shows that the total area overhead can be as low as 24.9%, with an improved energy efficiency in fully connected layers of 1.24\u00d7 on average.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7bb22616",
+                "title": "RELATED WORK AND LIMITATIONS OF THIS WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_42accfb0",
+                        "type": "paragraph",
+                        "text": "The recent success of Deep Learning has led to several proposals for hardware acceleration of DNNs. This section reviews some of these recent efforts. However, specialized hardware designs for neural networks is a field with a relatively long history. Relevant to TRT, bit-serial processing hardware for neural networks has been proposed several decades ago, e.g., Svensson & Nordstrom (1990) ; Murray et al. (1988) . While the performance of these designs scales with precision it would be lower than that of an equivalently configured bit-parallel engine. For example, Svensson & Nordstrom (1990) uses an interesting bit-serial multiplier which requires O(4 \u00d7 p) cycles, where p the precision in bits. Furthermore, as semiconductor technology has progressed the number of resources that can be put on chip and the trade offs (e.g., relative speed of memory vs. transistors vs. wires) are today vastly different facilitating different designs. However, truly bit-serial processing such as that used in the aforementioned proposals needs to be revisited with today's technology constraints due to its potentially high compute density (compute bandwidth delivered per area).",
+                        "extracted_citations": [
+                            "Citation_b27",
+                            "Citation_b23",
+                            "Citation_b27"
+                        ]
+                    },
+                    {
+                        "block_id": "b_11330c59",
+                        "type": "paragraph",
+                        "text": "In general, hardware acceleration for DNNs has recently progressed in two directions: 1) considering more general purpose accelerators that can support additional machine learing algorithms, and 2) considering further improvements primarily for convolutional neural networks and the two most dominant in terms of execution time layer types: convolutional and fully-connected. In the first category there are accelerators such as Cambricon Liu et al. (2016) and Cambricon-X Zhang et al. (2016) . While targeting support for more machine learning algorithms is desirable, work on further optimizing performance for specific algorithms such as TRT is valuable and needs to be pursued as it will affect such general purpose accelerators.",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b29"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f482b4b2",
+                        "type": "paragraph",
+                        "text": "TRT is closely related to Stripes Judd et al. (2016c; a) whose execution time scales with precision but only for CVLs. STR does not improve performance for FCLs. TRT improves upon STR by enabling: 1) performance improvements for FCLs, and 2) slicing the activation computation across multiple SIPs thus preventing underutilization for layers with fewer than 4K outputs. Pragmatic uses a similar in spirit organization to STR but its performance on CVLs depends only on the number of activation bits that are 1 Albericio et al. (2016b) . It should be possible to apply the TRT extensions to Pragmatic, however, performance in FCLs will still be dictated by weight precision. The area and energy overheads would need to be amortized by a commensurate performance improvement.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6a620f95",
+                        "type": "paragraph",
+                        "text": "The Efficient Inference Engine (EIE) uses synapse pruning, weight compression, zero activation elimination, and network retraining to drastically reduce the amount of computation and data communication when processing fully-connected layers Han et al. (2016) . An appropriately configured EIE will outperform TRT for FCLs, provided that the network is pruned and retrained. However, the two approaches attack a different component of FCL processing and there should be synergy between them. Specifically, EIE currently does not exploit the per layer precision variability of DNNs and relies on retraining the network. It would be interesting to study how EIE would benefit from a TRT-like compute engine where EIE's data compression and pruning is used to create vectors of weights and activations to be processed in parallel. EIE uses single-lane units whereas TRT uses a coarser-grain lane arrangement and thus would be prone to more imbalance. A middle ground may be able to offer some performance improvement while compensating for cross-lane imbalance.",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9e55bc36",
+                        "type": "paragraph",
+                        "text": "Eyeriss uses a systolic array like organization and gates off computations for zero activations Chen, Yu-Hsin and Krishna, Tushar and Emer, Joel and Sze, Vivienne (2016) and targets primarily highenergy efficiency. An actual prototype has been built and is in full operation. Cnvlutin is a SIMD accelerator that skips on-the-fly ineffectual activations such as those that are zero or close to zero Albericio et al. (2016a) . Minerva is a DNN hardware generator which also takes advantage of zero activations and that targets high-energy efficiency Reagen et al. (2016) . Layer fusion can further reduce off-chip communication and create additional parallelism Alwani et al. (2016) . As multiple layers are processed concurrently, a straightforward combination with TRT would use the maximum of the precisions when layers are fused.",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_87ecd576",
+                        "type": "paragraph",
+                        "text": "Google's Tensor Processing Unit uses quantization to represent values using 8 bits Jouppi (2016) to support TensorFlow Abadi et al. (2015) . As Table 1 shows, some layers can use lower than 8 bits of precision which suggests that even with quantization it may be possible to use fewer levels and to potentially benefit from an engine such as TRT.",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ff8d794c",
+                        "type": "paragraph",
+                        "text": "Limitations: As in DaDN this work assumed that each layer fits on-chip. However, as networks evolve it is likely that they will increase in size thus requiring multiple TRT nodes as was suggested in DaDN. However, some newer networks tend to use more but smaller layers. Regardless, it would be desirable to reduce the area cost of TRT most of which is due to the eDRAM buffers. We have not explored this possibility in this work. Proteus Judd et al. (2016b) is directly compatible with TRT and can reduce memory footprint by about 60% for both convolutional and fully-connected layers. Ideally, compression, quantization and pruning similar in spirit to EIE Han et al. (2016) would be used to reduce computation, communication and footprint. General memory compresion Mittal & Vetter (2016) techniques offer additional opportunities for reducing footprint and communication.",
+                        "extracted_citations": [
+                            "Citation_b15",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_56c49aa9",
+                        "type": "paragraph",
+                        "text": "We evaluated TRT only on CNNs for image classification. Other network architectures are important and the layer configurations and their relative importance varies. TRT enables performance improvements for two of the most dominant layer types. We have also provided some preliminary evidence that TRT works well for NeuralTalk LSTM Karpathy & Li (2014) . Moreover, by enabling output activation computation slicing it can accommodate relatively small layers as well.",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_571b6ebe",
+                        "type": "paragraph",
+                        "text": "Applying some of the concepts that underlie the TRT design to other more general purpose accelerators such as Cambricon Liu et al. (2016) or graphics processors would certainly be more preferable than a dedicated accelerator in most application scenarios. However, these techniques are best first investigated into specific designs and then can be generalized appropriately.",
+                        "extracted_citations": [
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f2b6bd9f",
+                        "type": "paragraph",
+                        "text": "We have evaluated TRT only for inference only. Using an engine whose performance scales with precision would provide another degree of freedom for network training as well. However, TRT needs to be modified accordingly to support all the operations necessary during training and the training algorithms need to be modified to take advantage of precision adjustments.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_92e09b91",
+                        "type": "paragraph",
+                        "text": "This section commented only on related work on digital hardware accelerators for DNNs. Advances at the algorithmic level would impact TRT as well or may even render it obsolete. For example, work on using binary weights Courbariaux et al. (2015) would obviate the need for an accelerator whose performance scales with weight precision. Investigating TRT's interaction with other network types and architectures and other machine learning algorithms is left for future work.",
+                        "extracted_citations": [
+                            "Citation_b7"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3c47189e",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_6635aa20",
+                        "type": "paragraph",
+                        "text": "This work presented Tartan an accelerator for inference with Deep Learning Networks whose performance scales inversely linearly with the number of bits used to represent values in fully-connected and convolutional layers. TRT also enables on-the-fly accuracy vs. performance and energy efficiency trade offs and its benefits were demonstrated over a set of popular image classification networks. The new key ideas in TRT are: 1) Supporting both the bit-parallel and the bit-serial loading of weights into processing units to facilitate the processing of either convolutional or fullyconnected layers, and 2) cascading the adder trees of various subunits (SIPs) to enable slicing the output computation thus reducing or eliminating cross-lane imbalance for relatively small layers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_71399aab",
+                        "type": "paragraph",
+                        "text": "TRT opens up a new direction for research in inference and training by enabling precision adjustments to translate into performance and energy savings. These precisions adjustments can be done statically prior to execution or dynamically during execution. While we demonstrated TRT for inference only, we believe that TRT, especially if combined with Pragmatic, opens up a new direction for research in training as well. For systems level research and development, TRT with its ability to trade off accuracy for performance and energy efficiency enables a new degree of adaptivity for operating systems and applications.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "TensorFlow: Large-scale machine learning on heterogeneous systems Mart\u00edn Abadi Ashish Agarwal Paul Barham Eugene Brevdo Zhifeng Chen Craig Citro Greg S Corrado Andy Davis Jeffrey Dean Matthieu Devin Sanjay Ghemawat Ian Goodfellow Andrew Harp Geoffrey Irving Michael Isard Yangqing Jia Rafal Jozefowicz Lukasz Kaiser Manjunath Kudlur Josh Levenberg Dan Man\u00e9 Rajat Monga Sherry Moore Derek Murray Chris Olah Mike Schuster Jonathon Shlens Benoit Steiner Ilya Sutskever Kunal Talwar Paul Tucker Vincent Vanhoucke Vijay Vasudevan Fernanda Vi\u00e9gas Oriol Vinyals Pete Warden Martin Wattenberg Martin Wicke Yuan Yu Xiaoqiang Zheng 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Cnvlutin: Ineffectual-neuron-free deep neural network computing Jorge Albericio Patrick Judd Tayler Hetherington Tor Aamodt Natalie Enright Jerger Andreas Moshovos 2016 IEEE/ACM International Conference on Computer Architecture (ISCA) 2016 a",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Bit-pragmatic deep neural network computing Jorge Albericio Patrick Judd Alberto Delmas Lascorz Sayeh Sharify Andreas Moshovos arXiv:1610.06920[cs.LG Arxiv 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Fused-layer cnn accelerators Manoj Alwani Han Chen Michael Ferdman Peter Milder 49th Annual IEEE/ACM International Symposium on Microarchitecture 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Diannao: A small-footprint highthroughput accelerator for ubiquitous machine-learning Z Chen N Du J Sun C Wang Y Wu Chen Temam Proceedings of the 19th international conference on Architectural support for programming languages and operating systems the 19th international conference on Architectural support for programming languages and operating systems 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Dadiannao: A machine-learning supercomputer Yunji Chen Tao Luo Shaoli Liu Shijin Zhang Liqiang He Jia Wang Ling Li Tianshi Chen Zhiwei Xu Ninghui Sun O Temam 10.1109/MICRO.2014.58 Microarchitecture (MICRO), 2014 47th Annual IEEE/ACM International Symposium on Dec 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Eyeriss: An Energy-Efficient Reconfigurable Accelerator for Deep Convolutional Neural Networks Yu-Hsin And Chen Tushar Krishna Joel Emer Vivienne Sze IEEE International Solid-State Circuits Conference Digest of Technical Papers 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Binaryconnect: Training deep neural networks with binary weights during propagations Matthieu Courbariaux Yoshua Bengio Jean-Pierre David Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Dark silicon and the end of multicore scaling Emily Hadi Esmaeilzadeh Renee Blem St Karthikeyan Amant Doug Sankaralingam Burger 10.1145/2000064.2000108 Proceedings of the 38th Annual International Symposium on Computer Architecture, ISCA '11 the 38th Annual International Symposium on Computer Architecture, ISCA '11 New York, NY, USA ACM 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "EIE: efficient inference engine on compressed deep neural network Song Han Xingyu Liu Huizi Mao Jing Pu Ardavan Pedram Mark A Horowitz William J Dally 43rd ACM/IEEE Annual International Symposium on Computer Architecture, ISCA 2016 Seoul, South Korea June 18-22, 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Yangqing Jia Caffe model zoo 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Yangqing Jia Evan Shelhamer Jeff Donahue Sergey Karayev Jonathan Long Ross Girshick Sergio Guadarrama Trevor Darrell Caffe arXiv:1408.5093 Convolutional architecture for fast feature embedding 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Google supercharges machine learning tasks with TPU custom chip Norman Jouppi 2016. Nov-2016 3",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Patrick Judd Jorge Albericio Tayler Hetherington Tor Aamodt Natalie Enright Jerger Raquel Urtasun Andreas Moshovos arXiv:1511.05236v4[cs.LG].arXiv.org Precision Strategies for Bounded Memory in Deep Neural Nets 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Stripes: Bit-serial Deep Neural Network Computing Patrick Judd Jorge Albericio Tayler Hetherington Tor Aamodt Andreas Moshovos MICRO-49 Proceedings of the 49th Annual IEEE/ACM International Symposium on Microarchitecture the 49th Annual IEEE/ACM International Symposium on Microarchitecture 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Proteus: Exploiting numerical precision variability in deep neural networks Patrick Judd Jorge Albericio Tayler Hetherington M Tor Natalie Enright Aamodt Andreas Jerger Moshovos 10.1145/2925426.2926294 Proceedings of the 2016 International Conference on Supercomputing, ICS '16 the 2016 International Conference on Supercomputing, ICS '16 New York, NY, USA ACM 2016b 23",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Stripes: Bit-serial Deep Neural Network Computing Patrick Judd Jorge Albericio Andreas Moshovos Computer Architecture Letters 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Deep visual-semantic alignments for generating image descriptions Andrej Karpathy Fei-Fei Li",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Abs Corr /1412.2306. 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Imagenet classification with deep convolutional neural networks Alex Krizhevsky Ilya Sutskever Geoffrey E Hinton Advances in Neural Information Processing Systems 25: 26th Annual Conference on Neural Information Processing Systems 2012. Proceedings of a meeting held Lake Tahoe, Nevada, United States December 3-6, 2012. 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Cambricon: An instruction set architecture for neural networks Shaoli Liu Zidong Du Jinhua Tao Dong Han Tao Luo Yuan Xie Yunji Chen Tianshi Chen 2016 IEEE/ACM International Conference on Computer Architecture (ISCA) 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "A survey of architectural approaches for data compression in cache and main memory systems Sparsh Mittal Jeffrey S Vetter 10.1109/TPDS.2015.2435788 IEEE Trans. Parallel Distrib. Syst 1045-9219 27 5 May 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Cacti 6.0: A tool to understand large caches Naveen Muralimanohar Rajeev Balasubramonian",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Bit-serial neural networks Alan F Murray Anthony Vw Smith Zoe F Butler Neural Information Processing Systems 1988",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Destiny: A tool for modeling emerging 3d nvm and edram caches M Poremba S Mittal Dong Li J S Vetter Yuan Xie Design, Automation Test in Europe Conference Exhibition (DATE) 2015. March 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Enabling low-power, highly-accurate deep neural network accelerators Brandon Reagen Paul Whatmough Robert Adolf Saketh Rama Hyunkwang Lee Kyu Sae Jose Lee Miguel Hernandez-Lobato Gu-Yeon Wei David Brooks 10.1109/ISCA.2016.32 ACM/IEEE 43rd Annual International Symposium on Computer Architecture (ISCA) Minerva 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Olga Russakovsky Jia Deng Hao Su Jonathan Krause Sanjeev Satheesh Sean Ma Zhiheng Huang Andrej Karpathy Aditya Khosla Michael Bernstein Alexander C Berg Li Fei-Fei arXiv:1409.0575 arXiv: 1409.0575 ImageNet Large Scale Visual Recognition Challenge September 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Execution of neural network algorithms on an array of bitserial processors Bertil Svensson Nordstrom Proceedings., 10th International Conference on 10th International Conference on IEEE 1990. 1990 2 Pattern Recognition",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Synopsys. Design Compiler",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Cambricon-x: An accelerator for sparse neural networks Shijin Zhang Zidong Du Lei Zhang Huiying Lan Shaoli Liu Ling Li Qi Guo Tianshi Chen Yunji Chen Proceedings of the 49th International Symposium on Microarchitecture the 49th International Symposium on Microarchitecture 2016",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.1497,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper proposed a hardware accelerator for DNN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "It utilized the fact that DNN are very tolerant to low precision inference and outperforms a state-of-the-art bit-parallel accelerator by 1.90x without any loss in accuracy while it is 1.17x more energy efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "TRT requires no network retraining.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "It achieved super linear scales of performance with area.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "The first concern is that this paper doesn't seem very well-suited to ICLR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "The circuit diagrams makes it more interesting for the hardware or circuit design community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "The second concern is the \"take-away for machine learning community\", seeing from the response, the take-away is using low-precision to make inference cheaper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "This is not novel enough.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "In last year's ICLR, there were at least 4 papers discussing using low precision to make DNN more efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "These ideas have also been explored in the authors' previous papers.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.1196,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This metareview is written based on the reviews of the two expert reviewers (scores of 5(5), 5(5)),\n given the wide disparity of reviewer expertise, and the relevance of hardware expertise to this particular paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "Quality, Clarity: The paper is clearly written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "It does require hardware expertise to read and appreciate the ideas, methodology, and the results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "There was a request to post a clear \"take home\" message for ML research, and the authors did post a clear statement in this regard.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "Originality: The size of the contribution is the major point of contention for this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "The expert reviewers believe it to be an incremental/small idea, particularly in relation to the prior work of the authors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "The authors provide rebut that while the implementation builds on their previous work, it can be seen as a general concept that could be applied to other architectures, and that this work targets the important case of fully-connected architectures, vs the case of convolutional architectures that were the case where the prior work did well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Overall: I have asked the expert reviewers for further input.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "In the absence of further information, updated scores, or some reasonably strong indication of excitement about the ideas from the expert reviewers, there is little choice but to currently lean towards \"reject\" in terms of this being an inspirational paper for ICLR.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "Here are our post-layout results with actual data-driven activity factors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The 2-bit configuration, detailed in the updated paper, is a design that processes two bits at once using half as many SIPs, increasing efficiency and reducing area overhead.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "It requires that precision is an even number.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "We report results for the typical design case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Pre-layout results showed that the worst case design corner results in a larger advantage for TRT.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "The results show increased energy efficiency compared to the pre-layout results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "This is expected as the pre-layout results used 50% activity factors whereas here we use actual activity factors measured on a typical layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "This is consistent with the behavior observed during the STRIPES work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Fully-connected layers, whole chip (TSMC 65nm typical case):\n\nBaseline (DaDN) area - 80.41 mm2\n\nTRT area - 120.04 mm2\nEfficiency (TRT vs baseline):\nAlexNet  1.062\nVGG_S    1.059\nVGG_M    1.063\nVGG_19   1.059\ngeomean  1.061\n\nTRT 2-bit area - 100.43 mm2\nEfficiency (TRT 2-bit vs baseline):\nAlexNet  1.228\nVGG_S    1.235\nVGG_M    1.268\nVGG_19   1.237\ngeomean  1.242\n\nNumbers greater than 1 mean less energy used overall by TRT.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.1403,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "We feel uncomfortable completing the reviewer ratings as provided except for one case where a review misrepresents the facts and which we have addressed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "This is because the reviews primarily state that the paper does not fit into ICLR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "This is a question for the organizers and an interpretation of the CFP which clearly states \"hardware\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "In summary, the take-away for the ML community is this:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "Adjusting the precision used per layer or even at a finer granularity of groups of 256 or activations and weights can lead to faster processing and higher energy efficiency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "This adjustment can be done at runtime and at a single-bit granularity.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "Performance can be had without sacrificing accuracy, but if one is willing to sacrifice accuracy more performance and more energy efficiency can be had.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "We envision follow up work on runtime adjustment of precisions (e.g,, incremental adjustment) to achieve better response times or higher throughput.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "In more detail:\n\n2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "There is an energy efficient high-performance hardware design that can offer performance inversely proportional to the precision being used per layer or even at a finer granularity (we do not present any results on this but the design obviously support it as-is).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "This design does not hardwire the precisions at manufacturing time but instead allows programmatic control at runtime.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_11",
+                    "text": "This capability opens up an additional design know that network designers can use to tradeoff execution time and accuracy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_12",
+                    "text": "Earlier we had proposed a method to choose per layer precisions  for convolutional layers here we extend this method to fully-connected layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_13",
+                    "text": "This method was published on arxiv and has never been accepted to any peer reviewed publication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_14",
+                    "text": "The only related publication to the work here is STRIPES (MICRO) (12 pages) and a pre-print at iEEE Computer Architecture Letters (4 pages) that explained the basic idea behind Stripes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_15",
+                    "text": "This work extends STRIPES for Fully-connected layers --- Stripes did not improve performance for FC layers and its energy efficiency was worse than DaDianNao for those layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_16",
+                    "text": "Concern summary:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_17",
+                    "text": "Some concerns were raised about the energy and area measurements.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_18",
+                    "text": "We have posted an update and we will deliver the final results post-layout in a day or so.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_19",
+                    "text": "We will also deliver results on an optimized configuration that drastically reduces area overhead and improves energy efficiency as well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_20",
+                    "text": "The delay in response was due to having received the reviews during the Xmas break when the author that can perform these measurements was unreachable due to travel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_21",
+                    "text": "Incremental over DaDianNao: Tartan is a general concept which can be integrated to many different architectures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_22",
+                    "text": "We chose DaDN as the baseline architecture as it widely known and often compared against and offers the additional challenge of being a very wide vector-like architecture (doing bit-serial computation for a single lane -- product -- independently is easy but doing it for 4K terms in parallel without extremely wide memories is hard).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_23",
+                    "text": "So, we disagree that this is an incremental improvement of DaDianNao.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_24",
+                    "text": "To draw an analogy, from hardware the seminal work on pattern based branch prediction was not an incremental improvement over out-of-order execution even though previous techniques included branch predictors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_25",
+                    "text": "Not that we feel that TARTAN is at the same level as pattern based branch prediction but we use this example to illustrate what such an argument can lead to.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_26",
+                    "text": "Also, STRIPES is receiving a honorable mention in the upcoming IEEE MICRO Topic PIcs in Computer Architecture researcher, which is akin to a best paper award in the field of computer architecture (each accepted paper in the last year in a top-tier conference receives 10 more peer reviews that state whether they feel the paper has the potential for high impact).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_27",
+                    "text": "So, at least some people that are credible enough to be invited to that panel in the comp arch community think it's not incremental.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_28",
+                    "text": "FC layers are not important: this is not true.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_29",
+                    "text": "They are still in use and more so in different applications.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_30",
+                    "text": "Moreover, last years best paper award in ICLR rightfully went to an excellent work that addressed both pruning the model and proposing an optimized hardware architecture solely for FC layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_31",
+                    "text": "TARTAN takes too much area: The units are larger but this is not where most of the area cost is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_32",
+                    "text": "The area cost is in the surrounding memory so in the big picture the overall area cost is much lower.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_33",
+                    "text": "also, in modern technology area is not the concern.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_34",
+                    "text": "Energy efficiency is not that much better than DaDN and within the error margin of the tools.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_35",
+                    "text": "We used industry standard tools and the results are positive.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_36",
+                    "text": "moreover, TARTAN is faster and has we can use frequency and voltage scaling to improve energy efficiency (which depends on voltage square) while still performing better.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_37",
+                    "text": "We show results assuming same voltage and frequency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_38",
+                    "text": "You did not use power gating for DaDN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_39",
+                    "text": "Did we not use it for TARTAN either.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_40",
+                    "text": "It is not straightforward to do for DaDN as it is a bit parlallel engine and there are not that many zero values to necessarily justify the logic needed to enable power gating.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_41",
+                    "text": "Which is to say that this ia a non-trivial task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_42",
+                    "text": "Moreover, the same technique can be applied to TATRAN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_43",
+                    "text": "We have results reported in another submission that show a heavy bias toward the zero bit value which suggestes that power gating will most likely be a lot more effective for TARTAN than DaDN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_44",
+                    "text": "In summary, combined this work, with STRIPES and the earlier arxiv report present a comprehensive hardware/software approach to exploiting precision to improve performance and energy efficiency for CNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_45",
+                    "text": "Stripes performed very well for convolutional layers but did poorly for fully-connected layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_46",
+                    "text": "TARTAN fixes this.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "Our apologies for the long delay.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "Our co-author that has the expertise to do this work was overseas for the Christmas break and she returned this Tuesday.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "She has synthesized the designs for three cases: bc, tc, and wc for best, typical and worst case respectively.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "The previous results were for the bc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "The detailed results are below.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_5",
+                    "text": "In summary, efficiency improves for tc and wc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_6",
+                    "text": "We have layout being synthesized and we expect to have the results in a day or so.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_7",
+                    "text": "The results below are pre-layout and use 50% activity factors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_8",
+                    "text": "The layout results that we will post as soon as possible will be a testbench for a typical layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_9",
+                    "text": "As with STRIPES we expect that energy efficiency will be better with real inputs as the inputs exhibit many more zero bits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_10",
+                    "text": "Please keep in mind that the results in the STRIPES publication in MICRO are post-layout.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_11",
+                    "text": "More importantly, we are also synthesizing a different configuration cuts down area costs and improves energy efficiency even further.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_12",
+                    "text": "We will post the post-layout results shortly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_13",
+                    "text": "We hope that we will be given the opportunity to post the updated results before a decision is made.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_14",
+                    "text": "Here are the detailed pre-layout results for all three cases and for fully-connected layers only.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_15",
+                    "text": "Best case is the configuration used in the original submission.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_16",
+                    "text": "We will update the writing with post-layout and actual activity-based results shortly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_17",
+                    "text": "Effieciency numbers above 1.0 mean that TRT is better than DaDN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_18",
+                    "text": "Area & Efficiency, Fully-connected layers, whole chip TRT vs DaDN:\n\nBest case\n\nBaseline area - 77.91 mm2\nTRT area - 108.61 mm2 (+39.4%)\nEfficiency:\nAlexNet  0.935\nVGG_S    0.932\nVGG_M    0.935\nVGG_19   0.932\ngeomean  0.933\n\nTypical case\n\nBaseline area - 79.28 mm2\nTRT area - 111.29 mm2 (+40.4%)\nEfficiency:\nAlexNet  1.014\nVGG_S    1.011\nVGG_M    1.014\nVGG_19   1.010\ngeomean  1.012\n\nWorst case\n\nBaseline area - 83.5 mm2\nTRT area - 121.39 mm2 (+45.3%)\nEfficiency:\nAlexNet  1.048\nVGG_S    1.046\nVGG_M    1.049\nVGG_19   1.045\ngeomean  1.047",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.5835,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "The authors present TARTAN, a derivative of the previously published DNN accelerator architecture: \u201cDaDianNao\u201d.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "The key difference is that TARTAN\u2019s compute units are bit-serial and unroll MAC operation over several cycles.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "This enables the units to better exploit any reduction in precision of the input activations for improvement in performance and energy efficiency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "Comments:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "I second the earlier review requesting the authors to be present more details on the methodology used for estimating energy numbers for TARTAN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "It is claimed that TARTAN gives only a 17% improvement in energy efficiency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "However, I suspect that this small improvement is clearly within the margin of error ij energy estimation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "TARTAN is a derivative of DaDianNao, and it heavily relies the overall architecture of DaDianNao.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "The only novel aspect of this contribution is the introduction of the bit-serial compute unit, which (unfortunately) turns out to incur a severe area overhead (of nearly 3x over DaDianNao's compute units).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "Nonetheless, the idea of bit-serial computation is certainly quite interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "I am of the opinion that it would be better appreciated (and perhaps be even more relevant) in a circuit design / architecture focused venue.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_7",
+            "type": "Human",
+            "liang_alpha_score": 0.6682,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_7_s_0",
+                    "text": "Summary:\n\nThe paper describes how the DaDianNao (DaDN) DNN accelerator can be improved by employing bit serial arithmetic.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_1",
+                    "text": "They replace the bit-parallel multipliers in DaDN with multipliers that accept the weights in parallel but the activations serially (serial x parallel multipliers).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_2",
+                    "text": "They increase the number of units keeping the total number of adders constant.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_3",
+                    "text": "This enables them to tailor the time and energy consumed to the number of bits used to represent activations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_4",
+                    "text": "They show how their configuration can be used to process both fully-connected and convolutional layers of DNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_5",
+                    "text": "Strengths:\n\nUsing variable precision for each layer of the network is useful - but was previously reported in Judd (2015)\n\nGood evaluation including synthesis - but not place and route - of the units.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_6",
+                    "text": "Also this evaluation is identical to that in Judd (2016b)\n\nWeaknesses:\n\nThe idea of combining bit-serial arithmetic with the DaDN architecture is a small one.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_7",
+                    "text": "The authors have already published almost everything that is in this paper at Micro 2016 in Judd (2016b).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_8",
+                    "text": "The increment here is the analysis of the architecture on fully-connected layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_9",
+                    "text": "Everything else is in the previous publication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_10",
+                    "text": "The energy gains are small - because the additional flip-flop energy of shifting the activations in almost offsets the energy saved on reducing the precision of the arithmetic.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_11",
+                    "text": "The authors don\u2019t compare to more conventional approaches to variable precision - using bit-parallel arithmetic units but data gating the LSBs so that only the relevant portion of the arithmetic units toggle.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_12",
+                    "text": "This would not provide any speedup, but would likely provide better energy gains than the bit-serial x bit-parallel approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_13",
+                    "text": "Overall:\n\nThe Tartan and Stripes architectures are interesting but the incremental contribution of this paper (adding support for fully-connected layers) over the three previous publications on this topic, and in particular Judd (2016b) is very small.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_14",
+                    "text": "This idea is worth one good paper, not four.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_8",
+            "type": "Human",
+            "liang_alpha_score": 0.3102,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_8_s_0",
+                    "text": "This seems like a reasonable study, though it's not my area of expertise.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_1",
+                    "text": "I found no fault with the work or presentation, but did not follow the details or know the comparable literature.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_2",
+                    "text": "There seem to be real gains to be had through this technique, though they are only in terms of efficiency in hardware, not changing accuracy on a task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_3",
+                    "text": "The tasks chosen (Alexnet / VGG) seem reasonable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_4",
+                    "text": "The results are in simulation rather than in actual hardware.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_5",
+                    "text": "The topic seems a little specialized for ICLR, since it does not describe any new advances in learning or representations, albeit that the CFP includes \"hardware\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_6",
+                    "text": "I think the appeal among attendees will be rather limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_7",
+                    "text": "Please learn to use parenthetical references correctly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_8",
+                    "text": "As is your references make reading harder.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_10",
+            "type": "Human",
+            "liang_alpha_score": 0.8159,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_10_s_0",
+                    "text": "I do not feel very qualified to review this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_1",
+                    "text": "I studied digital logic back in university, that was it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_2",
+                    "text": "I think the work deserves a reviewer with far more sophisticated background in this area.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_3",
+                    "text": "It certainly seems useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_4",
+                    "text": "My advice is also to submit it another venue.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_11",
+            "type": "Human",
+            "liang_alpha_score": 0.1497,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_11_s_0",
+                    "text": "This paper proposed a hardware accelerator for DNN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_1",
+                    "text": "It utilized the fact that DNN are very tolerant to low precision inference and outperforms a state-of-the-art bit-parallel accelerator by 1.90x without any loss in accuracy while it is 1.17x more energy efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_2",
+                    "text": "TRT requires no network retraining.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_3",
+                    "text": "It achieved super linear scales of performance with area.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_4",
+                    "text": "The first concern is that this paper doesn't seem very well-suited to ICLR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_5",
+                    "text": "The circuit diagrams makes it more interesting for the hardware or circuit design community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_6",
+                    "text": "The second concern is the \"take-away for machine learning community\", seeing from the response, the take-away is using low-precision to make inference cheaper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_7",
+                    "text": "This is not novel enough.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_8",
+                    "text": "In last year's ICLR, there were at least 4 papers discussing using low precision to make DNN more efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_9",
+                    "text": "These ideas have also been explored in the authors' previous papers.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.1497,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "This paper proposed a hardware accelerator for DNN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "It utilized the fact that DNN are very tolerant to low precision inference and outperforms a state-of-the-art bit-parallel accelerator by 1.90x without any loss in accuracy while it is 1.17x more energy efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "TRT requires no network retraining.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "It achieved super linear scales of performance with area.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "The first concern is that this paper doesn't seem very well-suited to ICLR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_5",
+                    "text": "The circuit diagrams makes it more interesting for the hardware or circuit design community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_6",
+                    "text": "The second concern is the \"take-away for machine learning community\", seeing from the response, the take-away is using low-precision to make inference cheaper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_7",
+                    "text": "This is not novel enough.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_8",
+                    "text": "In last year's ICLR, there were at least 4 papers discussing using low precision to make DNN more efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_9",
+                    "text": "These ideas have also been explored in the authors' previous papers.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_15",
+            "type": "Human",
+            "liang_alpha_score": 0.1196,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_15_s_0",
+                    "text": "This metareview is written based on the reviews of the two expert reviewers (scores of 5(5), 5(5)),\n given the wide disparity of reviewer expertise, and the relevance of hardware expertise to this particular paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_1",
+                    "text": "Quality, Clarity: The paper is clearly written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_2",
+                    "text": "It does require hardware expertise to read and appreciate the ideas, methodology, and the results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_3",
+                    "text": "There was a request to post a clear \"take home\" message for ML research, and the authors did post a clear statement in this regard.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_4",
+                    "text": "Originality: The size of the contribution is the major point of contention for this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_5",
+                    "text": "The expert reviewers believe it to be an incremental/small idea, particularly in relation to the prior work of the authors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_6",
+                    "text": "The authors provide rebut that while the implementation builds on their previous work, it can be seen as a general concept that could be applied to other architectures, and that this work targets the important case of fully-connected architectures, vs the case of convolutional architectures that were the case where the prior work did well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_7",
+                    "text": "Overall: I have asked the expert reviewers for further input.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_8",
+                    "text": "In the absence of further information, updated scores, or some reasonably strong indication of excitement about the ideas from the expert reviewers, there is little choice but to currently lean towards \"reject\" in terms of this being an inspirational paper for ICLR.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_16",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_16_s_0",
+                    "text": "Here are our post-layout results with actual data-driven activity factors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_1",
+                    "text": "The 2-bit configuration, detailed in the updated paper, is a design that processes two bits at once using half as many SIPs, increasing efficiency and reducing area overhead.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_2",
+                    "text": "It requires that precision is an even number.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_3",
+                    "text": "We report results for the typical design case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_4",
+                    "text": "Pre-layout results showed that the worst case design corner results in a larger advantage for TRT.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_5",
+                    "text": "The results show increased energy efficiency compared to the pre-layout results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_6",
+                    "text": "This is expected as the pre-layout results used 50% activity factors whereas here we use actual activity factors measured on a typical layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_7",
+                    "text": "This is consistent with the behavior observed during the STRIPES work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_8",
+                    "text": "Fully-connected layers, whole chip (TSMC 65nm typical case):\n\nBaseline (DaDN) area - 80.41 mm2\n\nTRT area - 120.04 mm2\nEfficiency (TRT vs baseline):\nAlexNet  1.062\nVGG_S    1.059\nVGG_M    1.063\nVGG_19   1.059\ngeomean  1.061\n\nTRT 2-bit area - 100.43 mm2\nEfficiency (TRT 2-bit vs baseline):\nAlexNet  1.228\nVGG_S    1.235\nVGG_M    1.268\nVGG_19   1.237\ngeomean  1.242\n\nNumbers greater than 1 mean less energy used overall by TRT.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_17",
+            "type": "Human",
+            "liang_alpha_score": 0.1403,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_17_s_0",
+                    "text": "We feel uncomfortable completing the reviewer ratings as provided except for one case where a review misrepresents the facts and which we have addressed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_1",
+                    "text": "This is because the reviews primarily state that the paper does not fit into ICLR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_2",
+                    "text": "This is a question for the organizers and an interpretation of the CFP which clearly states \"hardware\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_3",
+                    "text": "In summary, the take-away for the ML community is this:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_4",
+                    "text": "Adjusting the precision used per layer or even at a finer granularity of groups of 256 or activations and weights can lead to faster processing and higher energy efficiency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_5",
+                    "text": "This adjustment can be done at runtime and at a single-bit granularity.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_6",
+                    "text": "Performance can be had without sacrificing accuracy, but if one is willing to sacrifice accuracy more performance and more energy efficiency can be had.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_7",
+                    "text": "We envision follow up work on runtime adjustment of precisions (e.g,, incremental adjustment) to achieve better response times or higher throughput.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_8",
+                    "text": "In more detail:\n\n2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_9",
+                    "text": "There is an energy efficient high-performance hardware design that can offer performance inversely proportional to the precision being used per layer or even at a finer granularity (we do not present any results on this but the design obviously support it as-is).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_10",
+                    "text": "This design does not hardwire the precisions at manufacturing time but instead allows programmatic control at runtime.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_11",
+                    "text": "This capability opens up an additional design know that network designers can use to tradeoff execution time and accuracy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_12",
+                    "text": "Earlier we had proposed a method to choose per layer precisions  for convolutional layers here we extend this method to fully-connected layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_13",
+                    "text": "This method was published on arxiv and has never been accepted to any peer reviewed publication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_14",
+                    "text": "The only related publication to the work here is STRIPES (MICRO) (12 pages) and a pre-print at iEEE Computer Architecture Letters (4 pages) that explained the basic idea behind Stripes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_15",
+                    "text": "This work extends STRIPES for Fully-connected layers --- Stripes did not improve performance for FC layers and its energy efficiency was worse than DaDianNao for those layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_16",
+                    "text": "Concern summary:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_17",
+                    "text": "Some concerns were raised about the energy and area measurements.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_18",
+                    "text": "We have posted an update and we will deliver the final results post-layout in a day or so.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_19",
+                    "text": "We will also deliver results on an optimized configuration that drastically reduces area overhead and improves energy efficiency as well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_20",
+                    "text": "The delay in response was due to having received the reviews during the Xmas break when the author that can perform these measurements was unreachable due to travel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_21",
+                    "text": "Incremental over DaDianNao: Tartan is a general concept which can be integrated to many different architectures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_22",
+                    "text": "We chose DaDN as the baseline architecture as it widely known and often compared against and offers the additional challenge of being a very wide vector-like architecture (doing bit-serial computation for a single lane -- product -- independently is easy but doing it for 4K terms in parallel without extremely wide memories is hard).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_23",
+                    "text": "So, we disagree that this is an incremental improvement of DaDianNao.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_24",
+                    "text": "To draw an analogy, from hardware the seminal work on pattern based branch prediction was not an incremental improvement over out-of-order execution even though previous techniques included branch predictors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_25",
+                    "text": "Not that we feel that TARTAN is at the same level as pattern based branch prediction but we use this example to illustrate what such an argument can lead to.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_26",
+                    "text": "Also, STRIPES is receiving a honorable mention in the upcoming IEEE MICRO Topic PIcs in Computer Architecture researcher, which is akin to a best paper award in the field of computer architecture (each accepted paper in the last year in a top-tier conference receives 10 more peer reviews that state whether they feel the paper has the potential for high impact).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_27",
+                    "text": "So, at least some people that are credible enough to be invited to that panel in the comp arch community think it's not incremental.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_28",
+                    "text": "FC layers are not important: this is not true.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_29",
+                    "text": "They are still in use and more so in different applications.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_30",
+                    "text": "Moreover, last years best paper award in ICLR rightfully went to an excellent work that addressed both pruning the model and proposing an optimized hardware architecture solely for FC layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_31",
+                    "text": "TARTAN takes too much area: The units are larger but this is not where most of the area cost is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_32",
+                    "text": "The area cost is in the surrounding memory so in the big picture the overall area cost is much lower.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_33",
+                    "text": "also, in modern technology area is not the concern.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_34",
+                    "text": "Energy efficiency is not that much better than DaDN and within the error margin of the tools.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_35",
+                    "text": "We used industry standard tools and the results are positive.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_36",
+                    "text": "moreover, TARTAN is faster and has we can use frequency and voltage scaling to improve energy efficiency (which depends on voltage square) while still performing better.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_37",
+                    "text": "We show results assuming same voltage and frequency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_38",
+                    "text": "You did not use power gating for DaDN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_39",
+                    "text": "Did we not use it for TARTAN either.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_40",
+                    "text": "It is not straightforward to do for DaDN as it is a bit parlallel engine and there are not that many zero values to necessarily justify the logic needed to enable power gating.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_41",
+                    "text": "Which is to say that this ia a non-trivial task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_42",
+                    "text": "Moreover, the same technique can be applied to TATRAN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_43",
+                    "text": "We have results reported in another submission that show a heavy bias toward the zero bit value which suggestes that power gating will most likely be a lot more effective for TARTAN than DaDN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_44",
+                    "text": "In summary, combined this work, with STRIPES and the earlier arxiv report present a comprehensive hardware/software approach to exploiting precision to improve performance and energy efficiency for CNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_45",
+                    "text": "Stripes performed very well for convolutional layers but did poorly for fully-connected layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_46",
+                    "text": "TARTAN fixes this.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_18",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_18_s_0",
+                    "text": "Our apologies for the long delay.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_1",
+                    "text": "Our co-author that has the expertise to do this work was overseas for the Christmas break and she returned this Tuesday.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_2",
+                    "text": "She has synthesized the designs for three cases: bc, tc, and wc for best, typical and worst case respectively.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_3",
+                    "text": "The previous results were for the bc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_4",
+                    "text": "The detailed results are below.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_5",
+                    "text": "In summary, efficiency improves for tc and wc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_6",
+                    "text": "We have layout being synthesized and we expect to have the results in a day or so.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_7",
+                    "text": "The results below are pre-layout and use 50% activity factors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_8",
+                    "text": "The layout results that we will post as soon as possible will be a testbench for a typical layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_9",
+                    "text": "As with STRIPES we expect that energy efficiency will be better with real inputs as the inputs exhibit many more zero bits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_10",
+                    "text": "Please keep in mind that the results in the STRIPES publication in MICRO are post-layout.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_11",
+                    "text": "More importantly, we are also synthesizing a different configuration cuts down area costs and improves energy efficiency even further.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_12",
+                    "text": "We will post the post-layout results shortly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_13",
+                    "text": "We hope that we will be given the opportunity to post the updated results before a decision is made.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_14",
+                    "text": "Here are the detailed pre-layout results for all three cases and for fully-connected layers only.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_15",
+                    "text": "Best case is the configuration used in the original submission.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_16",
+                    "text": "We will update the writing with post-layout and actual activity-based results shortly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_17",
+                    "text": "Effieciency numbers above 1.0 mean that TRT is better than DaDN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_18_s_18",
+                    "text": "Area & Efficiency, Fully-connected layers, whole chip TRT vs DaDN:\n\nBest case\n\nBaseline area - 77.91 mm2\nTRT area - 108.61 mm2 (+39.4%)\nEfficiency:\nAlexNet  0.935\nVGG_S    0.932\nVGG_M    0.935\nVGG_19   0.932\ngeomean  0.933\n\nTypical case\n\nBaseline area - 79.28 mm2\nTRT area - 111.29 mm2 (+40.4%)\nEfficiency:\nAlexNet  1.014\nVGG_S    1.011\nVGG_M    1.014\nVGG_19   1.010\ngeomean  1.012\n\nWorst case\n\nBaseline area - 83.5 mm2\nTRT area - 121.39 mm2 (+45.3%)\nEfficiency:\nAlexNet  1.048\nVGG_S    1.046\nVGG_M    1.049\nVGG_19   1.045\ngeomean  1.047",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_19",
+            "type": "Human",
+            "liang_alpha_score": 0.5835,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_19_s_0",
+                    "text": "The authors present TARTAN, a derivative of the previously published DNN accelerator architecture: \u201cDaDianNao\u201d.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_1",
+                    "text": "The key difference is that TARTAN\u2019s compute units are bit-serial and unroll MAC operation over several cycles.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_2",
+                    "text": "This enables the units to better exploit any reduction in precision of the input activations for improvement in performance and energy efficiency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_3",
+                    "text": "Comments:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_4",
+                    "text": "I second the earlier review requesting the authors to be present more details on the methodology used for estimating energy numbers for TARTAN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_5",
+                    "text": "It is claimed that TARTAN gives only a 17% improvement in energy efficiency.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_6",
+                    "text": "However, I suspect that this small improvement is clearly within the margin of error ij energy estimation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_7",
+                    "text": "TARTAN is a derivative of DaDianNao, and it heavily relies the overall architecture of DaDianNao.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_8",
+                    "text": "The only novel aspect of this contribution is the introduction of the bit-serial compute unit, which (unfortunately) turns out to incur a severe area overhead (of nearly 3x over DaDianNao's compute units).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_9",
+                    "text": "Nonetheless, the idea of bit-serial computation is certainly quite interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_19_s_10",
+                    "text": "I am of the opinion that it would be better appreciated (and perhaps be even more relevant) in a circuit design / architecture focused venue.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_21",
+            "type": "Human",
+            "liang_alpha_score": 0.6682,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_21_s_0",
+                    "text": "Summary:\n\nThe paper describes how the DaDianNao (DaDN) DNN accelerator can be improved by employing bit serial arithmetic.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_1",
+                    "text": "They replace the bit-parallel multipliers in DaDN with multipliers that accept the weights in parallel but the activations serially (serial x parallel multipliers).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_2",
+                    "text": "They increase the number of units keeping the total number of adders constant.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_3",
+                    "text": "This enables them to tailor the time and energy consumed to the number of bits used to represent activations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_4",
+                    "text": "They show how their configuration can be used to process both fully-connected and convolutional layers of DNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_5",
+                    "text": "Strengths:\n\nUsing variable precision for each layer of the network is useful - but was previously reported in Judd (2015)\n\nGood evaluation including synthesis - but not place and route - of the units.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_6",
+                    "text": "Also this evaluation is identical to that in Judd (2016b)\n\nWeaknesses:\n\nThe idea of combining bit-serial arithmetic with the DaDN architecture is a small one.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_7",
+                    "text": "The authors have already published almost everything that is in this paper at Micro 2016 in Judd (2016b).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_8",
+                    "text": "The increment here is the analysis of the architecture on fully-connected layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_9",
+                    "text": "Everything else is in the previous publication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_10",
+                    "text": "The energy gains are small - because the additional flip-flop energy of shifting the activations in almost offsets the energy saved on reducing the precision of the arithmetic.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_11",
+                    "text": "The authors don\u2019t compare to more conventional approaches to variable precision - using bit-parallel arithmetic units but data gating the LSBs so that only the relevant portion of the arithmetic units toggle.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_12",
+                    "text": "This would not provide any speedup, but would likely provide better energy gains than the bit-serial x bit-parallel approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_13",
+                    "text": "Overall:\n\nThe Tartan and Stripes architectures are interesting but the incremental contribution of this paper (adding support for fully-connected layers) over the three previous publications on this topic, and in particular Judd (2016b) is very small.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_21_s_14",
+                    "text": "This idea is worth one good paper, not four.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_22",
+            "type": "Human",
+            "liang_alpha_score": 0.3102,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_22_s_0",
+                    "text": "This seems like a reasonable study, though it's not my area of expertise.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_22_s_1",
+                    "text": "I found no fault with the work or presentation, but did not follow the details or know the comparable literature.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_22_s_2",
+                    "text": "There seem to be real gains to be had through this technique, though they are only in terms of efficiency in hardware, not changing accuracy on a task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_22_s_3",
+                    "text": "The tasks chosen (Alexnet / VGG) seem reasonable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_22_s_4",
+                    "text": "The results are in simulation rather than in actual hardware.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_22_s_5",
+                    "text": "The topic seems a little specialized for ICLR, since it does not describe any new advances in learning or representations, albeit that the CFP includes \"hardware\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_22_s_6",
+                    "text": "I think the appeal among attendees will be rather limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_22_s_7",
+                    "text": "Please learn to use parenthetical references correctly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_22_s_8",
+                    "text": "As is your references make reading harder.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_24",
+            "type": "Human",
+            "liang_alpha_score": 0.8159,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_24_s_0",
+                    "text": "I do not feel very qualified to review this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_24_s_1",
+                    "text": "I studied digital logic back in university, that was it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_24_s_2",
+                    "text": "I think the work deserves a reviewer with far more sophisticated background in this area.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_24_s_3",
+                    "text": "It certainly seems useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_24_s_4",
+                    "text": "My advice is also to submit it another venue.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_25",
+            "type": "Human",
+            "liang_alpha_score": 0.1497,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_25_s_0",
+                    "text": "This paper proposed a hardware accelerator for DNN.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_1",
+                    "text": "It utilized the fact that DNN are very tolerant to low precision inference and outperforms a state-of-the-art bit-parallel accelerator by 1.90x without any loss in accuracy while it is 1.17x more energy efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_2",
+                    "text": "TRT requires no network retraining.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_3",
+                    "text": "It achieved super linear scales of performance with area.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_4",
+                    "text": "The first concern is that this paper doesn't seem very well-suited to ICLR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_5",
+                    "text": "The circuit diagrams makes it more interesting for the hardware or circuit design community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_6",
+                    "text": "The second concern is the \"take-away for machine learning community\", seeing from the response, the take-away is using low-precision to make inference cheaper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_7",
+                    "text": "This is not novel enough.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_8",
+                    "text": "In last year's ICLR, there were at least 4 papers discussing using low precision to make DNN more efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_9",
+                    "text": "These ideas have also been explored in the authors' previous papers.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_39fc870b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_39fc870b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_39fc870b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_39fc870b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_39fc870b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_e90ada5a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_39fc870b"
+        },
+        {
+            "source": "sec_e90ada5a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_424daad0"
+        },
+        {
+            "source": "sec_e90ada5a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_359ced86"
+        },
+        {
+            "source": "sec_e90ada5a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6f9500d9"
+        },
+        {
+            "source": "sec_e90ada5a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_37f8b46f"
+        },
+        {
+            "source": "sec_70ea7ed3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f8b03563"
+        },
+        {
+            "source": "sec_a2c3076e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9b859c73"
+        },
+        {
+            "source": "sec_a2c3076e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a05813c3"
+        },
+        {
+            "source": "sec_a2c3076e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d1c7b907"
+        },
+        {
+            "source": "sec_a2c3076e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6a486db"
+        },
+        {
+            "source": "sec_a2c3076e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d637d6c6"
+        },
+        {
+            "source": "sec_9b02908d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bbf4f2d0"
+        },
+        {
+            "source": "sec_75812a57",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f1b3ab50"
+        },
+        {
+            "source": "sec_75812a57",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d24ac32e"
+        },
+        {
+            "source": "sec_75812a57",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_06dbee48"
+        },
+        {
+            "source": "sec_75812a57",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b47e502c"
+        },
+        {
+            "source": "sec_75812a57",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8d237dc4"
+        },
+        {
+            "source": "sec_f229b586",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0919cd18"
+        },
+        {
+            "source": "sec_f229b586",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a7e1ad90"
+        },
+        {
+            "source": "b_57cf8272",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_f229b586",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_57cf8272"
+        },
+        {
+            "source": "sec_f229b586",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8bdf9d94"
+        },
+        {
+            "source": "sec_4d456073",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_88d11957"
+        },
+        {
+            "source": "sec_4d456073",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7d54be62"
+        },
+        {
+            "source": "sec_a1951fe9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1742dcfa"
+        },
+        {
+            "source": "sec_a1951fe9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b612ad0d"
+        },
+        {
+            "source": "sec_a1951fe9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5f43f79e"
+        },
+        {
+            "source": "sec_a1951fe9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_84be4d9f"
+        },
+        {
+            "source": "sec_d71c8c19",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36e0449c"
+        },
+        {
+            "source": "b_62a28b3d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_62a28b3d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_62a28b3d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_62a28b3d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_2995640c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_62a28b3d"
+        },
+        {
+            "source": "b_72b6cd2e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_2995640c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_72b6cd2e"
+        },
+        {
+            "source": "sec_06a0b55d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_449d3792"
+        },
+        {
+            "source": "b_ba8414ca",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_15f5b754",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ba8414ca"
+        },
+        {
+            "source": "b_8f6f3e17",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_15f5b754",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8f6f3e17"
+        },
+        {
+            "source": "sec_15f5b754",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b7334af6"
+        },
+        {
+            "source": "sec_74eff2dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_62d21518"
+        },
+        {
+            "source": "sec_74eff2dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5ea637a4"
+        },
+        {
+            "source": "b_42accfb0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_42accfb0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_42accfb0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_42accfb0"
+        },
+        {
+            "source": "b_11330c59",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_11330c59",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_11330c59"
+        },
+        {
+            "source": "b_f482b4b2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f482b4b2"
+        },
+        {
+            "source": "b_6a620f95",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6a620f95"
+        },
+        {
+            "source": "b_9e55bc36",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_9e55bc36",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9e55bc36"
+        },
+        {
+            "source": "b_87ecd576",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_87ecd576"
+        },
+        {
+            "source": "b_ff8d794c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_ff8d794c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff8d794c"
+        },
+        {
+            "source": "b_56c49aa9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_56c49aa9"
+        },
+        {
+            "source": "b_571b6ebe",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_571b6ebe"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f2b6bd9f"
+        },
+        {
+            "source": "b_92e09b91",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_7bb22616",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_92e09b91"
+        },
+        {
+            "source": "sec_3c47189e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6635aa20"
+        },
+        {
+            "source": "sec_3c47189e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_71399aab"
+        }
+    ]
+}

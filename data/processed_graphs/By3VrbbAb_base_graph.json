@@ -1,0 +1,1337 @@
+{
+    "paper_metadata": {
+        "paper_id": "By3VrbbAb",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_f3efdf1b",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_4c648462",
+                        "type": "paragraph",
+                        "text": "Search completion is the problem of taking a prefix of a search query from a user and generating several candidate completions. This problem has enormous potential utility and monetary value to any search provider: the more accurately an engine can find the desired completions for a user (or indeed, potentially steer the user towards high-value completions), the more quickly it can lead the user to their desired goal. This paper proposes a realtime search completion architecture based upon deep character-level language models. The basic idea is that instead of looking up possible completions from a generic database, we perform search under a deep-network-based language model to find the most likely completions of a user's current input. This allows us to integrate the power of deep language models, that has been shown to perform extremely well on complex language modeling and prediction tasks, with the desired goal of finding a good completion. Although this is a conceptually simple strategy (and one which has been considered before, as we highlight in the literature below), there are two key elements required to make this of practical use for a search engine provider, which together make up the primary technical contributions of the paper: 1) The completion must be error correcting, able to handle small errors in the user's initial input and provide completions for the most likely \"correct\" input. We propose such an approach that combines a character-level language model with an edit-distance-based potential function, combining the two using a tree-based beam search algorithm;",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8f589198",
+                        "type": "paragraph",
+                        "text": "2) The completion must be realtime, able to produce high-quality potential completions in a time that is not even perceivable to the user. We achieve this by developing an efficient tree-based version of the error-correcting beam search, exploiting CPU-based computation for single queries (due to the high levels of branching in the beam search), and through numerous optimizations to the implementation that we discuss below.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f0742915",
+                        "type": "paragraph",
+                        "text": "We evaluate the method on the AOL search data set, a dataset consisting of over 36 million total search queries. In total, the method substantially outperforms highly optimized standard search completion algorithms in terms of its hit rate (the benefit of the deep language model and the error correction), while being fast enough to execute in real time for search engines. Experiments and code are all available online, and a real-time demo of the approach is available at http: //www.deepquerycompletion.com.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ddd5d3af",
+                "title": "BACKGROUND ON SEARCH COMPLETION",
+                "blocks": [
+                    {
+                        "block_id": "b_cb46c845",
+                        "type": "paragraph",
+                        "text": "Here we review existing approaches to search query completion and error correction. Broadly speaking, two types of query completions are most relevant to our work, database lookup methods and learning-based approaches.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d93fd8a6",
+                        "type": "paragraph",
+                        "text": "Database Lookup . One of the most intuitive ways to do query completion is to do a database lookup. That is, given a prefix, we can fetch all the known queries matching the prefix and return the most frequent candidates. This is called the \"most popular completion\" (MPC) (Bar-Yossef & Kraus, 2011) , which corresponds to the maximum likelihood estimator for P (completion | prefix). The database lookup can be efficiently implemented by a trie (Hsu & Ottaviano, 2013) . For instance, it takes only 15\u00b5s to give 16 suggestions for a query in our own trie-based implementation. However, due to the long tail nature (Szpektor et al., 2011) of the search queries, many prefixes might not exist in the database; for example, in the AOL search data, 28% of the queries are unique. An excellent survey of these current \"classical\" approaches is given in (Cai et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b0",
+                            "Citation_b6",
+                            "Citation_b14",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a4910ef2",
+                        "type": "paragraph",
+                        "text": "Learning-based . In addition to database lookup approaches, in recent years there have been a number of approaches that use learning-based methods for query completion. Sordoni et al. (2015) uses a translation model at the word level to output single-word search query suggestions, and also model consecutive sessions of the same user. Liu et al. (2016) proposed a word-based method for code completion, but focused solely on greedy stochastic sampling for the prediction. Mitra & Craswell (2015) also used neural networks combined with a database-based model to handle tail queries, but focused on CNN approaches that just output the single most likely word-level completion. Shokouhi (2013) used logistic regression to learn a personalized query ranking model, specific to individual users. All these approaches are relevant but fairly orthogonal to our own, as we focus here on character-level modeling, beam search, and realtime completion. Finally, Park & Chiba (2017) very recently published an approach similar to ours, which uses a character-level language model for completion. But their approach focuses on the use of embeddings (such as word2vec) to produce \"intelligent\" completions that make use of additional context, and the approach does not handle error correction; they also do not report the prediction time of their completions, which is a key driver for our work.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b7",
+                            "Citation_b9",
+                            "Citation_b12"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e8217ae3",
+                "title": "ERROR CORRECTION FOR QUERIES",
+                "blocks": [
+                    {
+                        "block_id": "b_7cb7af6c",
+                        "type": "paragraph",
+                        "text": "Our work also relates to methods on error and spelling correction approaches, which again are roughly divided into heuristic models and learning-based approaches. Whitelaw et al. (2009) proposed generating candidate sets that contain common errors for given prefixes, then searching these based upon the current query. Similarly, Martins & Silva (2004) use a ternary search tree to accelerate the search within candidate sets for spelling correction in general. The approaches are nice that they are easily parallelizable at runtime, but are relatively \"brute force\", and cannot handle previously unseen permutations.",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_128a7790",
+                "title": "Heuristic models",
+                "blocks": [
+                    {
+                        "block_id": "b_51c3732b",
+                        "type": "paragraph",
+                        "text": "Learning-based Model On the learning side, Duan & Hsu (2011) train an n-gram Markov model combined with A* search to determine candidate misspelling; this is similar to our approach except with a much richer language model replacing the simple n-gram model, which creates several challenges in the search procedure itself. Likewise, (Xie et al., 2016) use a similar character-level model with attention, but do so in the context of error correcting an entire paragraph of text, and don't focus on the same realtime aspects that we do.",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_44e323f0",
+                "title": "BACKGROUND ON QUERY COMPLETION",
+                "blocks": [
+                    {
+                        "block_id": "b_2ef30a23",
+                        "type": "paragraph",
+                        "text": "When a user types any prefix string s in the search engine, the query completion function will start to recommend the best r completions, each denoted \u015d, according to certain metrics. For example, one might want to maximize the probability that a recommendation is clicked. The conditional probability can be formulated as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ff63d612",
+                        "type": "paragraph",
+                        "text": "and the goal of query completion in the setting is to find the top r most probable strings \u015d which potentially also maximize some additional metric, such as the click-through rate.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a6a6b376",
+                        "type": "paragraph",
+                        "text": "Denote s 0:m as the first m characters in string s and s 0 as the empty set. We first discuss the query completion in a simplified setting, in which all completions must contain the prefix exactly, that is: \u015d0:m = s 0:m , and",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_958a69aa",
+                        "type": "paragraph",
+                        "text": "where n is the total length of a completion. Note that the probability is defined in the sequence domain, which contains exponentially many candidate strings. To simplify the model we can apply the conditional probability formula recursively and we have",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9598188d",
+                        "type": "paragraph",
+                        "text": "This way, we only need to model P (\u015d t+1 | \u015d0:t ), that is, the probability of the next character under the current prefix. This is precisely a character-level language model, and we can learn it in an unsupervised manner using a variety of methods, though here we focus on the extremely popular approaches of using recurrent neural networks (RNNs) for this character-level language model. Character-level models are the right fidelity for search completion, because word-level models or sequence-to-sequence probabilities would not be able to model probabilities under all partial strings.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ae6342b2",
+                "title": "THE UNSUPERVISED LANGUAGE MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_92412a74",
+                        "type": "paragraph",
+                        "text": "Let's focus on the language model term P (\u015d t+1 | \u015d0:t ), the probability of next character under the current prefix. RNNs in general, and variants like long short term memory networks (LSTMs) (Hochreiter & Schmidhuber, 1997) , are extremely popular for high-fidelity character level modeling, and achieve state of the art performance for a number of datasets (Chung et al., 2016) . Since they can be trained from unsupervised data (e.g., just datasets of many unannotated search queries), we can easily adapt the model to whatever terms users are actually searching for in the data set, with the potential to adapt to new searches, products, etc, simply by occasionally retraining the model on all data collected up to the current point.",
+                        "extracted_citations": [
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_dea91956",
+                        "type": "paragraph",
+                        "text": "Although character-level language modeling is a fairly standard approach, we briefly highlight the model we use for completeness. Consider a recurrent neural network with hidden state h t at time t.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8e4bc957",
+                        "type": "paragraph",
+                        "text": "We want to encode the prefix \u015d0:t and predict the next character using h t . We follow fairly standard approaches here and use an LSTM model, in particular the specific implementation from the Keras library (Chollet et al., 2015) 1 , which is defined by the recurrences",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_60e676d1",
+                        "type": "paragraph",
+                        "text": "are the forward kernel and recurrent kernel with corresponding dimensions, and is the element-wise dot.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c015db6d",
+                        "type": "paragraph",
+                        "text": "We use a one-hot encoding of characters as input, a two-layer LSTM with 256 hidden units (more discussion on these choices below), and for prediction of character \u015dt+1 , we feed the hidden layer h t to a softmax function",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_98b0a06d",
+                        "type": "paragraph",
+                        "text": "and train the language model to maximize the log likelihood (minimize the categorical cross-entropy loss),",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ef497590",
+                        "type": "paragraph",
+                        "text": "where S denotes the set of queries. Further, we pad all queries with an end-of-sequence symbol to predict whether the query is complete.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_eabe45b1",
+                "title": "STOCHASTIC SEARCH AND BEAM SEARCH",
+                "blocks": [
+                    {
+                        "block_id": "b_5abc9888",
+                        "type": "paragraph",
+                        "text": "Once we have the language model, we can evaluate the probability P (\u015d m+1:n | \u015d0:m ) for any completion \u015d0:m , but would ideally like to find the completion with the highest probability. Enumerating all the possible strings is not an option because we have exponentially many candidates. Indeed, finding the best sequence probability, which is called the \"decoding problem\", is NP-hard (Forney, 1973) , so we have to rely on approximation.",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_82b405f0",
+                        "type": "paragraph",
+                        "text": "The most naive way to do so is simply via sampling: we sample the next character (according to its probability of occurrence) given the current prefix, until we hit an end-of-sequence symbol:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7a41a8d0",
+                        "type": "paragraph",
+                        "text": "This method produces output that looks intuitively reasonable. However, it is biased toward longer sequences with short-term dependencies and clearly does not generate the most probable sequences, because sampling in a greedy fashion clearly is not the same as sampling from the sequence space.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_770a7470",
+                        "type": "paragraph",
+                        "text": "That is, we really need to do a better approximate search to get better results. One classic way to do this is to perform beam search, that is, perform breadth-first search while keeping the top-r candidates.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f356d9c4",
+                        "type": "paragraph",
+                        "text": "We illustrate the algorithm as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_305731ba",
+                        "type": "paragraph",
+                        "text": "cand := {s 0:m : 0}, result := {} For t = m; cand is not empty; t++: cand new := { s 0:t+1 : log P (s 0:t+1 | s 0:m ) for every s t+1 , for every s 0:t \u2208 cand}; cand := the most probable (r -|result|) candidates in cand new ; Move s 0:t+1 from cand to result if s t+1 is end-of-sequence symbol;",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ed4a4a98",
+                        "type": "paragraph",
+                        "text": "By performing beam search we can consistently obtain a more probable set of completions compared to stochastic search.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2ba2b603",
+                        "type": "paragraph",
+                        "text": "However, there are two issues with the above method. First, it does not handle error correction (which is necessary for any practical type of completion) since the completion always attempts to find sequences that fit the current prefix exactly. Second, as we show below, a naive implementation of this model is extremely slow, often taking on the order of one second to produce 16 completions for a given prefix. Thus, in the next two sections, we present our primary technical contributions, which address both these issues.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_67f13e3c",
+                "title": "COMPLETION WITH ERROR CORRECTION",
+                "blocks": [
+                    {
+                        "block_id": "b_920f9d2a",
+                        "type": "paragraph",
+                        "text": "Most of the time query completion is more than completing over a fixed prefix. The input prefix might contain mistakes and sometimes we would also like to insert keywords in the prefix. Traditionally, the database community handles the two features by first doing a pass of error correction by matching the input to a typo database generated by permuting characters, then match the database again on the permuted terms for insertion completion. Our observation is that with a language-model-based approach, we can handle the spelling correction and insertion completion all in one model.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ecc55ab6",
+                "title": "A POTENTIAL FUNCTION AS PROBABILITY CORRECTION",
+                "blocks": [
+                    {
+                        "block_id": "b_2ed9bf62",
+                        "type": "paragraph",
+                        "text": "Remember that the original problem of estimating the probability of a query completion can be written as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c12cc11b",
+                        "type": "paragraph",
+                        "text": "Now, suppose that we no longer constrain the prefix to be exactly \u015d0:m = s 0:m . To utilize the language model, we need to augment the conditional distribution by adding an additional probability term P (\u015d 0:m | s 0:m ), the probability of a prefix in the completion given an observed prefix; note that these need not be the same length, as we may want to insert or delete characters from the prefix. Our completion probability now becomes",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5d5d9bee",
+                        "type": "paragraph",
+                        "text": "where the last equality comes because we assume that the completion only depends on its prefix. The probability P (\u015d 0:m | s 0:m ) models the error rate between the old and new prefix, that is, the probability of such modification/error of the old prefix. However, the question remains as to how to best represent this probability.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7b359480",
+                "title": "AMORTIZED DYNAMIC PROGRAMMING ON THE SEARCH TREE",
+                "blocks": [
+                    {
+                        "block_id": "b_f41a7acc",
+                        "type": "paragraph",
+                        "text": "A natural candidate for measuring the distance between two strings is the edit distance function.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_86e590bb",
+                        "type": "paragraph",
+                        "text": "Remember that the edit distance measures the minimum changes (add/remove/replace) to transform one string into another. If \u015d0:m is the correct prefix, the edit distance between \u015d0:m and s 0:m can be interpreted as the number of errors in the original prefix. Assuming that the probability by which users make an error is constant, we can model the probability of spelling error as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e13e4006",
+                        "type": "paragraph",
+                        "text": "Taking a 2% error rate gives \u03b1 = -log 1 50 \u2248 4. The edit distance can be calculated using the following dynamic programming (Wagner & Fischer, 1974) , which we include here as we will shortly propose a modification that works better in the search completion setting: dist edit := [0,1,. . . ,m]; For i = 0; i \u2264 m ; i++:",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1fcbb1bb",
+                        "type": "paragraph",
+                        "text": "For j = 0; j \u2264 m; j++: If \u015di ==s j : dist new (j) := dist edit (j-1); Else :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2d9a56c5",
+                        "type": "paragraph",
+                        "text": "\uf8f3 dist new (j-1) + 1, add; dist edit (j-1) + 1, substitute; dist edit (j) + 1, delete;",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2b16ddfb",
+                        "type": "paragraph",
+                        "text": "dist edit :=dist new ; Output dist edit (m);",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b7ea0855",
+                        "type": "paragraph",
+                        "text": "The above algorithm takes O(m \u2022 m ) time to run, and we need to evaluate the distance for every new candidate in the beam search. Thus, if we run it naively, it results in an additional O(|C|rm \u2022 m ) overhead to the beam search procedure, where C denotes the size of possible character set and r is the number of completions. However, observe that every new candidate is extended from old candidates. That is, only one character is changed in the outer-loop of the edit distance algorithm if we can maintain dist edit for every candidates. By such the bookkeeping, we are able to amortize the edit distance algorithm over the search, resulting in a much lower O(|C|rm) complexity.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d06f2df6",
+                "title": "EDIT DISTANCE V.S. COMPLETION DISTANCE",
+                "blocks": [
+                    {
+                        "block_id": "b_e07e4a37",
+                        "type": "paragraph",
+                        "text": "Note that to handle insertion completion, we should not incur penalty for adding words after the last character of any term. To accomplish this, we designed a new distance function called the \"completion distance\", which changes the update rule (15) to be dist new (j)= min \uf8f1 \uf8f2 \uf8f3 dist new (j-1) + I(s j-1 = last char) add; dist compl (j-1) + 1 substitute; dist compl (j) + 1 delete;",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6f45775a",
+                        "type": "paragraph",
+                        "text": "(15) By doing so, completion like \"poke go\" to \"pokemon go\" would not incur unnecessary penalties.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_afc06f84",
+                "title": "EXTENSIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_466f5ec2",
+                        "type": "paragraph",
+                        "text": "Finally, we note that this idea of inserting a potential function between different prefixes naturally generalizes to contexts other than edit distance. For example, many product search engines wish to drive the user not simply to a high-probability completion, but to a completion that is likely to lead to an actual sale. By modifying the prefix probability to more heavily weight high-value completions, we can effectively optimize metrics other than simple completion probability using this approach.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_297f6750",
+                "title": "REALTIME COMPLETION",
+                "blocks": [
+                    {
+                        "block_id": "b_732b14e8",
+                        "type": "paragraph",
+                        "text": "Starting with the system as proposed previously, the key challenge that remains now is to perform such completions in real time. Response time is crucial for query completion because unless the user can see completions as they type the query, the results will likely have very little value. The bar we set for ourselves in this work is to provide 16 completions in 20 milliseconds on current hardware. Unfortunately, a naive implementation of beam search with the model trained above (using off-the-shelf implementations), requires more than one second to complete forward propagation through the network and beam search.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0981efb1",
+                        "type": "paragraph",
+                        "text": "Thus, in this section we provide a detailed breakdown of how we have empirically improved this performance by a factor of over 50x, to achieve sub-20-ms completion times.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b7a8f3f2",
+                "title": "LSTM OVER A TREE",
+                "blocks": [
+                    {
+                        "block_id": "b_b8dd47b3",
+                        "type": "paragraph",
+                        "text": "First, we observe that all new candidates in the beam search process are extensions from the old candidates because of the BFS property. In this case, the forward propagations would greatly overlap.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_630a973f",
+                "title": "CPU IMPLEMENTATION AND LSTM TWEAKS",
+                "blocks": [
+                    {
+                        "block_id": "b_3b799b23",
+                        "type": "paragraph",
+                        "text": "Although GPUs appear to be most suitable for computation in deep learning, for this particular application we found that the CPU is actually better suited to the task. This is due to the need for branching and maintaining relatively complex data structures in the beam search process, along with the integration of the edit distance computation. Thus, implementation on a GPU requires a process that frequently shuffles very small amounts of data (each new character), between the CPU and GPU. We thus implemented the entire beam search and forward inference in C on the CPU.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e386213b",
+                        "type": "paragraph",
+                        "text": "However, after moving to a pure CPU implementation, it is the case that initially about 90% of the time is spent on computing the matrix-vector product in the LSTM. By properly moving to batch matrix-matrix operations with a minibatch that contains all r candidates maintained by beam search, we can substantially speed this up; By grouping together the product between the W matrices and h t for all r candidates maintained by the beam search procedure, we can use matrix-matrix products that even on the CPU have significantly better cache efficiency. We use the Intel MKL BLAS, and Finally, one of the most subtle but surprising speedups we attained was through a slightly tweaked LSTM implementation. With the optimizations above, computing the sigmoid terms in the LSTM actually took a surprisingly large 30% of the total computation time. This is due to the fact that 1) our LSTM implementation uses a hard sigmoid activation, which as a clipping operation requires branch prediction; and 2) the fact that the activations we need to apply the sigmoid to are not consecutive in the hidden state vector means we cannot perform fast vectorized operations. By simply grouping together the terms i t , f t , o t in the hidden state, and by using Intel SSE-based operations for the hard sigmoid, we further reduce the completion time down to 13.3ms, or 16.3ms if we include the error correction procedure.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9efec66f",
+                "title": "EXPERIMENTAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_c7bda2f1",
+                        "type": "paragraph",
+                        "text": "We evaluate our method on the AOL search dataset (Pass et al., 2006) , a data of real-world searches from 2006. The dataset contains 36M total queries, with 10M of these being unique, illustrating the long tail in these search domains. We set a maximum sequence length for the queries at 60 characters, as this contained 99.5% of all queries.",
+                        "extracted_citations": [
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d06f31b1",
+                        "type": "paragraph",
+                        "text": "Training and testing splits For each example in the data set, we choose a random cutting point (always after two characters in the string), and treat all text beforehand as the prefix and all text afterwards as the completion. For examples in the test set, we will use these prefixes and actual completions to evaluate the completions that our method predicts. In the training set, we will discard the cutting points and just train on the characters themselves.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_27e9b62e",
+                        "type": "paragraph",
+                        "text": "We use a test set size of 330K queries, and use the rest for training. We create training and testing splits to evaluate our method using two different strategies:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f8016fee",
+                        "type": "paragraph",
+                        "text": "\u2022 Prefix splitting: sort the queries according to the MD5 hash of the prefix then split. This ensures that data in the test set does not contain an exact prefix match in the training set.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e9d3d168",
+                        "type": "paragraph",
+                        "text": "\u2022 Time splitting: sort the queries by timestamp and split. This mimics making predictions online as new data comes in.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a7fb0e2d",
+                "title": "TRAINING LANGUAGE MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_0e4da5a2",
+                        "type": "paragraph",
+                        "text": "We trained our character-level language model on the characters of all the queries in the training set.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_66e80798",
+                        "type": "paragraph",
+                        "text": "We trained out LSTM language model for 3 epochs over the entire data set, which took 7.2 hours on a GTX 1080 Ti GPU.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fb594a98",
+                        "type": "paragraph",
+                        "text": "We used a 2-layer LSTM with 256 hidden dimensions with dropout of 0.5 between the two LSTM layers (no dropout within a single layer), and used Adam to train with a step size of 1e-3 and minibatch size of 256. Training and validation losses for the language model, under the two different splittings, are show in Table 1 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a77621ed",
+                        "type": "paragraph",
+                        "text": "We evaluated relatively few other architectures for this model, as the goal here is to use the characterlevel language model for completion rather than attain state-of-the-art results on language modeling in general. We did, however, find that the LSTM was prone to overfitting if too many hidden units were used, with 512 dimensional hidden units leading to only 1.5235 training loss on the prefix splitting dataset, whereas the validation loss grew to 1.6899. Although we mentioned the timing results in the main text, we summarize the speedups achieved by the different optimizations in Table 2 , which reports the time to give 16 suggestions for a prefix. One interesting point to note is that stochastic search in this setting actually takes three times longer than beam search (to generate the same number of candidates). This is due to the fact that stochastic search tends to generate completions that are much longer than those of beam search, interestingly making the \"simpler\" method here actually substantially slower while giving worse completions (which we will evaluate shortly).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_06f3ae2a",
+                "title": "PERFORMANCE EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_c9b6d0d8",
+                        "type": "paragraph",
+                        "text": "Finally, we evaluate the actual performance of the completion approaches, both comparing the performance of our beam search method to stochastic search (evaluated by log likelihood under the model), and comparing our completion method to a heavily optimized in-memory trie-base completion model, the standard data structure for completion given string prefixes.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_27f3dae1",
+                "title": "Stochastic Search vs. Beam Search",
+                "blocks": [
+                    {
+                        "block_id": "b_5dc1ae09",
+                        "type": "paragraph",
+                        "text": "In Table 3 we highlight the performance of beam search versus stochastic search for query completion, evaluated in terms of log likelihood under the model. Although it is not surprising, the results confirm the fact that beam search produces substantially better results under the model likelihood (in addition to being 3x faster, as mentioned above). Note that in this case we are not including any error correction, as it is not trivial to integrate this into the stochastic search setting, and we wanted a direct comparison on sample likelihood.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f470c4e2",
+                        "type": "paragraph",
+                        "text": "Our approach vs. database lookup Finally, we compare our total approach (beam search with error correction) to a trie-based (i.e., prefix lookup) completion model. We compare the approach using a combination of two metrics: 1) probabilistic coverage, which is simply the empirical conditional probability of the predicted completion given the prefix",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a24f01fb",
+                        "type": "paragraph",
+                        "text": "where P is the empirical probability for the whole AOL dataset (counts); and 2) hit rate, which simply lists the number of times a completion appears in the data set. Because the error correction model adjusts the prefix, it is not possible to compute probabilistic coverage exactly, but we can still get a sense of how likely the completions are based upon how often they occur. Table 4 shows the performance of the trie-based approach, beam search, and beam search with error correction under these metrics. Our models generally outperform trie-based approaches in all settings, the one exception being probabilistic coverage on the time-based training/testing split. This is likely due to some amount of shift over time in the search query terms. And although we cannot generate coverage numbers for the error-correction method, the hit rate suggests that it is indeed giving better completions than the alternative approaches.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0f86fc3f",
+                        "type": "paragraph",
+                        "text": "Further, we note that in addition to these numbers, there are a few notable disadvantages with triebased lookup. The trie data structure we compare to is very memory intensive (requires keeping prefixes for all relevant queries in memory), and takes a minimum of 16GB of RAM for the entire AOL search data set. The contrasts to the language model approach, which fits in only 18 MB. And if a prefix has not been seen before in the data set, the trie-based approach will offer no completions. Further, the trie-based approach is not amenable to error correction in isolation, as candidate corrections need to be proposed prior to lookup in the database; the process of repeatedly generating these candidates and performing the lookups will work for at most 2 edits, whereas our approach empirically easily handles completions that include 4-5 edits.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_dd86b0f5",
+                "title": "CONCLUSIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_a201812f",
+                        "type": "paragraph",
+                        "text": "In this paper, we presented a search query completion approach based upon character-level deep language models. We proposed a method for integrating the approach with an error correction framework and showed that candidate completions with error correction can be efficiently generated using beam search. We further described several optimizations that enabled the system to work in real time, including a CPU-based custom LSTM implementation. The method is able to jointly produce better completions than simple prefix lookup, while simultaneously being able to generate the candidates in real time.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Context-sensitive query auto-completion Ziv Bar -Yossef Naama Kraus Proceedings of the 20th international conference on World wide web the 20th international conference on World wide web ACM 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "A survey of query auto completion in information retrieval Fei Cai Maarten De Rijke Foundations and Trends R in Information Retrieval 10 4 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Fran\u00e7ois Chollet 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Junyoung Chung Sungjin Ahn Yoshua Bengio arXiv:1609.01704 Hierarchical multiscale recurrent neural networks 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Online spelling correction for query completion Huizhong Duan Bo-June Paul Hsu Proceedings of the 20th international conference on World wide web the 20th international conference on World wide web ACM 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Sepp Hochreiter and J\u00fcrgen Schmidhuber. Long short-term memory David Forney Proceedings of the IEEE the IEEE 1973. 1997 61 The viterbi algorithm",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Space-efficient data structures for top-k completion Bo-June Paul Hsu Giuseppe Ottaviano Proceedings of the 22nd international conference on World Wide Web the 22nd international conference on World Wide Web ACM 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Chang Liu Xin Wang Richard Shin Joseph E Gonzalez Dawn Song Neural code completion 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Spelling correction for search engine queries Bruno Martins M\u00e1rio J Silva Advances in Natural Language Processing Springer 2004",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Query auto-completion for rare prefixes Mitra Bhaskar Nick Craswell Proceedings of the 24th ACM International on Conference on Information and Knowledge Management the 24th ACM International on Conference on Information and Knowledge Management ACM 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "A neural language model for query auto-completion Dae Hoon Park Rikio Chiba Proceedings of the 40th International ACM SIGIR Conference on Research and Development in Information Retrieval the 40th International ACM SIGIR Conference on Research and Development in Information Retrieval ACM 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "A picture of search Greg Pass Abdur Chowdhury Cayley Torgeson Proceedings of the 1st international conference on Scalable information systems the 1st international conference on Scalable information systems ACM 2006 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Learning to personalize query auto-completion Milad Shokouhi Proceedings of the 36th international ACM SIGIR conference on Research and development in information retrieval the 36th international ACM SIGIR conference on Research and development in information retrieval ACM 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "A hierarchical recurrent encoder-decoder for generative context-aware query suggestion Alessandro Sordoni Yoshua Bengio Hossein Vahabi Christina Lioma Jakob Grue Simonsen Jian-Yun Nie Proceedings of the 24th ACM International on Conference on Information and Knowledge Management the 24th ACM International on Conference on Information and Knowledge Management ACM 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Improving recommendation for long-tail queries via templates Idan Szpektor Aristides Gionis Yoelle Maarek Proceedings of the 20th international conference on World wide web the 20th international conference on World wide web ACM 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "The string-to-string correction problem A Robert Michael J Wagner Fischer Journal of the ACM (JACM) 21 1 1974",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Using the web for language independent spellchecking and autocorrection Casey Whitelaw Ben Hutchinson Grace Y Chung Gerard Ellis Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing the 2009 Conference on Empirical Methods in Natural Language Processing Association for Computational Linguistics 2009 2",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Neural language correction with character-based attention Ziang Xie Anand Avati Naveen Arivazhagan Dan Jurafsky Andrew Y Ng arXiv:1603.09727 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.3229,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "The authors describe a method for performing query completion with error correction using a neural network that can achieve real-time performance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The method described uses a character-level LSTM, and modifies the beam search procedure with a an edit distance-based probability to handle cases where the prefix may contain errors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "Details are also given on how the authors are able to achieve realtime completion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "Overall, it\u2019s nice a nice study of the query completion application.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "The paper is well explained, and it\u2019s also nice that the runtime is shown for each of the algorithm blocks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Could imagine this work giving nice guidelines for others who also want to run query completion using neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "The final dataset is also a good size (36M search queries).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "My major concerns are perhaps the fit of the paper for ICLR as well as the thoroughness of the final experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Much of the paper provides background on LSTMs and edit distance, which granted, are helpful for explaining the ideas.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "But much of the realtime completion section is also standard practice, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "maintaining previous hidden states and grouping together the different gates.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "So the paper feels directed to an audience with less background in neural net LMs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "Secondly, the experiments could have more thorough/stronger baselines.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "I don\u2019t really see why we would try stochastic search.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "And expected to see more analysis of how performance was impacted as the number of errors increased, even if errors were introduced artificially, and expected analysis of how different systems scale with varying amounts of data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "The fact that 256 hidden dimension worked best while 512 overfit was also surprising, as character language models on datasets such as Penn Treebank with only 1 million words use hidden states far larger than that for 2 layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "More regularization required?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0076,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper focuses on solving query completion problem with error correction which is a very practical and important problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The idea is character based.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "And in order to achieve three important targets which are auto completion, auto error correction and real time, the authors first adopt the character-level RNN-based modeling which can be easily combined with error correction, and then carefully optimize the inference part to make it real time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "Pros:\n(1) the paper is very well organized and easy to read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "(2) the proposed method is nicely designed to solve the specific real problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "For example, the edit distance is modified to be more consistent with the task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "(3) detailed information are provided about the experiments, such as data, model and inference.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Cons:\n(1) No direct comparisons with other methods are provided.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "I am not familiar with the state-of-the-art methods in this field.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "If the performance (hit rate or coverage) of this paper is near stoa methods, then such experimental results will make this paper much more solid.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.5719,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper presents methods for query completion that includes prefix correction, and some engineering details to meet particular latency requirements on a CPU.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Regarding the latter methods: what is described in the paper sounds like competent engineering details that those performing such a task for launch in a real service would figure out how to accomplish, and the specific reported details may or may not represent the 'right' way to go about this versus other choices that might be made.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The final threshold for 'successful' speedups feels somewhat arbitrary -- why 16ms in particular?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "In any case, these methods are useful to document, but derive their value mainly from the fact that they allow the use of the completion/correction methods that are the primary contribution of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "While the idea of integrating the spelling error probability into the search for completions is a sound one, the specific details of the model being pursued feel very ad hoc, which diminishes the ultimate impact of these results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Specifically, estimating the log probability to be proportional to the number of edits in the Levenshtein distance is really not the right thing to do at all.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Under such an approach, the unedited string receives probability one, which doesn't leave much additional probability mass for the other candidates -- not to mention that the number of possible misspellings would require some aggressive normalization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "Even under the assumption that a normalized edit probability is not particularly critical (an issue that was not raised at all in the paper, let alone assessed), the fact is that the assumptions of independent errors and a single substitution cost are grossly invalid in natural language.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "For example, the probability p_1 of 'pkoe' versus p_2 of 'zoze' as likely versions of 'poke' (as, say, the prefix of pokemon, as in your example) should be such that p_1 >>> p_2, not equal as they are in your model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Probabilistic models of string distance have been common since Ristad and Yianlios in the late 90s, and there are proper probabilistic models that would work with your same dynamic programming algorithm, as well as improved models with some modest state splitting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "And even with very simple assumptions some unsupervised training could be used to yield at least a properly normalized model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "It may very well end up that your very simple model does as well as a well estimated model, but that is something to establish in your paper, not assume.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "That such shortcomings are not noted in the paper is troublesome, particularly for a conference like ICLR that is focused on learned models, which this is not.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "As the primary contribution of the paper is this method for combining correction with completion, this shortcoming in the paper is pretty serious.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Some other comments:\n\nYour presentation of completion cost versus edit cost separation in section 3.3 is not particularly clear, partly since the methods are discussed prior to this point as extension of (possibly corrected) prefixes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "In fact, it seems that your completion model also includes extension of words with end point prior to the end of the prefix -- which doesn't match your prior notation, or, frankly, the way in which the experimental results are described.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "The notation that you use is a bit sloppy and not everything is introduced in a clear way.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "For example, the s_0:m notation is introduced before indicating that s_i would be the symbol in the i_th position (which you use in section 3.3).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "Also, you claim that s_0 is the empty string, but isn't it more correct to model this symbol as the beginning of string symbol?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "If not, what is the difference between s_0:m and s_1:m?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "If s_0 is start of string, the s_0:m is of length m+1 not length m.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "You spend too much time on common, well-known information, such as the LSTM equations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "(you don't need them, but also why number if you never refer to them later?)  Also the dynamic programming for Levenshtein is foundational, not required to present that algorithm in detail, unless there is something specific that you need to point out there (which your section 3.3 modification really doesn't require to make that point).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_23",
+                    "text": "Is there a specific use scenario for the prefix splitting, other than for the evaluation of unseen prefixes?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_24",
+                    "text": "This doesn't strike me as the most effective way to try to assess the seen/unseen distinction, since, as I understand the procedure, you will end up with very common prefixes alongside less common prefixes in your validation set, which doesn't really correspond to true 'unseen' scenarios.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_25",
+                    "text": "I think another way of teasing apart such results would be recommended.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_26",
+                    "text": "You never explicitly mention what your training loss is in section 5.1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_27",
+                    "text": "Overall, while this is an interesting and important problem, and the engineering details are interesting and reasonably well-motivated, the main contribution of the paper is based on a pretty flawed approach to modeling correction probability, which would limit the ultimate applicability of the methods.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_f3efdf1b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4c648462"
+        },
+        {
+            "source": "sec_f3efdf1b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8f589198"
+        },
+        {
+            "source": "sec_f3efdf1b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0742915"
+        },
+        {
+            "source": "sec_ddd5d3af",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cb46c845"
+        },
+        {
+            "source": "b_d93fd8a6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_d93fd8a6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_d93fd8a6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_d93fd8a6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_ddd5d3af",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d93fd8a6"
+        },
+        {
+            "source": "b_a4910ef2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_a4910ef2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_a4910ef2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_a4910ef2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_ddd5d3af",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a4910ef2"
+        },
+        {
+            "source": "b_7cb7af6c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_7cb7af6c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_e8217ae3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7cb7af6c"
+        },
+        {
+            "source": "b_51c3732b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_51c3732b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_128a7790",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_51c3732b"
+        },
+        {
+            "source": "sec_44e323f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2ef30a23"
+        },
+        {
+            "source": "sec_44e323f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff63d612"
+        },
+        {
+            "source": "sec_44e323f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a6a6b376"
+        },
+        {
+            "source": "sec_44e323f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_958a69aa"
+        },
+        {
+            "source": "sec_44e323f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9598188d"
+        },
+        {
+            "source": "b_92412a74",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_ae6342b2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_92412a74"
+        },
+        {
+            "source": "sec_ae6342b2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dea91956"
+        },
+        {
+            "source": "b_8e4bc957",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_ae6342b2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8e4bc957"
+        },
+        {
+            "source": "sec_ae6342b2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_60e676d1"
+        },
+        {
+            "source": "sec_ae6342b2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c015db6d"
+        },
+        {
+            "source": "sec_ae6342b2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_98b0a06d"
+        },
+        {
+            "source": "sec_ae6342b2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ef497590"
+        },
+        {
+            "source": "b_5abc9888",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_eabe45b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5abc9888"
+        },
+        {
+            "source": "sec_eabe45b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_82b405f0"
+        },
+        {
+            "source": "sec_eabe45b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7a41a8d0"
+        },
+        {
+            "source": "sec_eabe45b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_770a7470"
+        },
+        {
+            "source": "sec_eabe45b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f356d9c4"
+        },
+        {
+            "source": "sec_eabe45b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_305731ba"
+        },
+        {
+            "source": "sec_eabe45b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ed4a4a98"
+        },
+        {
+            "source": "sec_eabe45b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2ba2b603"
+        },
+        {
+            "source": "sec_67f13e3c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_920f9d2a"
+        },
+        {
+            "source": "sec_ecc55ab6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2ed9bf62"
+        },
+        {
+            "source": "sec_ecc55ab6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c12cc11b"
+        },
+        {
+            "source": "sec_ecc55ab6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5d5d9bee"
+        },
+        {
+            "source": "sec_7b359480",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f41a7acc"
+        },
+        {
+            "source": "sec_7b359480",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_86e590bb"
+        },
+        {
+            "source": "b_e13e4006",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_7b359480",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e13e4006"
+        },
+        {
+            "source": "sec_7b359480",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1fcbb1bb"
+        },
+        {
+            "source": "sec_7b359480",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2d9a56c5"
+        },
+        {
+            "source": "sec_7b359480",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b16ddfb"
+        },
+        {
+            "source": "sec_7b359480",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b7ea0855"
+        },
+        {
+            "source": "sec_d06f2df6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e07e4a37"
+        },
+        {
+            "source": "sec_d06f2df6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6f45775a"
+        },
+        {
+            "source": "sec_afc06f84",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_466f5ec2"
+        },
+        {
+            "source": "sec_297f6750",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_732b14e8"
+        },
+        {
+            "source": "sec_297f6750",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0981efb1"
+        },
+        {
+            "source": "sec_b7a8f3f2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b8dd47b3"
+        },
+        {
+            "source": "sec_630a973f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3b799b23"
+        },
+        {
+            "source": "sec_630a973f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e386213b"
+        },
+        {
+            "source": "b_c7bda2f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_9efec66f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c7bda2f1"
+        },
+        {
+            "source": "sec_9efec66f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d06f31b1"
+        },
+        {
+            "source": "sec_9efec66f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_27e9b62e"
+        },
+        {
+            "source": "sec_9efec66f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f8016fee"
+        },
+        {
+            "source": "sec_9efec66f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e9d3d168"
+        },
+        {
+            "source": "sec_a7fb0e2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0e4da5a2"
+        },
+        {
+            "source": "sec_a7fb0e2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_66e80798"
+        },
+        {
+            "source": "sec_a7fb0e2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fb594a98"
+        },
+        {
+            "source": "sec_a7fb0e2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a77621ed"
+        },
+        {
+            "source": "sec_06f3ae2a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c9b6d0d8"
+        },
+        {
+            "source": "sec_27f3dae1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5dc1ae09"
+        },
+        {
+            "source": "sec_27f3dae1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f470c4e2"
+        },
+        {
+            "source": "sec_27f3dae1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a24f01fb"
+        },
+        {
+            "source": "sec_27f3dae1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0f86fc3f"
+        },
+        {
+            "source": "sec_dd86b0f5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a201812f"
+        }
+    ]
+}

@@ -1,0 +1,2299 @@
+{
+    "paper_metadata": {
+        "paper_id": "760",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Rejected",
+        "total_reviews_available": 8
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_51f203e5",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_d62fcf83",
+                        "type": "paragraph",
+                        "text": "Deep neural networks coupled with the availability of vast amounts of data have proved very successful over the last few years at visual discrimination (Goodfellow et al., 2014; Kingma & Welling, 2013; LeCun et al., 1998; Mnih & Gregor, 2014) . A basic desire of deep architectures is to discover the blocks -or features-that compose an image (or in general, a sensory input) at different levels of abstraction. Tasks that require some degree of image understanding can be performed more easily when using representations based on these building blocks.",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b11",
+                            "Citation_b14",
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a6a50211",
+                        "type": "paragraph",
+                        "text": "It would make intuitive sense that if we were to train one of the above models (particularly, those that are generative, such as variational autoencoders or generative adversarial networks) on images containing, e.g. text, the learned features would be individual letters, since those are the building blocks of the provided images. In addition to matching our intuition, a model that realizes (from noisy raw pixels) that the building blocks of text are letters, and is able to extract a representation based on those, has found meaningful structure in the data, and can prove it by being able to efficiently compress text images. However, this is not the case with existing incarnations of the above models 1 . We can see in Fig. 1 the features recovered by the hierarchical compositional network (HCN) from a single image with no supervision. They appear to be reasonable building blocks and are easy to find for a human. Yet we are not aware of any model that can perform such apparently simple recovery with no supervision.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8c209a60",
+                        "type": "paragraph",
+                        "text": "The HCN is a multilayer generative model with features defined at each layer. A feature (at a given position) is defined as the composition of features of the layer immediately below (by specifying their relative positions). To increase flexibility, the positions of the composing features can be perturbed slightly with respect to their default values (pooling). This results in a latent variable model, with some of the latent variables (the features) being shared for all images while others (the pool states) are specific for each image.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9c1ec11f",
+                        "type": "paragraph",
+                        "text": "Comparing HCN with other generative models for images, we note that existing models tend to have at least one of the following limitations: a) priors are not rich enough; typically, the sources of variation are not distributed among the layers of the network, and instead the generative model is expressed as X = f (Y ) + \u03b5 where Y and \u03b5 are two set of random variables, X is the generated image and f (\u2022) is the network, i.e., the entire network behaves as a sophisticated deterministic function, b) the inference method (usually a separate recognition network) considers all the latent variables as independent and does not solve explaining away, which leads to c) the learned features being not directly interpretable as reusable parts of the learned images.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_229a5419",
+                        "type": "paragraph",
+                        "text": "Although directed models enjoy important advantages such as the ability to represent causal semantics and easy sampling mechanics, it is known that the \"explaining away\" phenomenon makes inference difficult in these models (Hinton et al., 2006) . For this reason, representation learning efforts have largely focused on undirected models (Salakhutdinov & Hinton, 2009) , or have tried to avoid the problem of explaining away by using complementary priors (Hinton et al., 2006) .",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b23",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_988ea06b",
+                        "type": "paragraph",
+                        "text": "An important contribution of this work is to show that approximate inference using max-product message passing (MPMP) can learn features that are composable, interpretable and causally meaningful. It is also noteworthy that unlike previous works, we consider the weights (a.k.a. features) to be latent variables and not parameters. Thus, we do not use separate expectation-maximization (EM) stages. Instead, we perform feature learning and pool state inference jointly as part of the same message passing loop.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_744c8354",
+                        "type": "paragraph",
+                        "text": "When augmented with supervision information, HCN can be used for classification, with inference and learning still being taken care of by a largely unmodified MPMP procedure. After training, discrimination can be achieved via a fast forward pass which turns out to have the same functional form as a convolutional neural network (CNN).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5e1cd013",
+                        "type": "paragraph",
+                        "text": "The rest of the paper is organized as follows: we describe the HCN model in Section 2; Section 3 describes learning and inference in the single layer and multilayer HCNs; Section 4 tests the HCN experimentally and we conclude with a brief discussion in Section 5.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_32fd4b18",
+                "title": "THE HIERARCHICAL COMPOSITIONAL NETWORK",
+                "blocks": [
+                    {
+                        "block_id": "b_2b39acf9",
+                        "type": "paragraph",
+                        "text": "The HCN model is a discrete latent variable model that generates binary images by composing parts with different levels of abstraction. These parts are shared across all images. Training the model involves learning such parts from data as well as how to combine them to create each concrete image. The HCN model can be expressed as a factor graph consisting only of three types of factors: AND, OR and POOL. These perform the obvious binary operations and will be defined more precisely later in this section. The flexibility of the model allows training in supervised, semisupervised and unsupervised settings, including missing image data. Once trained, the HCN can be used for classification, missing value completion (pixel inference), sparsification, denoising, etc. See Fig. 2 for a factor graph of the complete model. Additional details of each layer type are given in Fig. 4 . At a high level, the HCN consists of a class layer at the top followed by alternating convolutional layers and pooling layers. Inside each layer there is a sparsification, a representation and weights (a.k.a. features), each of which is a multidimensional array of latent variables. The class layer selects a category, and within it, which template is going to be used, producing the top-level sparsification. A sparsification is simply an encoding of the representation. A sparsification encodes a representation by specifying which features compose it and where they should be placed. The features are in turn stored in the form of weights. Convolutional layers deterministically combine the sparsification and the weights of a layer to create its representation. Pooling layers randomly perturb the position of the active elements (within a local neighborhood), introducing small variations in the process.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_33160aae",
+                "title": "BINARY CONVOLUTIONAL FEATURE LAYER (SINGLE-LAYER HCN)",
+                "blocks": [
+                    {
+                        "block_id": "b_883586de",
+                        "type": "paragraph",
+                        "text": "This layer can perform non-trivial feature learning on its own. We refer to it as a single-layer HCN. See Section 4.1 for the corresponding experiments.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3ba904f5",
+                        "type": "paragraph",
+                        "text": "In this case, since there is no additional top-down structure, a binary image is created by placing features at random locations of an image. Wherever two features overlap, they are ORed, i.e., if a pixel of the binary image is activated due to two features, it is simply kept active. We will call W to the features, S to the sparsification of the image (locations at which features are placed in that image) and X to the image. All of these variables are multidimensional binary arrays.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fa61dd73",
+                        "type": "paragraph",
+                        "text": "The values of each of the involved arrays for a concrete example with a single-channel image is given in Fig. 3 (to display S we maximize over f ). The corresponding diagram is shown in Fig. 4 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c19f8722",
+                        "type": "paragraph",
+                        "text": "In practice, each image X is possibly multichannel, so it will have size F X \u00d7 H X \u00d7 W X , where the first dimension is the number of channels in the image and the other two are its height and width. S has size F S \u00d7 H S \u00d7 W S , where the first dimension is the number of features and the other two are its height and width. We refer to an entry of S n as S f rc . Setting an entry S f rc = 1 corresponds to placing feature f at position (r, c) in the final image X. The features themselves are stored in W , which has size F below small 3D array containing one of the building blocks of the image. Those are placed in the positions specified by S, and the same block can be used many times at different positions, hence calling this layer convolutional 2 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7a1ede18",
+                        "type": "paragraph",
+                        "text": "We can fully specify a probabilistic model for a binary images by adding independent priors over the entries of S and W and connecting those to X through a binary convolution and a noisy channel. The complete model is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_253d6287",
+                        "type": "paragraph",
+                        "text": "p(X|R) = arc p noisy (X arc |R arc ) with R = bconv(S, W ) and p noisy (1|0) = p 10 , p noisy (0|1) = p 01 , which depends on four scalar parameters p S , p W , p 01 , p 10 , controlling the density of features in the image, of pixels in each feature, and the noise of the channel, respectively. The indexes a, f, r, c run over channels, features, rows and columns, respectively.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e7674284",
+                        "type": "paragraph",
+                        "text": "We have used the binary convolution operator R = bconv(S, W ). A binary convolution performs the same operation as a normal convolution, but operates on binary inputs and truncates outputs above 1. Our latent variables are arranged as three-and four-dimensional arrays, so we define R = bconv(S, W ) to mean R a,:,: = min(1, f conv2D(S f,:,: , W a,f,:,: )) where conv2D(\u2022, \u2022) is the usual 2D convolution operator, R and S are binary 3D arrays and W is a binary 4D arrays. The operator min(1, \u2022) truncates values above 1 to 1, performing the ORing of two overlapping features previously mentioned.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d291f693",
+                        "type": "paragraph",
+                        "text": "The binary convolution (and hence model (1)) can be expressed as a factor graph, as seen in Fig. 4 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f5015995",
+                        "type": "paragraph",
+                        "text": "The AND factor can be written as AND(b|t 1 , t 2 ) and takes value 0 when the bottom variable b is the logical AND of the two top variables t 1 and t 2 . It takes value -\u221e in any other case. The OR factor, OR(b|t 1 . . . , t M ) takes value 0 when the bottom variable b is the logical OR of the M top variables t 1 . . . , t M . It takes value -\u221e in any other case.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_097e28d6",
+                        "type": "paragraph",
+                        "text": "When this layer is not used in standalone mode, but inside a multilayer HCN, the variables R are connected to the pooling layer immediately below (instead of being connected to the image X through the noisy channel) and the variables S are connected to the pooling layer immediately above (instead of being connected to the prior).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_de398132",
+                "title": "THE CLASS LAYER",
+                "blocks": [
+                    {
+                        "block_id": "b_d26133fd",
+                        "type": "paragraph",
+                        "text": "We assume for now that a single class is present in each image. We can then write log p(c 1 , . . . , c K ) = POOL(c 1 , . . . , c K |1)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f2d6a144",
+                        "type": "paragraph",
+                        "text": "where c k are mutually exclusive binary variables representing which of the K categories is present.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0dbcdcb7",
+                        "type": "paragraph",
+                        "text": "In  where these JK variables are arranged as a 3D array of size 1 \u00d7 1 \u00d7 JK called S L which forms the top-level sparsification of the template. A sample from S L will always have exactly one element set to 1 and the rest set to 0. Superscript L is used to identify the layer to which a variable belongs. Since there are L layers, S L is the top layer sparsification.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fd5c69a2",
+                "title": "THE POOLING LAYER",
+                "blocks": [
+                    {
+                        "block_id": "b_5a6af984",
+                        "type": "paragraph",
+                        "text": "In a multilayer HCN, feature layers and pooling layers appear in pairs. Inside layer , the pooling layer is placed below the feature layer .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_799293b2",
+                        "type": "paragraph",
+                        "text": "Since the convolutional feature layer is deterministic, any variation in the generated image must come from the pooling layers (and the final noisy channel). Each pooling layer shifts the position of the active units in R to produce the sparsification S -1 in the layer below. This shifting is local, constrained to a region of size 3 H P \u00d7 W P \u00d7 1, the pooling window. When two or more active units in R are shifted towards the same position in S -1 , they result in a single activation, so the number of active units in S -1 is equal or smaller than the number of activations in R .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a2224064",
+                        "type": "paragraph",
+                        "text": "The above description should be enough to know how to sample S -1 from R , but to provide a rigorous probabilistic description, we need to introduce the intermediate binary variables U \u2206r,\u2206c,f,r,c, , which are associated to a shift \u2206r, \u2206c of the element R f rc . The H P W P intermediate variables associated to the same element R f rc are noted as U :,:,f rc . Since an element can be shifted to a single position per realization and only when it is active, the elements in U :,:,f rc are grouped into a pool",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3fa47888",
+                        "type": "paragraph",
+                        "text": "and then S -1 can be obtained deterministically from U by ORing the H P W P variables of U that can potentially turn it on, log p(S",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8bdeb0d7",
+                        "type": "paragraph",
+                        "text": "f r c |{U \u2206r,\u2206c,f,r,c } r :r+\u2206r,c :c+\u2206c ). i.e., the above expression evaluates to 0 if the above OR relations are satisfied and to -\u221e if they are not.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1b943888",
+                "title": "JOINT PROBABILITY WITH MULTIPLE IMAGES",
+                "blocks": [
+                    {
+                        "block_id": "b_07c80802",
+                        "type": "paragraph",
+                        "text": "The observed binary image X corresponds to the bottommost sparsification 4 S 0 after it has traversed, element by element, a noisy channel with bit flip probabilities p(X f rc = 1|S 0 f rc = 0) = p 10 < 0.5 and p(X f rc = 0|S 0 f rc = 1) = p 01 < 0.5. This defines p(X|S 0 ). Finally, if we consider the weight variables to be independent Bernoulli variables with a fixed perlayer sparse prior p W that are drawn once and shared for the generation of all images, we can write the joint probability of multiple images, latent variables and weights as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e0f829d5",
+                        "type": "paragraph",
+                        "text": "where we have collected all the category variables {c k } of each image in C n and the remaining latent variables in H n and for convenience. Each image uses its own copy of the latent variables, but the weights are shared across all images, which is the only coupling between the latent variables.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eaf8fd13",
+                        "type": "paragraph",
+                        "text": "The above expression shows how, in addition to factorizing over observations (conditionally on the weights), there is a factorization across layers. Furthermore, the previous description of each of these layers implies that the entire model can be further reduced to small factors of type AND, OR and POOL, involving only a few local variables each.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_96989b70",
+                        "type": "paragraph",
+                        "text": "Since we are interested in a point estimate of the features, given the images {X n } N n=1 and a (possibly empty) 5 subset of the labels {C n } N n=1 , we will attempt to recover the maximum a posteriori 6 (MAP) configuration over features, sparsifications, and unknown labels. Note that for classification, selecting {W } L =1 by maximizing the joint probability is very different from selecting it by maximizing a discriminative loss of the type log p",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_27288179",
+                        "type": "paragraph",
+                        "text": ", since in this case, all the prior information p(X) about the structure of the images is lost. This results in more samples being required to achieve the same performance, and less invariance to new test data.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_68cb6b65",
+                        "type": "paragraph",
+                        "text": "Once learning is complete, we can fix {W } L =1 , thus decoupling the model for every image, and use approximate MAP inference to classify new test images, or to complete them if they include missing data (while benefiting from the class label if it is available).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fa5842d8",
+                        "type": "paragraph",
+                        "text": "Even though we only consider the single-class-per-image setting, the compositional property of this model means that we can train it on single-class images and then, without retraining, change the class layer to make it generate (and therefore, recognize) combinations of classes in the same image.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4e11113e",
+                "title": "LEARNING AND INFERENCE",
+                "blocks": [
+                    {
+                        "block_id": "b_c58f9967",
+                        "type": "paragraph",
+                        "text": "We will consider first the simpler case of a single-layer HCN, as described in Section 2.1. Then we will tackle inference in the multilayer HCN.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3cfac324",
+                "title": "LEARNING IN SINGLE-LAYER HCN",
+                "blocks": [
+                    {
+                        "block_id": "b_2e34d1b7",
+                        "type": "paragraph",
+                        "text": "In this case, for model (1), we want to find",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8b54c563",
+                        "type": "paragraph",
+                        "text": "(2) This is a challenging problem even in simple cases. In fact, it can be easily shown that boolean matrix factorization (BMF), a.k.a. boolean factor analysis, arises as a particular case of (2) in which the heights and widths of all the involved arrays are set to one. BMF is a decades-old problem proved to be NP-complete in (Stockmeyer, 1975) and with applications in machine learning, communications and combinatorial optimization. Another related problem is non-negative matrix factorization (NMF) (Lee & Seung, 1999), but NMF is additive instead of ORing the contributions of multiple features, which is not desired here.",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_97a702ed",
+                        "type": "paragraph",
+                        "text": "One of the best-known heuristics to address BMF is the Asso (Miettinen et al., 2006) . Unfortunately, it is not clear how to extend it to solve (2) because it relies on assumptions that no longer hold in the present case. The variational bound of (Jaakkola & Jordan, 1999) addresses inference in the presence of a noisy-OR gate and was successfully used in by ( \u0160ingliar & Hauskrecht, 2006) to obtain the noisy-OR component analysis (NOCA) algorithm. NOCA addresses a very similar problem to (2), the two differences being that a) the weight values are continuous between 0 and 1 (instead of binary) and b) there is no convolutional weight sharing among the features. NOCA can be modified to include the convolutional weight sharing, but it is not an entirely satisfactory solution to the feature learning problem as we will show. We observed that the obtained local maxima, even after significant tweaking of parameters and learning schedule, are poor for problems of small to moderate size.",
+                        "extracted_citations": [
+                            "Citation_b17",
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5d2ab8cf",
+                        "type": "paragraph",
+                        "text": "We are not aware of other existing algorithms that can solve (2) for medium image sizes. The model ( 1 ) is directly amenable to mean-field inference without requiring the additional lower-bounding used in NOCA, but we experimented with several optimization strategies (both based in mean field updates and gradient-based) and the obtained local maxima were consistently worse than those of NOCA.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_26898ab0",
+                        "type": "paragraph",
+                        "text": "In (Ravanbakhsh et al., 2015) it is shown that max-product message passing (MPMP) produces stateof-the-art results for the BMF problem, improving even on the performance of the Asso heuristic.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fb344964",
+                        "type": "paragraph",
+                        "text": "We also address problem (2) using MPMP. Even though MPMP is not guaranteed to converge, we found that with the right schedule, even with very slight or no damping, good solutions are found consistently.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_46f28c72",
+                        "type": "paragraph",
+                        "text": "Model (1) can be expressed both as a directed Bayesian network or as a factor graph using only AND and OR factors, each involving a small number of local binary variables. Finding features and sparsifications can be cast as MAP inference 7 in this factor graph.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_641dd6b7",
+                        "type": "paragraph",
+                        "text": "MPMP is a local message passing technique to perform MAP inference in factor graphs. MPMP is exact on factor graphs without loops (trees). In loopy models, such as (1), it is an approximation with no convergence guarantees 8 , although convergence can be often attained by using some damping 0 < \u03b1 \u2264 1. See Appendix C for a quick review on MPMP and Appendix D for the message update equations required for the factors used in this work. Unlike Ravanbakhsh et al. (2015) which uses parallel updates and damping, we update each AND-OR factor 9 in turn, following a random in a sequential schedule. This results in faster convergence with less or no damping.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cf8fa2c7",
+                "title": "LEARNING IN MULTILAYER HCN (UNSUPERVISED, SEMISUPERVISED, SUPERVISED)",
+                "blocks": [
+                    {
+                        "block_id": "b_26e2fe44",
+                        "type": "paragraph",
+                        "text": "Despite its loopiness, we can also apply MPMP inference to the full, multilayer model and obtain good results. The learning procedure iterates forward and backward passes (a precise description can be found in Algorithm 1 below). In a forward pass, we proceed updating the bottom-up messages to variables, starting from the bottom of the hierarchy (closer to the image) and going up to the class layer. In a backward pass, we update the top-down messages visiting the variables in top-down order. Messages to the weight variables are updated only in the forward pass. We use damping only in the update of the bottom-up messages from a pooling layer during the forward pass. The AND-OR factors in the binary convolutional layer form trees, so we treat each of these trees as a single factor, since closed form message updates for them can be obtained. Those factors are updated once in random order inside each layer, i.e., sequentially. The pools at the class layer also from a tree, so we also treat them as a single factor. The message updates for AND, OR and POOL factors follow trivially from their definition and are provided in Appendix D.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cc89a3ea",
+                        "type": "paragraph",
+                        "text": "After enough iterations, weights are set to 1 if their max-marginal difference is positive and to 0 otherwise. This hard assignment converts some of the AND factors into a pass-through and the rest in disconnections. Thus the weight assignments define the connectivity between S and R on a new graph without ANDs. This is the learned model, that we can use to perform inference with with on new test images.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_86852c3b",
+                "title": "INFERENCE IN MULTILAYER HCN",
+                "blocks": [
+                    {
+                        "block_id": "b_6a445011",
+                        "type": "paragraph",
+                        "text": "Typical inference tasks are classification and missing value imputation. For classification, we find that a single forward pass seems good enough and further forward and backward passes are not needed (see Algorithm 1 for the description of the forward and backward passes). For missing value imputation a single forward and top-down pass is enough. In order to achieve higher quality explaining-away 10 , we use a top-down pass instead of a backward pass. A top-down pass differs from a backward pass in that we replace step 5) with multiple alternating executions of steps 5) and 2). Therefore, it is not strictly a backward pass, but it proceeds top-down in the sense that once a layer has been fully processed, it is never visited again.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_244f8e63",
+                        "type": "paragraph",
+                        "text": "Interestingly, the functional form of the forward pass of an HCN is the same as that of a standard CNN, see Section 3.4, and therefore, an actual CNN can be used to perform a fast forward pass.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_01538a3d",
+                "title": "Algorithm 1 Learning in Hierarchical Compositional Networks",
+                "blocks": [
+                    {
+                        "block_id": "b_8df444c5",
+                        "type": "paragraph",
+                        "text": "Input: Hyperparameters p01, p10, {p W } L =1 , data {Xn, Cn} N n=1 and network structure (pool and weight sizes for each layer) Init Initialize bottom-up messages and messages to {W } to zero. Initialize the top-down messages to -\u221e. Initialize messages to W from its prior uniformly at random in (0.9pW , pW ) to break symmetry. Set constant bottom-up messages to S 0 : m(S 0 f rc ) = (k1 -k0)X f rc + k0 with k1 = log 1-p 01 p 10 and k0 = log p 01 1-p 10 repeat Forward pass: for in 1, . . . , L do 1) Update messages from OR to U in parallel 2) Update messages from POOL to R in parallel with damping \u03b1 3) Update messages from AND-OR to W and S sequentially in random order end for Update message from all class layer POOLs to S L . Hard assign Cn if label is available. Backward pass: for in L, . . . , 1 do 4) Update messages from AND-OR to R sequentially in random order 5) Update messages from POOL to U in parallel 6) Update messages from OR to S -1 in parallel end for Compute max-marginals by summing incoming messages to each variable until Fixed point or iteration limit return Max-marginal differences of S , W and R",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f20f2226",
+                "title": "FUNCTIONAL CORRESPONDENCE WITH CNN",
+                "blocks": [
+                    {
+                        "block_id": "b_d9d86af9",
+                        "type": "paragraph",
+                        "text": "After a single forward pass in an HCN (considering that the weights are known, after training), we get an estimate of the MAP assignment over categories. In practice, this assignment seems good enough for classification and further forward and backward passes are not needed.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6dd4bf2f",
+                        "type": "paragraph",
+                        "text": "The functional form of the first forward pass can be simplified because of the initial strongly negative top-down messages. Under these conditions, the message update rules applied to the pooling layers of the HCN have exactly the same functional form 11 as the max-pooling layer in a standard CNN. Similarly, applying the message update rule to the convolutional layers of the HCN -when the weights are known-has the same functional form as performing a standard (not binary) convolution of the bottom-up messages with the weights, just like in a standard CNN. At the top, the max-marginal over categories will select the one with the template with the largest bottom-up message. This can be realized with max-pooling over the feature dimension as done in (Goodfellow et al., 2013) , or closely approximated using a fully connected layer and a softmax, as in more standard CNNs.",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0e0d2ea6",
+                        "type": "paragraph",
+                        "text": "Simply put, the binary weights learned by an HCN can be copied to a standard CNN with linear activations and they will both produce the same classification results when we applied to the bottom-up messages (which are a positive scaling of the input data X plus a constant).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e7eb520a",
+                "title": "INVARIANCE TO NOISE LEVEL",
+                "blocks": [
+                    {
+                        "block_id": "b_7c5044a4",
+                        "type": "paragraph",
+                        "text": "Consider we generate two data sets with the HCN model using the same weights but different bit-flip probabilities. If those probabilities are known, would we use different classifiers for each dataset? If we use a single forward pass, changing p 01 and p 10 produces a different monotonic transformation of all the bottom-up messages at every layer of the hierarchy, but the selected category, which depends only on which variable has the largest value, will not change. So, with a single-pass classifier, our class estimation does not change with the noise level. This has the important implication that an HCN does not need to be trained with noisy data to classify noisy data. It can be trained with clean data (where there is more signal and learning parts is easier) and used on noisy data without retraining.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_51cac9fa",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_b2716986",
+                        "type": "paragraph",
+                        "text": "In the following, we experimentally characterize both the single-layer and multilayer HCN.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cbb4888e",
+                "title": "SINGLE-LAYER HCN",
+                "blocks": [
+                    {
+                        "block_id": "b_0850d205",
+                        "type": "paragraph",
+                        "text": "We create several synthetic (both noisy and noiseless) images in which the building blocks -or features-are obvious to a human observer and check the ability of HCN to recover the them. The task is deceptively simple, and the existing the state of the art at this task, NOCA, is unable to solve several of our examples. Since the number of free parameters of the model is so small (3 in the case of a symmetric noisy channel), these can be easily explored using grid search and selected using maximum likelihood. The sensitivity of the results to these parameters is small. HCN only requires straightforward MPMP with random order over the factors. For NOCA, initializing the variational posterior over the latent sources and choosing how to interleave the updates of this posterior with the update of the additional variational parameters ( \u0160ingliar & Hauskrecht, 2006 ) is tricky. For best results, during each E step we repeated the following 10 times: update the variational parameters for 20 iterations and then update the variational posterior (which is a single closed form update). The M update also required an inner loop of variational parameter updating.",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a3ae58ff",
+                        "type": "paragraph",
+                        "text": "The performance of HCN and NOCA can be assessed visually in Fig. 5 . Column (a) shows each input image (these are single-image datasets) and the remaining columns show the features and reconstructions obtained by HCN and NOCA. In some of the input images we have added noise that flips pixels with 3% probability. For HCN (respectively NOCA), we binarize all the beliefs (respectively, variational posteriors) from the [0, 1] range by thresholding at 0.5 and then perform a binary convolution to obtain the reconstruction. Because noise is not included in this reconstruction, a cleaner image may be obtained, resulting in unsupervised denoising (rows 1 and 4 of Fig. 5 ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_af188627",
+                        "type": "paragraph",
+                        "text": "For a quantitative comparison, refer to Tab. 1. One algorithm-independent way to measure performance in the feature learning problem is to measure compression. It is known that to transmit a long sequence of N bits which are 1 with probability p, we only need to transmit N H(p) bits with an optimal encoding, where H is the entropy. Thus sparse sequences compress well. In order to transmit these images without loss, we need to transmit either one sequence of bits (encoding the image itself) or three sequences of bits, one encoding the features, another encoding the sparsification and a last one encoding the errors between the reconstruction and the original image. Ideally, the second method is more efficient, because the features are only sent once and the sparsification and errors sequences are much sparser than the original image. The ratio between the two is shown together with running time on a single CPU. Unused features are discarded prior to computing compression.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0fc9b01a",
+                        "type": "paragraph",
+                        "text": ", where E is the encoding cost. Time: minutes.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_78ee14b7",
+                "title": "ONLINE LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_ecb2efb7",
+                        "type": "paragraph",
+                        "text": "The above experiments use a batch formulation, i.e., consider simultaneously all the available training data {X n } N 1 . Since the amount of memory required to store the messages for MPMP scales linearly with the training data, this imposes a practical limit in the number of images that can be processed. In order to overcome this limit, we also consider a particular message update schedule in which the messages outgoing from factors connected to each image and sparsification X n , S n are updated only once and therefore, after an image has been processed, can be discarded, since they are never reused. This effectively allows for online processing of images without memory scaling issues. Two modifications are needed in practice for this to work well: first, instead of processing only one image at a time, better results are obtained if the factors of multiple images (forming a minibatch) are processed in random order. Second, a forgetting mechanism must be introduced to avoid accumulating an unbounded amount of evidence from the processed minibatches.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1f7ade98",
+                        "type": "paragraph",
+                        "text": "In detail, the beliefs of the variables W are initialized uniformly at random in the interval (0.9p W , p W ) (we call these initial beliefs b (0) prior (W af rc )) and the beliefs of the variables {S n } N 1 are initialized to p S . The initial outgoing messages from all the AND-OR factors are set to 0. Since each factor is only processed once, this allows implementing MPMP without ever having to store messages and only requiring to store beliefs. After processing the first minibatch using MPMP (with no damping), we call the resulting belief over each of the weights b (0) post (W af rc ) (as it standard for MPMP of binary variables, beliefs are represented using max-marginal differences in log space). Instead of processing the second minibatch using b prior (W af rc ), i.e., we \"forget\" part of the observed evidence, substituting it with the prior. This introduces an exponential weighing in the contribution of each minibatch. The forgetting factor is \u03bb \u2208 (0, 1] specifies the amount of forgetting. When \u03bb = 1 this reduces to normal MPMP (no forgetting), when \u03bb = 0, we completely forget the previous minibatch and process the new one from scratch. c ): as a single batch with damping \u03b1 = 0.8 and using 100 epochs (each factor is updated 100 times); Fig. 6 .(d): with minibatches of 5 images, no damping, \u03bb = 0.95 and using 100 epochs; Fig. 6 .(e): with minibatches of 5 images, no damping, \u03bb = 0.95, using a single epoch, but using 3000 images, so that running time is the same.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_000177fb",
+                "title": "MULTI-LAYER HCN: SYNTHETIC DATA",
+                "blocks": [
+                    {
+                        "block_id": "b_7a1513f4",
+                        "type": "paragraph",
+                        "text": "We create a dataset by combining two traits: a) either a square (with four holes) or a circle and b) either a forward or a backward diagonal line. This results in four patterns, which we group in two categories, see Fig. 7 .(a). Categories are chosen such that we cannot decide the label of an image based only on one of the traits. The position of the traits is jittered within a 3 \u00d7 3 window, and after combining them, the position of the individual pixels is also jittered by the same amount. Finally, each pixel is flipped with probability 10 -3 . This sampling procedure corresponds a 2-layer HCN sampling for some parameterization. We generate 100 training samples and 10000 test samples.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4321f1fa",
+                "title": "UNSUPERVISED LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_5b9035a5",
+                        "type": "paragraph",
+                        "text": "We train the HCN as described in Section C on the 100 training data samples, not using any label information. We do set the architecture of the network to match the architecture generating the data. There are four hyperparameters in this model, p 01 , p 10 , p 1 W , p 2 W . Their selection is not critical. We will choose them to match the generation process. MAP inference does discover and disentangle almost perfectly the compositional parts at the first and second layers of the hierarchy, see Figs. 7.(b) and 8.(a). In 8.(a), rows correspond with templates and columns correspond to each of the features of the first layer. We can see that the model has \"understood\" the data and can be used to generate more samples from it. Performing inference on this model is very challenging. We are not aware of any previous method that can learn the features of this simple dataset with so few samples. In other experiments we verified that, using local message passing as opposed to gradient descent was critical to successfully minimize our objective function. Results with the quality of Figs. 7.(b) and 8.(a) were obtained in every run of the algorithm. Running time is 7 min on a single CPU.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fca48eb7",
+                        "type": "paragraph",
+                        "text": "We can now clamp the discovered weights on both layers and use the fast forward pass to classify each training image as belonging to one of the four discovered templates (i.e., cluster them). We can even classify the test images as belonging to one of the four templates. When doing this, all the images in the training set get assigned to the right template and only 60 out of 10000 images in the test set do not get classified in the right cluster. This means that if we had just 4 labeled images, one from each cluster, we could perform 4-class minimally-supervised classification with just 0.6% error.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a150e80f",
+                        "type": "paragraph",
+                        "text": "Finally, we run a single forward-backward pass of the inference algorithm on a test image with missing pixels. We show the inferred missing pixels in Fig. 7 .(c). See also footnote 10.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ffe413a4",
+                "title": "SUPERVISED LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_05695667",
+                        "type": "paragraph",
+                        "text": "Now we retrain the model using label information. This results in the same weights being found, but this time the templates are properly grouped in two classes, as shown in Fig. 8 .(a). Classification error on the test set is very low, 0.07%. We now compare the HCN classification performance with that of a CNN with the same functional form but trained discriminatively and with a standard CNN with ReLU activations, a densely connected layer and softmax activation. We minimize the crossentropy loss function with L 2 regularization on the weights. The test errors are respectively 0.5% and 2.5%, much larger than those of HCN. We then consider versions of our training set with different levels of pixel-flipping noise. The evolution of the test error is shown in Fig. 8 .(c). For the competing methods we needed many random restarts to obtain good results. Their regularization parameter was chosen based on the test set performance.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3b2c70c1",
+                "title": "MULTI-LAYER HCN: MNIST DATA",
+                "blocks": [
+                    {
+                        "block_id": "b_6cc5b8c2",
+                        "type": "paragraph",
+                        "text": "We turn now to a problem with real data, the MNIST database (LeCun et al., 1998) , which contains 60000/10000 training/testing images of size 28 \u00d7 28. We want to generalize from very few samples, so we only use the first 40 digits of each category to train. We pre-process each image with a fixed set of 16 oriented filters, so that the inputs are a 16-channel image. We use a 2-layer HCN with 32 templates per class and 64 lower level features of size 26 \u00d7 26 and two layers of 3 \u00d7 3 pooling, p 1 W = 0.001, p 2 W = 0.05. These values are set a priori, not optimized. Then we test on both the regular MNIST training set and different corrupted versions 12 of it (same preprocessing   The training time of HCN scales exactly as that of a CNN. It is linear in each of its architectural parameters: Number of images, number of pixels per image, features at each layer, size of those features, etc. However, the forward and backward passes of an HCN are more complex and optimized code for them is not readily available as it is for a CNN, so a significant constant factor separates the running times of both. Training time for MNIST is around 17 hours on a single CPU. The RAM required to store all the messages for 400 training images in MNIST goes up to around 150GB. To scale to bigger training sets, an online extension (see Section 4.2) needs to be used.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3bf1881e",
+                "title": "CONCLUSIONS AND FUTURE WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_28b9c8a6",
+                        "type": "paragraph",
+                        "text": "We have described the HCN, a hierarchical feature model with a rich prior and provided a novel method to solve the challenging learning problem it poses. The model effectively learns convolutional features and is interpretable and flexible. The learned weights are binary, which is advantageous for storage and computation purposes (Courbariaux et al., 2015; Han et al., 2015) . Future work entails adding more structure to the prior, leveraging more refined MAP inference techniques, exploring other update schedules and further exploiting the generalization-without-retraining capabilities of this model.",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b6"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a717e43b",
+                "title": "A RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_0ea086b9",
+                        "type": "paragraph",
+                        "text": "There is a plethora of previous works that address hierarchical feature learning, usually in the setting or real-valued images, as opposed to binary ones: Fidler et al. (2014) ; Zhu et al. (2008; 2010); Wu et al. (2010); Si & Zhu (2013) ; Poon & Domingos (2011) . Many of those works explicitly use AND-OR graphs, in the same spirit as our work. The most outstanding difference, however, between previous works and HCN is that HCN allows multiple features to overlap, thus creating new compositions. For instance, if feature H is a centered horizontal line and feature V is a centered vertical line, HCN can create a new feature \"cross\" that combines both, and the fact that both are overlapping and sharing a common active pixel (and many common inactive pixels) is properly handled. In contrast, previously cited models cannot overlap features, so they partition the input space and dedicate separate subtrees to each of them, and do so recursively. We can see in Figure 5 , top row, how we can generate 25 different cross variations using only two features. This would not be possible with any of the cited models, which would need to span each combination as a separate feature. This fundamental difference makes HCN combinatorially more powerful, but also less tractable. Both learning and inference become harder because feature reuse introduces the well-known \"explaining away\" phenomenon (Hinton et al., 2006) .",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b31",
+                            "Citation_b30",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_eefa962a",
+                        "type": "paragraph",
+                        "text": "As a side, note the difference between the meaning of \"OR\" as used in the present work and in previous works on AND-OR graphs: what they call \"OR\", is what we term POOL (an exclusive bottom-up OR of elements), whereas HCN has a novel third type of gate, the \"OR\" connection (a non-exclusive, top-down OR of elements) to be able to handle explaining away. Standard AND-OR (or more clearly, AND-POOL) graphs lack the top-down ORing and therefore are not able to handle explaining away.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3173a716",
+                        "type": "paragraph",
+                        "text": "In the compositional hierarchies of Fidler et al. (2014) , the lack of feature reuse allows for inference to be exact, since the graphical model is tree-like. Features are learned using a heuristic that relies on the exact inference, similar in spirit to EM. The AND-OR template learning methods of (Zhu et al., 2008; 2010) use respectively max-margin and incremental concave-convex procedures to optimize a discriminative score. Therefore they require supervision (unlike HCN) and a tractable inference procedure (to make the discriminative score easy to optimize), which again is achieved by not allowing overlapping features. The sum-product networks (SPNs) of (Poon & Domingos, 2011) express features as product nodes. In order to achieve feature overlapping, two product nodes spanning the same set of pixels (but with possibly different activation patterns) should be active simultaneously. This would violate the consistency requirement of SPNs, making HCN a more compact way to express feature overlap 13 (with the price to be paid being lack of exact inference).",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b31"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7618f9aa",
+                        "type": "paragraph",
+                        "text": "The AND-OR template (AOT) learning of (Wu et al., 2010) again cannot deal properly with the generation of superimposed features, having to create new features to handle every combination. In Section B we will compare AOT feature learning and HCN feature learning and check how these limitations make AOT unable to disentangle the generative features.",
+                        "extracted_citations": [
+                            "Citation_b30"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9ac2a23e",
+                        "type": "paragraph",
+                        "text": "Grammars exclude the sharing of sub-parts among multiple objects or object parts in a parse of the scene (Jin & Geman, 2006) , and they limit interpretations to single trees even if those are dynamic (Williams & Adams, 1999). Our graphical model formulation makes the sharing of lower-level features explicit by using local conditional probability distributions for multi-parent interactions, and allows for MAP configurations (i.e, the parse graphs) that are not trees.",
+                        "extracted_citations": [
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_cdfd5695",
+                        "type": "paragraph",
+                        "text": "The deep rendering model (DRM) of Patel et al. ( 2015 ) is, to some extent, a continuous counterpart of the present work. Although DRMs allow for feature overlap, the semantics are different: in HCN the amount of activation of a given pixel is the same whether there are one or many features (causes) activating it, whereas in DRM the activation is proportional to the number of causes. This means that the difference between DRM and HCN is analogous to the difference between principal component analysis and binary matrix factorization: while the first can be solved analytically, the second is hard and not analytically tractable. This results in DRM being more tractable, but less appropriate to handle problems with binary events with multiple causes, such as the ones posed in this paper.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_57fade2a",
+                        "type": "paragraph",
+                        "text": "Two popular approaches to handle learning in generative models, largely independent of the model itself, are variational autoencoders (VAEs) and generative adversarial networks (GANs). We are not aware of any work that uses a VAE or GAN with a generative model like HCN and such an option is unlikely to be straightforward.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d4352d4e",
+                        "type": "paragraph",
+                        "text": "Most common VAEs rely on the reparameterization trick for variance reduction. However, this trick cannot be applied to HCN due to the discrete nature of its variables, and alternative methods would suffer from high variance. Another limitation of VAEs wrt HCN is that they perform a single bottom-up pass and lack of explaining away: HCN combines top-down and bottom-up information in multiple passes, isolating the parent cause of a given activation, instead of activating every possible cause.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d3d47030",
+                        "type": "paragraph",
+                        "text": "GANs need to compute \u2207 W D(G W (\u03b5)) where D(\u2022) is the discriminative network and G W (\u03b5) is a generative network parameterized by the features W . In this case, not only W is binary, but also the generated reconstructions at every layer, so the GAN formulation cannot be applied to HCN as-is.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d3d0e221",
+                        "type": "paragraph",
+                        "text": "One could in principle relax the binary assumption of features and reconstructions and use the GAN paradigm to train a neural network with sigmoidal activations, but it is unclear that the lack of binary variables will still produce proper disentangling (the convolutional extension of NOCA also has this problem due to the use of non-binary features and produces results that are inferior to HCN).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f6eb4458",
+                "title": "B COMBINING WITH GRAYSCALE PREPROCESSING",
+                "blocks": [
+                    {
+                        "block_id": "b_940345ab",
+                        "type": "paragraph",
+                        "text": "The HCN is a binary model. However, to process real-valued data, it can be coupled with an initial grayscale-to-binary preprocessing step to do feature detection. We tested this by generating a grayscale version of our toy data and then computing the bottom-up messages to S 0 by convolving the input image with a filter bank. This is roughly equivalent to replacing the noisy binary channel of HCN with a Gaussian channel. We used 16 preprocessing filters, which means that S 0 has 16 channels. 200 training images (unsupervised) were used. Two filter sizes, 3 \u00d7 3 and 7 \u00d7 7 were tested. We also run the AOT feature learning method of Wu et al. (2010) on the same data for comparison.",
+                        "extracted_citations": [
+                            "Citation_b30"
+                        ]
+                    },
+                    {
+                        "block_id": "b_95906de4",
+                        "type": "paragraph",
+                        "text": "The results of training on 200 training images (unsupervised) is provided in Figure 10 . When the larger filter is used, the diagonal bars are harder to identify so their disentangling is poorer.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2ec467f8",
+                "title": "C MAX-PRODUCT MESSAGE PASSING (MPMP)",
+                "blocks": [
+                    {
+                        "block_id": "b_1d0a4e96",
+                        "type": "paragraph",
+                        "text": "The HCN model can be expressed both as a directed Bayesian network or as a factor graph using only POOL, AND, and OR factors, each involving a small number of local binary variables. Both learning and ulterior classification can be cast as MAP inference in this factor graph. Other tasks, such as filling in unknown image data can also be performed by MAP inference.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eabe3591",
+                        "type": "paragraph",
+                        "text": "MAP inference can be performed exactly on factor graphs without loops (trees) in linear time, but it is an NP-hard problem for arbitrary graphs (Shimony, 1994) . The factor graph describing our model is highly structured, but also very loopy.",
+                        "extracted_citations": [
+                            "Citation_b24"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8429dce0",
+                        "type": "paragraph",
+                        "text": "There is large body of works (Wang & Daphne, 2013; Meltzer et al., 2009; Globerson & Jaakkola, 2008; Kolmogorov, 2006; Werner, 2007) , addressing the problem of MAP inference in loopy factor graphs. Perhaps the simplest of these methods is the max-product algorithm, a variant of dynamic programming proposed in (Pearl, 1988) to find the MAP configuration in trees.",
+                        "extracted_citations": [
+                            "Citation_b27",
+                            "Citation_b16",
+                            "Citation_b3",
+                            "Citation_b13",
+                            "Citation_b28",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c98756fc",
+                        "type": "paragraph",
+                        "text": "The max-product algorithm defines a set of messages m a\u2192i (y i ) going from each factor a to each of its variables y i . The sum of the messages incoming to a variable \u00b5(y i ) = a:yi\u2208ya m a\u2192i (y i ) defines its approximate max-marginal 14 \u00b5(y i ). The max-product algorithm then proceeds by updating the outgoing messages from each factor in turn so as to make the approximate max-marginals consistent with that factor. This algorithm is not guaranteed to converge if there are loops in the graph, and if it does, it is not guaranteed to find the MAP configuration. Damping the updates of the factors has been shown to improve convergence in loopy belief propagation (Heskes, 2002) and was justified as local divergence minimization in (Minka et al., 2005) . Using a damping factor 0 < \u03b1 \u2264 1 for max-product, the update rule is m t+1 a\u2192i (y i ) = (1 -\u03b1)m t a\u2192i (y i ) + \u03b1 max y a\\i log \u03c6 a (y i , y a\\i ) + yj \u2208y a\\i m t a\u2192j (y j ) + \u03ba (3) and the original update rule is recovered for \u03b1 = 1. The value \u03ba is arbitrary and does not affect the algorithm. We select it to make m t+1 a\u2192i (y i = 0) = 0, so that messages can be stored as a single scalar. When storing messages in this way, their sum provides the max-marginal difference, which is enough for our purposes.",
+                        "extracted_citations": [
+                            "Citation_b7",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_47558c5e",
+                        "type": "paragraph",
+                        "text": "Eq. ( 3 ) can be computed exactly for the three type of factors appearing in our graph, so message updating can be performed in closed form. Despite the graph of our model being very loopy, it turns out that a careful choice of message initialization, damping and parallel and sequential updates produces satisfactory results in our experiments. For further details about max-product inference and MAP inference via message passing in discrete graphical models we refer the reader to (Koller & Friedman, 2009) .",
+                        "extracted_citations": [
+                            "Citation_b12"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1ad0dd1e",
+                "title": "D MAX-PRODUCT MESSAGE UPDATES FOR AND, OR AND POOL FACTORS",
+                "blocks": [
+                    {
+                        "block_id": "b_692c0a58",
+                        "type": "paragraph",
+                        "text": "In the following we provide the message update equations for the different types of factors used in the main paper. The messages are in normalized form: each message is a single scalar and corresponds to the difference between the unnormalized message value evaluated at 1 and the unnormalized message value evaluated at 0. For each update we assume that the incoming messages m IN (\u2022) for all the variables of the factor are available. The incoming messages are the sum of all messages going to that variable except for the one from the factor under consideration.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_761e4a65",
+                        "type": "paragraph",
+                        "text": "The outgoing messages are well-defined even for \u00b1\u221e incoming messages, by taking the corresponding limit in the expressions below.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Variational algorithms for approximate Bayesian inference Matthew James Beal 2003 University of London London",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Binaryconnect: Training deep neural networks with binary weights during propagations Matthieu Courbariaux Yoshua Bengio Jean-Pierre David Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Learning a hierarchical compositional shape vocabulary for multi-class object representation Sanja Fidler Marko Boben Ales Leonardis arXiv:1408.5516 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Fixing max-product: Convergent message passing algorithms for MAP LP-relaxations Amir Globerson Tommi S Jaakkola Advances in Neural Information Processing Systems 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Generative adversarial nets Ian Goodfellow Jean Pouget-Abadie Mehdi Mirza Bing Xu David Warde-Farley Sherjil Ozair Aaron Courville Yoshua Bengio Advances in Neural Information Processing Systems 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Ian J Goodfellow David Warde-Farley Mehdi Mirza Aaron Courville Yoshua Bengio arXiv:1302.4389 2013 Maxout networks. arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Song Han Huizi Mao William J Dally arXiv:1510.00149 Deep compression: Compressing deep neural networks with pruning, trained quantization and huffman coding 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Stable fixed points of loopy belief propagation are local minima of the bethe free energy Tom Heskes Advances in neural information processing systems 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "A fast learning algorithm for deep belief nets Geoffrey E Hinton Simon Osindero Yee-Whye Teh Neural computation 18 7 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Variational probabilistic inference and the qmr-dt network S Tommi Michael I Jaakkola Jordan Journal of artificial intelligence research 10 1999",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Context and hierarchy in a probabilistic image model Ya Jin Stuart Geman IEEE Computer Society Conference on Computer Vision and Pattern Recognition (CVPR'06) IEEE 2006. 2006 2",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Auto-encoding variational bayes P Diederik Max Kingma Welling arXiv:1312.6114 2013 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Probabilistic graphical models: principles and techniques Daphne Koller Nir Friedman 2009 MIT press",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Convergent tree-reweighted message passing for energy minimization. Pattern Analysis and Machine Intelligence Vladimir Kolmogorov IEEE Transactions on 28 10 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Gradient-based learning applied to document recognition Yann Lecun L\u00e9on Bottou Yoshua Bengio Patrick Haffner Proceedings of the IEEE 86 11 1998",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Learning the parts of objects by non-negative matrix factorization D Daniel H Lee Seung Sebastian Nature 401 6755 1999",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Convergent message passing algorithms -a unifying view Talya Meltzer Yair Amir Globerson Weiss UAI Jeff A Bilmes Andrew Y Ng 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "The discrete basis problem Pauli Miettinen Taneli Mielik\u00e4inen Aristides Gionis Gautam Das Heikki Mannila European Conference on Principles of Data Mining and Knowledge Discovery Springer 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Divergence measures and message passing Tom Minka 2005 Technical report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Neural variational inference and learning in belief networks Andriy Mnih Karol Gregor arXiv:1402.0030 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "B Ankit Tan Patel Richard G Nguyen Baraniuk arXiv:1504.00641 A probabilistic theory of deep learning 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Probabilistic reasoning in intelligent systems: networks of plausible inference Judea Pearl Computer Vision Workshops (ICCV Workshops) IEEE 1988. 2011. 2011 Hoifung Poon and Pedro Domingos. Sum-product networks: A new deep architecture",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Boolean matrix factorization and noisy completion via message passing Siamak Ravanbakhsh Barnab\u00e1s P\u00f3czos Russell Greiner 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Deep boltzmann machines Ruslan Salakhutdinov Geoffrey E Hinton AISTATS 2009 1 3",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Zhangzhang Si and Song-Chun Zhu. Learning and-or templates for object recognition and detection Shimony IEEE transactions on pattern analysis and machine intelligence 68 9 1994. 2013 AIJ: Artificial Intelligence",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Noisy-or component analysis and its application to link analysis Tom\u00e1\u0161 \u0160ingliar Milo\u0161 Hauskrecht Journal of Machine Learning Research 7 Oct. 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "The set basis problem is NP-complete. IBM Thomas J J Larry Stockmeyer 1975 Watson Research Division",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Subproblem-tree calibration: A unified approach to max-product message passing Huayan Wang Koller Daphne Proceedings of the 30th International Conference on Machine Learning (ICML-13) the 30th International Conference on Machine Learning (ICML-13) 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "A linear programming approach to max-sum problem: A review Tom\u00e1\u0161 Werner IEEE Trans. Pattern Analysis and Machine Intelligence 29 7 July 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Advances in neural information processing systems K I Christopher Nicholas J Williams Adams 1999 Dts: dynamic trees",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Learning active basis model for object detection and recognition Zhangzhang Ying Nian Wu Haifeng Si Song-Chun Gong Zhu International journal of computer vision 90 2 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Max margin and/or graph learning for parsing the human body Long Zhu Yuanhao Chen Yifei Lu Chenxi Lin Alan Yuille Computer Vision and Pattern Recognition IEEE 2008. 2008 CVPR 2008. IEEE Conference on",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Latent hierarchical structural learning for object detection Long Zhu Yuanhao Chen Alan Yuille William Freeman Computer Vision and Pattern Recognition (CVPR), 2010 IEEE Conference on IEEE 2010",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.5743,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper presents a generative model for binary images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Images are composed by placing a set of binary features at locations in the image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "These features are OR'd together to produce an image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "In a hierarchical variant, features/classes can have a set of possible templates, one of which can be active.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Variables are defined to control which template is present in each layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "A joint probability distribution over both the feature appearance and instance/location variables is defined.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "Overall, the goal of this work is interesting -- it would be satisfying if semantically meaningful features could be extracted, allowing compositionality in a generative model of images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "However, it isn't clear this would necessarily result from the proposed process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Why would the learned features (building blocks) necessarily semantically meaningful?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "In the motivating example of text, rather than discovering letters, features could correspond to many other sub-units (parts of letters), or other features lacking direct semantic meaning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "The current instantiation of the model is limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "It models binary image patterns.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "The experiments are done on synthetic data and MNIST digits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "The method recovers the structure and is effective at classification on synthetic data that are directly compositional.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "On the MNIST data, the test errors are quite large, and worse than a CNN except when synthetic data corruption is added.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "Further work to enhance the ability of the method to handle natural images or naturally occuring data variation would enhance the paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.7005,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "The paper discusses a method to learn interpretable hierarchical template representations from given data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The authors illustrate their approach on binary images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The paper presents a novel technique for extracting interpretable hierarchical template representations based on a small set of standard operations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "It is then shown how a combination of those standard operations translates into a task equivalent to a boolean matrix factorization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "This insight is then used to formulate a message passing technique which was shown to produce accurate results for these types of problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Summary:\n\u2014\u2014\u2014\nThe paper presents an novel formulation for extracting hierarchical template representations that has not been discussed in that form.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Unfortunately the experimental results are on smaller scale data and extension of the proposed algorithm to more natural images seems non-trivial to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "Quality: I think some of the techniques could be described more carefully to better convey the intuition.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Clarity: Some of the derivations and intuitions could be explained in more detail.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Originality: The suggested idea is reasonable but limited to binary data at this point in time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "Significance: Since the experimental setup is somewhat limited according to my opinion, significance is hard to judge.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "Details:\n\u2014\u2014\u2014\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "My main concern is related to the experimental evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "While the discussed approach is valuable, its application seems limited to binary images at this point in time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Can the authors comment?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "There are existing techniques to extract representations of images which the authors may want to mention, e.g., work based on grammars.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.2244,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "This paper presents an approach to learn object representations by composing a set of templates which are leaned from binary images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "In particular, a hierarchical model is learned by combining AND, OR and POOL operations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "Learning is performed by using approximated inference with MAX-product BP follow by a heuristic to threshold activations to be binary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "Learning hierarchical representations that are interpretable is a very interesting topic, and this paper brings some good intuitions in light of modern convolutional neural nets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "I have however, some concerns about the paper:\n\n1) the paper fails to cite and discuss relevant literature and claims to be the first one that is able to learn interpretable parts.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_5",
+                    "text": "I would like to see a discussion of the proposed approach compared to a variety of papers e.g.,:\n\n- Compositional hierarchies of Sanja Fidler\n- AND-OR graphs used by Leo Zhu and Alan Yuille to model objects\n- AND-OR templates of Song-Chun Zhu's group at UCLA \n\nThe claim that this paper is the first to discover such parts should be removed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_6",
+                    "text": "2) The experimental evaluation is limited to very toy datasets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_7",
+                    "text": "The papers I mentioned have been applied to real images (e.g., by using contours to binarize the images).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_8",
+                    "text": "I'll also like to see how good/bad the proposed approach is for classification in more well known benchmarks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_9",
+                    "text": "A comparison to other generative models such as VAE, GANS, etc will also be useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_10",
+                    "text": "3) I'll also like to see a discussion of the relation/differences/advantages of the proposed approach wrt to sum product networks and grammars.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_11",
+                    "text": "Other comments:\n\n- the paper claims that after learning inference is feed-forward, but since message passing is used, it should be a recurrent network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_12",
+                    "text": "- the algorithm and tech discussion should be moved from the appendix to the main paper\n\n- the introduction claims that compression is a prove for understanding.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_13",
+                    "text": "I disagree with this statement, and should be removed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_14",
+                    "text": "- I'll also like to see a discussion relating the proposed approach to the Deep Rendering model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_15",
+                    "text": "- It is not obvious how some of the constraints are satisfied during message passing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_16",
+                    "text": "Also constraints are well known to be difficult to optimize with max product.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_17",
+                    "text": "How do you handle this?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_18",
+                    "text": "- The learning and inference algorithms seems to be very heuristic (e.g., clipping to 1, heuristics on which messages are run).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_19",
+                    "text": "Could you analyze the choices you make?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_20",
+                    "text": "- doing multiple steps of 5) 2) is not a single backward pass \n\nI'll reconsider my score in light of the answers",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.5743,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "This paper presents a generative model for binary images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "Images are composed by placing a set of binary features at locations in the image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "These features are OR'd together to produce an image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "In a hierarchical variant, features/classes can have a set of possible templates, one of which can be active.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "Variables are defined to control which template is present in each layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "A joint probability distribution over both the feature appearance and instance/location variables is defined.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "Overall, the goal of this work is interesting -- it would be satisfying if semantically meaningful features could be extracted, allowing compositionality in a generative model of images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "However, it isn't clear this would necessarily result from the proposed process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "Why would the learned features (building blocks) necessarily semantically meaningful?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "In the motivating example of text, rather than discovering letters, features could correspond to many other sub-units (parts of letters), or other features lacking direct semantic meaning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "The current instantiation of the model is limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_11",
+                    "text": "It models binary image patterns.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_12",
+                    "text": "The experiments are done on synthetic data and MNIST digits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_13",
+                    "text": "The method recovers the structure and is effective at classification on synthetic data that are directly compositional.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_14",
+                    "text": "On the MNIST data, the test errors are quite large, and worse than a CNN except when synthetic data corruption is added.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_15",
+                    "text": "Further work to enhance the ability of the method to handle natural images or naturally occuring data variation would enhance the paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_7",
+            "type": "Human",
+            "liang_alpha_score": 0.5743,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_7_s_0",
+                    "text": "This paper presents a generative model for binary images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_1",
+                    "text": "Images are composed by placing a set of binary features at locations in the image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_2",
+                    "text": "These features are OR'd together to produce an image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_3",
+                    "text": "In a hierarchical variant, features/classes can have a set of possible templates, one of which can be active.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_4",
+                    "text": "Variables are defined to control which template is present in each layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_5",
+                    "text": "A joint probability distribution over both the feature appearance and instance/location variables is defined.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_6",
+                    "text": "Overall, the goal of this work is interesting -- it would be satisfying if semantically meaningful features could be extracted, allowing compositionality in a generative model of images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_7",
+                    "text": "However, it isn't clear this would necessarily result from the proposed process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_8",
+                    "text": "Why would the learned features (building blocks) necessarily semantically meaningful?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_9",
+                    "text": "In the motivating example of text, rather than discovering letters, features could correspond to many other sub-units (parts of letters), or other features lacking direct semantic meaning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_10",
+                    "text": "The current instantiation of the model is limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_11",
+                    "text": "It models binary image patterns.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_12",
+                    "text": "The experiments are done on synthetic data and MNIST digits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_13",
+                    "text": "The method recovers the structure and is effective at classification on synthetic data that are directly compositional.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_14",
+                    "text": "On the MNIST data, the test errors are quite large, and worse than a CNN except when synthetic data corruption is added.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_15",
+                    "text": "Further work to enhance the ability of the method to handle natural images or naturally occuring data variation would enhance the paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_9",
+            "type": "Human",
+            "liang_alpha_score": 0.7005,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_9_s_0",
+                    "text": "The paper discusses a method to learn interpretable hierarchical template representations from given data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_1",
+                    "text": "The authors illustrate their approach on binary images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_2",
+                    "text": "The paper presents a novel technique for extracting interpretable hierarchical template representations based on a small set of standard operations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_3",
+                    "text": "It is then shown how a combination of those standard operations translates into a task equivalent to a boolean matrix factorization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_4",
+                    "text": "This insight is then used to formulate a message passing technique which was shown to produce accurate results for these types of problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_5",
+                    "text": "Summary:\n\u2014\u2014\u2014\nThe paper presents an novel formulation for extracting hierarchical template representations that has not been discussed in that form.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_6",
+                    "text": "Unfortunately the experimental results are on smaller scale data and extension of the proposed algorithm to more natural images seems non-trivial to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_7",
+                    "text": "Quality: I think some of the techniques could be described more carefully to better convey the intuition.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_8",
+                    "text": "Clarity: Some of the derivations and intuitions could be explained in more detail.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_9",
+                    "text": "Originality: The suggested idea is reasonable but limited to binary data at this point in time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_10",
+                    "text": "Significance: Since the experimental setup is somewhat limited according to my opinion, significance is hard to judge.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_11",
+                    "text": "Details:\n\u2014\u2014\u2014\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_12",
+                    "text": "My main concern is related to the experimental evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_13",
+                    "text": "While the discussed approach is valuable, its application seems limited to binary images at this point in time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_14",
+                    "text": "Can the authors comment?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_15",
+                    "text": "There are existing techniques to extract representations of images which the authors may want to mention, e.g., work based on grammars.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_11",
+            "type": "Human",
+            "liang_alpha_score": 0.2244,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_11_s_0",
+                    "text": "This paper presents an approach to learn object representations by composing a set of templates which are leaned from binary images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_1",
+                    "text": "In particular, a hierarchical model is learned by combining AND, OR and POOL operations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_2",
+                    "text": "Learning is performed by using approximated inference with MAX-product BP follow by a heuristic to threshold activations to be binary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_3",
+                    "text": "Learning hierarchical representations that are interpretable is a very interesting topic, and this paper brings some good intuitions in light of modern convolutional neural nets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_4",
+                    "text": "I have however, some concerns about the paper:\n\n1) the paper fails to cite and discuss relevant literature and claims to be the first one that is able to learn interpretable parts.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_5",
+                    "text": "I would like to see a discussion of the proposed approach compared to a variety of papers e.g.,:\n\n- Compositional hierarchies of Sanja Fidler\n- AND-OR graphs used by Leo Zhu and Alan Yuille to model objects\n- AND-OR templates of Song-Chun Zhu's group at UCLA \n\nThe claim that this paper is the first to discover such parts should be removed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_6",
+                    "text": "2) The experimental evaluation is limited to very toy datasets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_7",
+                    "text": "The papers I mentioned have been applied to real images (e.g., by using contours to binarize the images).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_8",
+                    "text": "I'll also like to see how good/bad the proposed approach is for classification in more well known benchmarks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_9",
+                    "text": "A comparison to other generative models such as VAE, GANS, etc will also be useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_10",
+                    "text": "3) I'll also like to see a discussion of the relation/differences/advantages of the proposed approach wrt to sum product networks and grammars.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_11",
+                    "text": "Other comments:\n\n- the paper claims that after learning inference is feed-forward, but since message passing is used, it should be a recurrent network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_12",
+                    "text": "- the algorithm and tech discussion should be moved from the appendix to the main paper\n\n- the introduction claims that compression is a prove for understanding.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_13",
+                    "text": "I disagree with this statement, and should be removed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_14",
+                    "text": "- I'll also like to see a discussion relating the proposed approach to the Deep Rendering model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_15",
+                    "text": "- It is not obvious how some of the constraints are satisfied during message passing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_16",
+                    "text": "Also constraints are well known to be difficult to optimize with max product.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_17",
+                    "text": "How do you handle this?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_18",
+                    "text": "- The learning and inference algorithms seems to be very heuristic (e.g., clipping to 1, heuristics on which messages are run).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_19",
+                    "text": "Could you analyze the choices you make?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_20",
+                    "text": "- doing multiple steps of 5) 2) is not a single backward pass \n\nI'll reconsider my score in light of the answers",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_12",
+            "type": "Human",
+            "liang_alpha_score": 0.5743,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_12_s_0",
+                    "text": "This paper presents a generative model for binary images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_1",
+                    "text": "Images are composed by placing a set of binary features at locations in the image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_2",
+                    "text": "These features are OR'd together to produce an image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_3",
+                    "text": "In a hierarchical variant, features/classes can have a set of possible templates, one of which can be active.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_4",
+                    "text": "Variables are defined to control which template is present in each layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_5",
+                    "text": "A joint probability distribution over both the feature appearance and instance/location variables is defined.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_6",
+                    "text": "Overall, the goal of this work is interesting -- it would be satisfying if semantically meaningful features could be extracted, allowing compositionality in a generative model of images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_7",
+                    "text": "However, it isn't clear this would necessarily result from the proposed process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_8",
+                    "text": "Why would the learned features (building blocks) necessarily semantically meaningful?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_9",
+                    "text": "In the motivating example of text, rather than discovering letters, features could correspond to many other sub-units (parts of letters), or other features lacking direct semantic meaning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_10",
+                    "text": "The current instantiation of the model is limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_11",
+                    "text": "It models binary image patterns.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_12",
+                    "text": "The experiments are done on synthetic data and MNIST digits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_13",
+                    "text": "The method recovers the structure and is effective at classification on synthetic data that are directly compositional.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_14",
+                    "text": "On the MNIST data, the test errors are quite large, and worse than a CNN except when synthetic data corruption is added.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_15",
+                    "text": "Further work to enhance the ability of the method to handle natural images or naturally occuring data variation would enhance the paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_d62fcf83",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_d62fcf83",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_d62fcf83",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_d62fcf83",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_51f203e5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d62fcf83"
+        },
+        {
+            "source": "sec_51f203e5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a6a50211"
+        },
+        {
+            "source": "sec_51f203e5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8c209a60"
+        },
+        {
+            "source": "sec_51f203e5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9c1ec11f"
+        },
+        {
+            "source": "b_229a5419",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_229a5419",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_229a5419",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_51f203e5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_229a5419"
+        },
+        {
+            "source": "sec_51f203e5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_988ea06b"
+        },
+        {
+            "source": "sec_51f203e5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_744c8354"
+        },
+        {
+            "source": "sec_51f203e5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e1cd013"
+        },
+        {
+            "source": "sec_32fd4b18",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b39acf9"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_883586de"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3ba904f5"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fa61dd73"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c19f8722"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7a1ede18"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_253d6287"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e7674284"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d291f693"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f5015995"
+        },
+        {
+            "source": "sec_33160aae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_097e28d6"
+        },
+        {
+            "source": "sec_de398132",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d26133fd"
+        },
+        {
+            "source": "sec_de398132",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f2d6a144"
+        },
+        {
+            "source": "sec_de398132",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0dbcdcb7"
+        },
+        {
+            "source": "sec_fd5c69a2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5a6af984"
+        },
+        {
+            "source": "sec_fd5c69a2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_799293b2"
+        },
+        {
+            "source": "sec_fd5c69a2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a2224064"
+        },
+        {
+            "source": "sec_fd5c69a2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3fa47888"
+        },
+        {
+            "source": "sec_fd5c69a2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8bdeb0d7"
+        },
+        {
+            "source": "sec_1b943888",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07c80802"
+        },
+        {
+            "source": "sec_1b943888",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e0f829d5"
+        },
+        {
+            "source": "sec_1b943888",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eaf8fd13"
+        },
+        {
+            "source": "sec_1b943888",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_96989b70"
+        },
+        {
+            "source": "sec_1b943888",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_27288179"
+        },
+        {
+            "source": "sec_1b943888",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_68cb6b65"
+        },
+        {
+            "source": "sec_1b943888",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fa5842d8"
+        },
+        {
+            "source": "sec_4e11113e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c58f9967"
+        },
+        {
+            "source": "sec_3cfac324",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2e34d1b7"
+        },
+        {
+            "source": "b_8b54c563",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_3cfac324",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8b54c563"
+        },
+        {
+            "source": "b_97a702ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_97a702ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_3cfac324",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_97a702ed"
+        },
+        {
+            "source": "sec_3cfac324",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5d2ab8cf"
+        },
+        {
+            "source": "b_26898ab0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_3cfac324",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_26898ab0"
+        },
+        {
+            "source": "sec_3cfac324",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fb344964"
+        },
+        {
+            "source": "sec_3cfac324",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_46f28c72"
+        },
+        {
+            "source": "b_641dd6b7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_3cfac324",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_641dd6b7"
+        },
+        {
+            "source": "sec_cf8fa2c7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_26e2fe44"
+        },
+        {
+            "source": "sec_cf8fa2c7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cc89a3ea"
+        },
+        {
+            "source": "sec_86852c3b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6a445011"
+        },
+        {
+            "source": "sec_86852c3b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_244f8e63"
+        },
+        {
+            "source": "sec_01538a3d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8df444c5"
+        },
+        {
+            "source": "sec_f20f2226",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d9d86af9"
+        },
+        {
+            "source": "b_6dd4bf2f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_f20f2226",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6dd4bf2f"
+        },
+        {
+            "source": "sec_f20f2226",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0e0d2ea6"
+        },
+        {
+            "source": "sec_e7eb520a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7c5044a4"
+        },
+        {
+            "source": "sec_51cac9fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b2716986"
+        },
+        {
+            "source": "b_0850d205",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_cbb4888e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0850d205"
+        },
+        {
+            "source": "sec_cbb4888e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a3ae58ff"
+        },
+        {
+            "source": "sec_cbb4888e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_af188627"
+        },
+        {
+            "source": "sec_cbb4888e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0fc9b01a"
+        },
+        {
+            "source": "sec_78ee14b7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ecb2efb7"
+        },
+        {
+            "source": "sec_78ee14b7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1f7ade98"
+        },
+        {
+            "source": "sec_000177fb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7a1513f4"
+        },
+        {
+            "source": "sec_4321f1fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5b9035a5"
+        },
+        {
+            "source": "sec_4321f1fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fca48eb7"
+        },
+        {
+            "source": "sec_4321f1fa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a150e80f"
+        },
+        {
+            "source": "sec_ffe413a4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_05695667"
+        },
+        {
+            "source": "b_6cc5b8c2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_3b2c70c1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6cc5b8c2"
+        },
+        {
+            "source": "b_28b9c8a6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_28b9c8a6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_3bf1881e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28b9c8a6"
+        },
+        {
+            "source": "b_0ea086b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_0ea086b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_0ea086b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_0ea086b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ea086b9"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eefa962a"
+        },
+        {
+            "source": "b_3173a716",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_3173a716",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3173a716"
+        },
+        {
+            "source": "b_7618f9aa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7618f9aa"
+        },
+        {
+            "source": "b_9ac2a23e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9ac2a23e"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cdfd5695"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_57fade2a"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d4352d4e"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d3d47030"
+        },
+        {
+            "source": "sec_a717e43b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d3d0e221"
+        },
+        {
+            "source": "b_940345ab",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_f6eb4458",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_940345ab"
+        },
+        {
+            "source": "sec_f6eb4458",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_95906de4"
+        },
+        {
+            "source": "sec_2ec467f8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d0a4e96"
+        },
+        {
+            "source": "b_eabe3591",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_2ec467f8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eabe3591"
+        },
+        {
+            "source": "b_8429dce0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_8429dce0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_8429dce0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_8429dce0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_8429dce0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_8429dce0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_2ec467f8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8429dce0"
+        },
+        {
+            "source": "b_c98756fc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_c98756fc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_2ec467f8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c98756fc"
+        },
+        {
+            "source": "b_47558c5e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_2ec467f8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47558c5e"
+        },
+        {
+            "source": "sec_1ad0dd1e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_692c0a58"
+        },
+        {
+            "source": "sec_1ad0dd1e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_761e4a65"
+        }
+    ]
+}

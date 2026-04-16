@@ -1,0 +1,2370 @@
+{
+    "paper_metadata": {
+        "paper_id": "399",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Accepted",
+        "total_reviews_available": 8
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_051675d7",
+                "title": "INTRODUCTION AND RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_4aa55a7f",
+                        "type": "paragraph",
+                        "text": "1.1 CONDITIONAL COMPUTATION Exploiting scale in both training data and model size has been central to the success of deep learning. When datasets are sufficiently large, increasing the capacity (number of parameters) of neural networks can give much better prediction accuracy. This has been shown in domains such as text (Sutskever et al., 2014; Bahdanau et al., 2014; Jozefowicz et al., 2016; Wu et al., 2016) , images (Krizhevsky et al., 2012; Le et al., 2012) , and audio (Hinton et al., 2012; Amodei et al., 2015) . For typical deep learning models, where the entire model is activated for every example, this leads to a roughly quadratic blow-up in training costs, as both the model size and the number of training examples increase. Unfortunately, the advances in computing power and distributed computation fall short of meeting such demand.",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b4",
+                            "Citation_b24",
+                            "Citation_b37",
+                            "Citation_b27",
+                            "Citation_b28",
+                            "Citation_b19",
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_af113698",
+                        "type": "paragraph",
+                        "text": "Various forms of conditional computation have been proposed as a way to increase model capacity without a proportional increase in computational costs (Davis & Arel, 2013; Bengio et al., 2013; Eigen et al., 2013; Ludovic Denoyer, 2014; Cho & Bengio, 2014; Bengio et al., 2015; Almahairi et al., 2015) . In these schemes, large parts of a network are active or inactive on a per-example basis. The gating decisions may be binary or sparse and continuous, stochastic or deterministic. Various forms of reinforcement learning and back-propagation are proposed for trarining the gating decisions.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b6",
+                            "Citation_b14",
+                            "Citation_b29",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b88c42ef",
+                        "type": "paragraph",
+                        "text": "Figure 1 : A Mixture of Experts (MoE) layer embedded within a recurrent language model. In this case, the sparse gating function selects two experts to perform computations. Their outputs are modulated by the outputs of the gating network.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e47fe7c0",
+                        "type": "paragraph",
+                        "text": "While these ideas are promising in theory, no work to date has yet demonstrated massive improvements in model capacity, training time, or model quality. We blame this on a combination of the following challenges:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f451b72f",
+                        "type": "paragraph",
+                        "text": "\u2022 Modern computing devices, especially GPUs, are much faster at arithmetic than at branching. Most of the works above recognize this and propose turning on/off large chunks of the network with each gating decision.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_107631c0",
+                        "type": "paragraph",
+                        "text": "\u2022 Large batch sizes are critical for performance, as they amortize the costs of parameter transfers and updates. Conditional computation reduces the batch sizes for the conditionally active chunks of the network.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c1757f6c",
+                        "type": "paragraph",
+                        "text": "\u2022 Network bandwidth can be a bottleneck. A cluster of GPUs may have computational power thousands of times greater than the aggregate inter-device network bandwidth. To be computationally efficient, the relative computational versus network demands of an algorithm must exceed this ratio. Embedding layers, which can be seen as a form of conditional computation, are handicapped by this very problem. Since the embeddings generally need to be sent across the network, the number of (example, parameter) interactions is limited by network bandwidth instead of computational capacity.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9d37d983",
+                        "type": "paragraph",
+                        "text": "\u2022 Depending on the scheme, loss terms may be necessary to achieve the desired level of sparsity per-chunk and/or per example. Bengio et al. (2015) use three such terms. These issues can affect both model quality and load-balancing.",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2b571755",
+                        "type": "paragraph",
+                        "text": "\u2022 Model capacity is most critical for very large data sets. The existing literature on conditional computation deals with relatively small image recognition data sets consisting of up to 600,000 images. It is hard to imagine that the labels of these images provide a sufficient signal to adequately train a model with millions, let alone billions of parameters.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ba54b1ef",
+                        "type": "paragraph",
+                        "text": "In this work, we for the first time address all of the above challenges and finally realize the promise of conditional computation. We obtain greater than 1000x improvements in model capacity with only minor losses in computational efficiency and significantly advance the state-of-the-art results on public language modeling and translation data sets.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f5a34aba",
+                "title": "OUR APPROACH: THE SPARSELY-GATED MIXTURE-OF-EXPERTS LAYER",
+                "blocks": [
+                    {
+                        "block_id": "b_70effbd4",
+                        "type": "paragraph",
+                        "text": "Our approach to conditional computation is to introduce a new type of general purpose neural network component: a Sparsely-Gated Mixture-of-Experts Layer (MoE). The MoE consists of a number of experts, each a simple feed-forward neural network, and a trainable gating network which selects a sparse combination of the experts to process each input (see Figure 1 ). All parts of the network are trained jointly by back-propagation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_66fdf084",
+                        "type": "paragraph",
+                        "text": "While the introduced technique is generic, in this paper we focus on language modeling and machine translation tasks, which are known to benefit from very large models. In particular, we apply a MoE convolutionally between stacked LSTM layers (Hochreiter & Schmidhuber, 1997) , as in Figure 1 . The MoE is called once for each position in the text, selecting a potentially different combination of experts at each position. The different experts tend to become highly specialized based on syntax and semantics (see Appendix E Table 9 ). On both language modeling and machine translation benchmarks, we improve on best published results at a fraction of the computational cost.",
+                        "extracted_citations": [
+                            "Citation_b20"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3672be0b",
+                "title": "RELATED WORK ON MIXTURES OF EXPERTS",
+                "blocks": [
+                    {
+                        "block_id": "b_f64b2161",
+                        "type": "paragraph",
+                        "text": "Since its introduction more than two decades ago (Jacobs et al., 1991; Jordan & Jacobs, 1994) , the mixture-of-experts approach has been the subject of much research. Different types of expert architectures hae been proposed such as SVMs (Collobert et al., 2002) , Gaussian Processes (Tresp, 2001; Theis & Bethge, 2015; Deisenroth & Ng, 2015) , Dirichlet Processes (Shahbaba & Neal, 2009) , and deep networks. Other work has focused on different expert configurations such as a hierarchical structure (Yao et al., 2009) , infinite numbers of experts (Rasmussen & Ghahramani, 2002) , and adding experts sequentially (Aljundi et al., 2016) . Garmash & Monz (2016) suggest an ensemble model in the format of mixture of experts for machine translation. The gating network is trained on a pre-trained ensemble NMT model.",
+                        "extracted_citations": [
+                            "Citation_b21",
+                            "Citation_b23",
+                            "Citation_b9",
+                            "Citation_b11",
+                            "Citation_b38",
+                            "Citation_b32",
+                            "Citation_b1",
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5d2a0d38",
+                        "type": "paragraph",
+                        "text": "The works above concern top-level mixtures of experts. The mixture of experts is the whole model. Eigen et al. (2013) introduce the idea of using multiple MoEs with their own gating networks as parts of a deep model. It is intuitive that the latter approach is more powerful, since complex problems may contain many sub-problems each requiring different experts. They also allude in their conclusion to the potential to introduce sparsity, turning MoEs into a vehicle for computational computation.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8990d889",
+                        "type": "paragraph",
+                        "text": "Our work builds on this use of MoEs as a general purpose neural network component. While Eigen et al. (2013) uses two stacked MoEs allowing for two sets of gating decisions, our convolutional application of the MoE allows for different gating decisions at each position in the text. We also realize sparse gating and demonstrate its use as a practical way to massively increase model capacity.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b8100ea5",
+                "title": "THE STRUCTURE OF THE MIXTURE-OF-EXPERTS LAYER",
+                "blocks": [
+                    {
+                        "block_id": "b_047b788b",
+                        "type": "paragraph",
+                        "text": "The Mixture-of-Experts (MoE) layer consists of a set of n \"expert networks\" E 1 , \u2022 \u2022 \u2022 , E n , and a \"gating network\" G whose output is a sparse n-dimensional vector. Figure 1 shows an overview of the MoE module. The experts are themselves neural networks, each with their own parameters.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3af00c91",
+                        "type": "paragraph",
+                        "text": "Although in principle we only require that the experts accept the same sized inputs and produce the same-sized outputs, in our initial investigations in this paper, we restrict ourselves to the case where the models are feed-forward networks with identical architectures, but with separate parameters.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9c2c8c60",
+                        "type": "paragraph",
+                        "text": "Let us denote by G(x) and E i (x) the output of the gating network and the output of the i-th expert network for a given input x. The output y of the MoE module can be written as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_03a7b584",
+                        "type": "paragraph",
+                        "text": "We save computation based on the sparsity of the output of G(x). Wherever G(x) i = 0, we need not compute E i (x). In our experiments, we have up to thousands of experts, but only need to evaluate a handful of them for every example. If the number of experts is very large, we can reduce the branching factor by using a two-level hierarchical MoE. In a hierarchical MoE, a primary gating network chooses a sparse weighted combination of \"experts\", each of which is itself a secondary mixture-of-experts with its own gating network. In the following we focus on ordinary MoEs. We provide more details on hierarchical MoEs in Appendix B.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c9f42620",
+                        "type": "paragraph",
+                        "text": "Our implementation is related to other models of conditional computation. A MoE whose experts are simple weight matrices is similar to the parameterized weight matrix proposed in (Cho & Bengio, 2014) . A MoE whose experts have one hidden layer is similar to the block-wise dropout described in (Bengio et al., 2015) , where the dropped-out layer is sandwiched between fully-activated layers.",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_37319d8d",
+                "title": "GATING NETWORK",
+                "blocks": [
+                    {
+                        "block_id": "b_47b8af64",
+                        "type": "paragraph",
+                        "text": "Softmax Gating: A simple choice of non-sparse gating function (Jordan & Jacobs, 1994) is to multiply the input by a trainable weight matrix W g and then apply the Sof tmax function.",
+                        "extracted_citations": [
+                            "Citation_b23"
+                        ]
+                    },
+                    {
+                        "block_id": "b_dd0f70d3",
+                        "type": "paragraph",
+                        "text": "Noisy Top-K Gating: We add two components to the Softmax gating network: sparsity and noise. Before taking the softmax function, we add tunable Gaussian noise, then keep only the top k values, setting the rest to -\u221e (which causes the corresponding gate values to equal 0). The sparsity serves to save computation, as described above. While this form of sparsity creates some theoretically scary discontinuities in the output of gating function, we have not yet observed this to be a problem in practice. The noise term helps with load balancing, as will be discussed in Appendix A. The amount of noise per component is controlled by a second trainable weight matrix W noise .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f802952b",
+                        "type": "paragraph",
+                        "text": "Training the Gating Network We train the gating network by simple back-propagation, along with the rest of the model. If we choose k > 1, the gate values for the top k experts have nonzero derivatives with respect to the weights of the gating network. This type of occasionally-sensitive behavior is described in (Bengio et al., 2013) with respect to noisy rectifiers. Gradients also backpropagate through the gating network to its inputs. Our method differs here from (Bengio et al., 2015) who use boolean gates and a REINFORCE-style approach to train the gating network. b examples. This causes a naive MoE implementation to become very inefficient as the number of experts increases. The solution to this shrinking batch problem is to make the original batch size as large as possible. However, batch size tends to be limited by the memory necessary to store activations between the forwards and backwards passes. We propose the following techniques for increasing the batch size:",
+                        "extracted_citations": [
+                            "Citation_b6",
+                            "Citation_b5"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f59a1877",
+                "title": "ADDRESSING PERFORMANCE CHALLENGES",
+                "blocks": [
+                    {
+                        "block_id": "b_50a57de2",
+                        "type": "paragraph",
+                        "text": "Mixing Data Parallelism and Model Parallelism: In a conventional distributed training setting, multiple copies of the model on different devices asynchronously process distinct batches of data, and parameters are synchronized through a set of parameter servers. In our technique, these different batches run synchronously so that they can be combined for the MoE layer. We distribute the standard layers of the model and the gating network according to conventional data-parallel schemes, but keep only one shared copy of each expert. Each expert in the MoE layer receives a combined batch consisting of the relevant examples from all of the data-parallel input batches. The same set of devices function as data-parallel replicas (for the standard layers and the gating networks) and as model-parallel shards (each hosting a subset of the experts). If the model is distributed over d devices, and each device processes a batch of size b, each expert receives a batch of approximately kbd n examples. Thus, we achieve a factor of d improvement in expert batch size. In the case of a hierarchical MoE (Section B), the primary gating network employs data parallelism, and the secondary MoEs employ model parallelism. Each secondary MoE resides on one device. This technique allows us to increase the number of experts (and hence the number of parameters) by proportionally increasing the number of devices in the training cluster. The total batch size increases, keeping the batch size per expert constant. The memory and bandwidth requirements per device also remain constant, as do the step times, as does the amount of time necessary to process a number of training examples equal to the number of parameters in the model. It is our goal to train a trillionparameter model on a trillion-word corpus. We have not scaled our systems this far as of the writing of this paper, but it should be possible by adding more hardware.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_98ea12f5",
+                        "type": "paragraph",
+                        "text": "Taking Advantage of Convolutionality: In our language models, we apply the same MoE to each time step of the previous layer. If we wait for the previous layer to finish, we can apply the MoE to all the time steps together as one big batch. Doing so increases the size of the input batch to the MoE layer by a factor of the number of unrolled time steps.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f4fbf05b",
+                        "type": "paragraph",
+                        "text": "Increasing Batch Size for a Recurrent MoE: We suspect that even more powerful models may involve applying a MoE recurrently. For example, the weight matrices of a LSTM or other RNN could be replaced by a MoE. Sadly, such models break the convolutional trick from the last paragraph, since the input to the MoE at one timestep depends on the output of the MoE at the previous timestep. Gruslys et al. (2016) describe a technique for drastically reducing the number of stored activations in an unrolled RNN, at the cost of recomputing forward activations. This would allow for a large increase in batch size.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_35ee99b3",
+                "title": "NETWORK BANDWIDTH",
+                "blocks": [
+                    {
+                        "block_id": "b_f80ef062",
+                        "type": "paragraph",
+                        "text": "Another major performance concern in distributed computing is network bandwidth. Since the experts are stationary (see above) and the number of gating parameters is small, most of the communication involves sending the inputs and outputs of the experts across the network. To maintain computational efficiency, the ratio of an expert's computation to the size of its input and output must exceed the ratio of computational to network capacity of the computing device. For GPUs, this may be thousands to one. In our experiments, we use experts with one hidden layer containing thousands of RELU-activated units. Since the weight matrices in the expert have sizes input_size\u00d7hidden_size and hidden_size \u00d7 output_size, the ratio of computation to input and output is equal to the size of the hidden layer. Conveniently, we can increase computational efficiency simply by using a larger hidden layer, or more hidden layers.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a76af5b5",
+                "title": "BALANCING EXPERT UTILIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_9245c455",
+                        "type": "paragraph",
+                        "text": "We have observed that the gating network tends to converge to a state where it always produces large weights for the same few experts. This imbalance is self-reinforcing, as the favored experts are trained more rapidly and thus are selected even more by the gating network. Eigen et al. (2013) describe the same phenomenon, and use a hard constraint at the beginning of training to avoid this local minimum. Bengio et al. (2015) include a soft constraint on the batch-wise average of each gate. 1 We take a soft constraint approach. We define the importance of an expert relative to a batch of training examples to be the batchwise sum of the gate values for that expert. We define an additional loss L importance , which is added to the overall loss function for the model. This loss is equal to the square of the coefficient of variation of the set of importance values, multiplied by a hand-tuned scaling factor w importance . This additional loss encourages all experts to have equal importance. Previous State-of-the-Art: The best previously published results (Jozefowicz et al., 2016) use models consisting of one or more stacked Long Short-Term Memory (LSTM) layers (Hochreiter & Schmidhuber, 1997; Gers et al., 2000) . The number of parameters in the LSTM layers of these models vary from 2 million to 151 million. Quality increases greatly with parameter count, as do computational costs. Results for these models form the top line of Figure 2 -right.",
+                        "extracted_citations": [
+                            "Citation_b14",
+                            "Citation_b5",
+                            "Citation_b24",
+                            "Citation_b20",
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_20298c71",
+                        "type": "paragraph",
+                        "text": "MoE Models: Our models consist of two stacked LSTM layers with a MoE layer between them (see Figure 1 ). We vary the sizes of the layers and the number of experts.  Varied Computation, High Capacity: In addition to the largest model from the previous section, we trained two more MoE models with similarly high capacity (4 billion parameters), but higher computation budgets. These models had larger LSTMs, and fewer but larger experts. Details can 1 compares the results of these models to the best previously-published result on this dataset .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ec849ea3",
+                        "type": "paragraph",
+                        "text": "Even the fastest of these models beats the best published result (when controlling for the number of training epochs), despite requiring only 6% of the computation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ee31d7c1",
+                        "type": "paragraph",
+                        "text": "Computational Efficiency: We trained our models using TensorFlow (Abadi et al., 2016) on clusters containing 16-32 Tesla K40 GPUs. For each of our models, we determine computational efficiency in TFLOPS/GPU by dividing the number of floating point operations required to process one training batch by the observed step time and the number of GPUs in the cluster. The operation counts used here are higher than the ones we report in our ops/timestep numbers in that we include the backwards pass, we include the importance-sampling-based training of the softmax layer, and we count a multiply-and-add as two separate operations. For all of our MoE models, the floating point operations involved in the experts represent between 37% and 46% of the total.",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fceeea7d",
+                        "type": "paragraph",
+                        "text": "For our baseline models wtih no MoE, observed computational efficiency ranged from 1.07-1.29 TFLOPS/GPU. For our low-computation MoE models, computation efficiency ranged from 0.74-0.90 TFLOPS/GPU, except for the 4-expert model which did not make full use of the available parallelism. Our highest-computation MoE model was more efficient at 1.56 TFLOPS/GPU, likely due to the larger matrices. These numbers represent a significant fraction of the theoretical maximum of 4.29 TFLOPS/GPU claimed by NVIDIA. Detailed results are in Appendix C, Table 7 .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_eeed4402",
+                "title": "100 BILLION WORD GOOGLE NEWS CORPUS",
+                "blocks": [
+                    {
+                        "block_id": "b_d1289ee3",
+                        "type": "paragraph",
+                        "text": "Figure 3 : Language modeling on a 100 billion word corpus. Models have similar computational budgets (8 million ops/timestep).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4e4e9e9a",
+                        "type": "paragraph",
+                        "text": "On the 1-billion-word corpus, adding additional capacity seems to produce diminishing returns as the number of parameters in the MoE layer exceeds 1 billion, as can be seen in Figure 2 -left. We hypothesized that for a larger training set, even higher capacities would produce significant quality improvements.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a5c08f27",
+                        "type": "paragraph",
+                        "text": "We constructed a similar training set consisting of shuffled unique sentences from Google's internal news corpus, totalling roughly 100 billion words. Similarly to the previous section, we tested a series of models with similar computational costs of about 8 million ops/timestep. Even at 65536 experts (99.994% layer sparsity), computational efficiency for the model stays at a respectable 0.72 TFLOPS/GPU.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_46d086f1",
+                "title": "MACHINE TRANSLATION (SINGLE LANGUAGE PAIR)",
+                "blocks": [
+                    {
+                        "block_id": "b_d2c03de4",
+                        "type": "paragraph",
+                        "text": "Model Architecture: Our model was a modified version of the GNMT model described in (Wu et al., 2016) . To reduce computation, we decreased the number of LSTM layers in the encoder and decoder from 9 and 8 to 3 and 2 respectively. We inserted MoE layers in both the encoder (between layers 2 and 3) and the decoder (between layers 1 and 2). Each MoE layer contained up to 2048 experts each with about two million parameters, adding a total of about 8 billion parameters to the models. Further details on model architecture, testing procedure and results can be found in Appendix E.",
+                        "extracted_citations": [
+                            "Citation_b37"
+                        ]
+                    },
+                    {
+                        "block_id": "b_08e744be",
+                        "type": "paragraph",
+                        "text": "Datasets: We benchmarked our method on the WMT'14 En\u2192Fr and En\u2192De corpora, whose training sets have 36M sentence pairs and 5M sentence pairs, respectively. The experimental protocols were also similar to those in (Wu et al., 2016) : newstest2014 was used as the test set to compare against previous work (Luong et al., 2015a; Zhou et al., 2016; Wu et al., 2016) , while the combination of newstest2012 and newstest2013 was used as the development set. We also tested the same model on Google's Production English to French data. (Wu et al., 2016) 2.79 39.22 214M 278M 6 days/96 k80s GNMT+RL (Wu et al., 2016) 2.96 39.92 214M 278M 6 days/96 k80s PBMT (Durrani et al., 2014) 37.0 LSTM (6-layer) (Luong et al., 2015b) 31.5 LSTM (6-layer+PosUnk) (Luong et al., 2015b) 33.1 DeepAtt (Zhou et al., 2016) 37.7 DeepAtt+PosUnk (Zhou et al., 2016) 39.2 (Wu et al., 2016) 8.08 24.66 214M 278M 1 day/96 k80s PBMT (Durrani et al., 2014) 20.7 DeepAtt (Zhou et al., 2016) 20.6 Results: Tables 2, 3 , and 4 show the results of our largest models, compared with published results. Our approach achieved BLEU scores of 40.56 and 26.03 on the WMT'14 En\u2192Fr and En\u2192De benchmarks. As our models did not use RL refinement, these results constitute significant gains of 1.34 and 1.12 BLEU score on top of the strong baselines in (Wu et al., 2016) . The perplexity scores are also better. 2 On the Google Production dataset, our model achieved 1.01 higher test BLEU score even after training for only one sixth of the time.",
+                        "extracted_citations": [
+                            "Citation_b37",
+                            "Citation_b40",
+                            "Citation_b37",
+                            "Citation_b37",
+                            "Citation_b37",
+                            "Citation_b13",
+                            "Citation_b40",
+                            "Citation_b40",
+                            "Citation_b37",
+                            "Citation_b13",
+                            "Citation_b40",
+                            "Citation_b37"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ed8fe85a",
+                "title": "MULTILINGUAL MACHINE TRANSLATION",
+                "blocks": [
+                    {
+                        "block_id": "b_02c604b8",
+                        "type": "paragraph",
+                        "text": "Dataset: (Johnson et al., 2016 ) train a single GNMT (Wu et al., 2016) model on a very large combined dataset of twelve language pairs. Results are somewhat worse than those for 12 separately trained single-pair GNMT models. This is not surprising, given that the twelve models have 12 times the capacity and twelve times the aggregate training of the one model. We repeat this experiment with a single MoE-augmented model. E for details on model architecture. We train our model on the same dataset as (Johnson et al., 2016) and process the same number of training examples (about 3 billion sentence pairs). Our training time was shorter due to the lower computational budget of our model.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b37",
+                            "Citation_b22"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cf4e275e",
+                "title": "Results:",
+                "blocks": [
+                    {
+                        "block_id": "b_112fc0a2",
+                        "type": "paragraph",
+                        "text": "Results for the single-pair GNMT models, the multilingual GNMT model and the multilingual MoE model are given in Table 5 . The MoE model achieves 19% lower perplexity on the dev set than the multilingual GNMT model. On BLEU score, the MoE model significantly beats the multilingual GNMT model on 11 of the 12 language pairs (by as much as 5.84 points), and even beats the monolingual GNMT models on 8 of 12 language pairs. The poor performance on English \u2192 Korean seems to be a result of severe overtraining, as for the rarer language pairs a small number of real examples were highly oversampled in the training corpus.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e3a4f8cb",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_6d6f6d27",
+                        "type": "paragraph",
+                        "text": "This work is the first to demonstrate major wins from conditional computation in deep networks. We carefully identified the design considerations and challenges of conditional computing and addressed them with a combination of algorithmic and engineering solutions. While we focused on text, conditional computation may help in other domains as well, provided sufficiently large training sets. We look forward to seeing many novel implementations and applications of conditional computation in the years to come.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a8e9d837",
+                "title": "APPENDICES A LOAD-BALANCING LOSS",
+                "blocks": [
+                    {
+                        "block_id": "b_b5dcb0a8",
+                        "type": "paragraph",
+                        "text": "As discussed in section 4, for load-balancing purposes, we want to define an additional loss function to encourage experts to receive roughly equal numbers of training examples. Unfortunately, the number of examples received by an expert is a discrete quantity, so it can not be used in backpropagation. Instead, we define a smooth estimator Load(X) of the number of examples assigned to each expert for a batch X of inputs. The smoothness allows us to back-propagate gradients through the estimator. This is the purpose of the noise term in the gating function. We define P (x, i) as the probability that G(x) i is nonzero, given a new random choice of noise on element i, but keeping the already-sampled choices of noise on the other elements. To compute P (x, i), we note that the G(x) i is nonzero if and only if H(x) i is greater than the k th -greatest element of H(x) excluding itself. The probability works out to be:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5f0155ac",
+                        "type": "paragraph",
+                        "text": "Where kth_excluding(v, k, i) means the kth highest component of v, excluding component i. Simplifying, we get:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bfe8ea91",
+                        "type": "paragraph",
+                        "text": "Where \u03a6 is the CDF of the standard normal distribution.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4fb619ac",
+                        "type": "paragraph",
+                        "text": "We can now define the load loss to be the square of the coefficient of variation of the load vector, multiplied by a hand-tuned scaling factor w load .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b11d2444",
+                        "type": "paragraph",
+                        "text": "Initial Load Imbalance: To avoid out-of-memory errors, we need to initialize the network in a state of approximately equal expert load (since the soft constraints need some time to work). To accomplish this, we initialize the matrices W g and W noise to all zeros, which yields no signal and some noise.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a56ed2a1",
+                        "type": "paragraph",
+                        "text": "Experiments: We trained a set of models with identical architecture (the MoE-256 model described in Appendix C), using different values of w importance and w load . We trained each model for 10 epochs, then measured perplexity on the test set. We also measured the coefficients of variation in Importance and Load, as well as ratio of the load on the most overloaded expert to the average load. This last value is significant for load balancing purposes on distributed hardware. All of these metrics were averaged over several training batches. Results: Results are reported in Table 6 . All the combinations containing at least one the two losses led to very similar model quality, where having no loss was much worse. Models with higher values of w load had lower loads on the most overloaded expert.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_27d2e530",
+                "title": "B HIERACHICAL MIXTURE OF EXPERTS",
+                "blocks": [
+                    {
+                        "block_id": "b_f2354254",
+                        "type": "paragraph",
+                        "text": "If the number of experts is very large, we can reduce the branching factor by using a two-level hierarchical MoE. In a hierarchical MoE, a primary gating network chooses a sparse weighted combination of \"experts\", each of which is itself a secondary mixture-of-experts with its own gating network. 3 If the hierarchical MoE consists of a groups of b experts each, we denote the primary gating network by G primary , the secondary gating networks by (G 1 , G 2 ..G a ), and the expert networks by (E 0,0 , E 0,1 ..E a,b ). The output of the MoE is given by:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f81d8b94",
+                        "type": "paragraph",
+                        "text": "Our metrics of expert utilization change to the following:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b429fbf3",
+                        "type": "paragraph",
+                        "text": "Load primary and Load i deonte the Load functions for the primary gating network and i th secondary gating network respectively. X (i) denotes the subset of X for which G primary (x) i > 0.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c2d0ea0e",
+                        "type": "paragraph",
+                        "text": "It would seem simpler to let Load H (X) i,j = Load i (X i ) j , but this would not have a gradient with respect to the primary gating network, so we use the formulation above.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0fde4438",
+                        "type": "paragraph",
+                        "text": "C 1 BILLION WORD LANGUAGE MODELING BENCHMARK -EXPERIMENTAL DETAILS",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0c0b31d1",
+                "title": "C.1 8-MILLION-OPERATIONS-PER-TIMESTEP MODELS",
+                "blocks": [
+                    {
+                        "block_id": "b_4cc528ef",
+                        "type": "paragraph",
+                        "text": "Model Architecture: Our model consists of five layers: a word embedding layer, a recurrent Long Short-Term Memory (LSTM) layer (Hochreiter & Schmidhuber, 1997; Gers et al., 2000) , a MoE layer, a second LSTM layer, and a softmax layer. The dimensionality of the embedding layer, the number of units in each LSTM layer, and the input and output dimensionality of the MoE layer are all equal to 512. For every layer other than the softmax, we apply dropout (Zaremba et al., 2014) to the layer output, dropping each activation with probability DropP rob, otherwise dividing by (1 -DropP rob). After dropout, the output of the previous layer is added to the layer output. This residual connection encourages gradient flow (He et al., 2015) .",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b16",
+                            "Citation_b39",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fbc492e5",
+                        "type": "paragraph",
+                        "text": "MoE Layer Architecture: Each expert in the MoE layer is a feed forward network with one ReLU-activated hidden layer of size 1024 and an output layer of size 512. Thus, each expert contains [512 * 1024] + [1024 * 512] = 1M parameters. The output of the MoE layer is passed through a sigmoid function before dropout. We varied the number of experts between models, using ordinary MoE layers with 4, 32 and 256 experts and hierarchical MoE layers with 256, 1024 and 4096 experts. We call the resulting models MoE-4, MoE-32, MoE-256, MoE-256-h, MoE-1024-h and MoE-4096h. For the hierarchical MoE layers, the first level branching factor was 16, corresponding to the number of GPUs in our cluster. We use Noisy-Top-K Gating (see Section 2.1) with k = 4 for the ordinary MoE layers and k = 2 at each level of the hierarchical MoE layers. Thus, each example is processed by exactly 4 experts for a total of 4M ops/timestep. The two LSTM layers contribute 2M ops/timestep each for the desired total of 8M.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c848fc01",
+                "title": "Computationally-Matched Baselines:",
+                "blocks": [
+                    {
+                        "block_id": "b_226dee52",
+                        "type": "paragraph",
+                        "text": "The MoE-4 model does not employ sparsity, since all 4 experts are always used. In addition, we trained four more computationally-matched baseline models with no sparsity:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9b5c140b",
+                        "type": "paragraph",
+                        "text": "\u2022 MoE-1-Wide: The MoE layer consists of a single \"expert\" containing one ReLU-activated hidden layer of size 4096.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_86b03c84",
+                        "type": "paragraph",
+                        "text": "\u2022 MoE-1-Deep: The MoE layer consists of a single \"expert\" containing four ReLU-activated hidden layers, each with size 1024.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6c91cba7",
+                        "type": "paragraph",
+                        "text": "\u2022 4xLSTM-512: We replace the MoE layer with two additional 512-unit LSTM layers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7b383a71",
+                        "type": "paragraph",
+                        "text": "\u2022 LSTM-2048-512: The model contains one 2048-unit LSTM layer (and no MoE). The output of the LSTM is projected down to 512 dimensions (Sak et al., 2014) . The next timestep of the LSTM receives the projected output. This is identical to one of the models published in (Jozefowicz et al., 2016) . We re-ran it to account for differences in training regimen, and obtained results very similar to the published ones.",
+                        "extracted_citations": [
+                            "Citation_b33",
+                            "Citation_b24"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2e9b585f",
+                        "type": "paragraph",
+                        "text": "Training: The models were trained on a cluster of 16 K40 GPUs using the synchronous method described in Section 3. Each batch consisted of a set of sentences totaling roughly 300,000 words. In the interest of time, we limited training to 10 epochs, (27,000 steps). Training took 12-16 hours for all models, except for MoE-4, which took 18 hours (since all the expert computation was performed on only 4 of 16 GPUs). We used the Adam optimizer (Kingma & Ba, 2015) . The base learning rate was increased linearly for the first 1000 training steps, and decreased after that so as to be proportional to the inverse square root of the step number. The Softmax output layer was trained efficiently using importance sampling similarly to the models in (Jozefowicz et al., 2016) . For each model, we performed a hyper-parmeter search to find the best dropout probability, in increments of 0.1.",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b24"
+                        ]
+                    },
+                    {
+                        "block_id": "b_821cb523",
+                        "type": "paragraph",
+                        "text": "To ensure balanced expert utilization we set w importance = 0.1 and w load = 0.1, as described in Section 4 and Appendix A.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_64058a1e",
+                        "type": "paragraph",
+                        "text": "Results: We evaluate our model using perplexity on the holdout dataset, used by (Chelba et al., 2013; Jozefowicz et al., 2016) . We follow the standard procedure and sum over all the words including the end of sentence symbol. Results are reported in Table 7 . For each model, we report the test perplexity, the computational budget, the parameter counts, the value of DropP rob, and the computational efficiency. model than for the baseline model. It is notable that the measured computational efficiency of the largest model (0.30 TFLOPS/GPU) is very low compared to the other models. This is likely a result of the fact that, for purposes of comparison to the other models, we did not increase the training batch size proportionally to the number of GPUs. For comparison, we include results for a computationally matched baseline model consisting of 4 LSTMs, and for an unpruned 5-gram model with Kneser-Ney smoothing (Kneser & Ney, 1995) . 4",
+                        "extracted_citations": [
+                            "Citation_b7",
+                            "Citation_b24",
+                            "Citation_b26"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_57d55bc4",
+                "title": "E MACHINE TRANSLATION -EXPERIMENTAL DETAILS",
+                "blocks": [
+                    {
+                        "block_id": "b_7080c1e5",
+                        "type": "paragraph",
+                        "text": "Model Architecture for Single Language Pair MoE Models: Our model is a modified version of the GNMT model described in (Wu et al., 2016) . To reduce computation, we decrease the number of LSTM layers in the encoder and decoder from 9 and 8 to 3 and 2 respectively. We insert MoE layers in both the encoder (between layers 2 and 3) and the decoder (between layers 1 and 2). We use an attention mechanism between the encoder and decoder, with the first decoder LSTM receiving output from and providing input for the attention 5 . All of the layers in our model have input and output dimensionality of 512. Our LSTM layers have 2048 hidden units, with a 512-dimensional output projection. We add residual connections around all LSTM and MoE layers to encourage gradient flow (He et al., 2015) . Similar to GNMT, to effectively deal with rare words, we used subword units (also known as \"wordpieces\") (Schuster & Nakajima, 2012) for inputs and outputs in our system.",
+                        "extracted_citations": [
+                            "Citation_b37",
+                            "Citation_b18",
+                            "Citation_b34"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f34a7136",
+                        "type": "paragraph",
+                        "text": "We use a shared source and target vocabulary of 32K wordpieces. We also used the same beam search technique as proposed in (Wu et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b37"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1942e8f9",
+                        "type": "paragraph",
+                        "text": "We Model Architecture for Multilingual MoE Model: We used the same model architecture as for the single-language-pair models, with the following exceptions: We used noisy-top-k gating as described in Section 2.1, not the scheme from Appendix F. The MoE layers in the encoder and decoder are non-hierarchical MoEs with n = 512 experts, and k = 2. Each expert has a larger hidden layer of size 8192. This doubles the amount of computation in the MoE layers, raising the computational budget of the entire model from 85M to 102M ops/timestep.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2125c729",
+                        "type": "paragraph",
+                        "text": "Training: We trained our networks using the Adam optimizer (Kingma & Ba, 2015) . The base learning rate was increased linearly for the first 2000 training steps, held constant for an additional 8000 steps, and decreased after that so as to be proportional to the inverse square root of the step number. For the single-language-pair models, similarly to (Wu et al., 2016) , we applied dropout (Zaremba et al., 2014) to the output of all embedding, LSTM and MoE layers, using DropP rob = 0.4. Training was done synchronously on a cluster of up to 64 GPUs as described in section 3. Each training batch consisted of a set of sentence pairs containing roughly 16000 words per GPU.",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b37",
+                            "Citation_b39"
+                        ]
+                    },
+                    {
+                        "block_id": "b_99da2651",
+                        "type": "paragraph",
+                        "text": "To ensure balanced expert utilization we set w importance = 0.01 and w load = 0.01, as described in Section 4 and Appendix A.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9cc55c64",
+                        "type": "paragraph",
+                        "text": "Results: Tables 2, 3 and 4 in Section 5.3 show comparisons of our results to other published methods. Figure 4 shows test perplexity as a function of number of words in the (training data's) source sentences processed for models with different numbers of experts. As can be seen from the Figure, as we increased the number of experts to approach 2048, the test perplexity of our model continued to improve. We found that the experts indeed become highly specialized by syntax and/or semantics, as can be seen in Table 9 . For example, one expert is used when the indefinite article \"a\" introduces the direct object in a verb phrase indicating importance or leadership.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_58c092f0",
+                "title": "F STRICTLY BALANCED GATING",
+                "blocks": [
+                    {
+                        "block_id": "b_040216d5",
+                        "type": "paragraph",
+                        "text": "Due to some peculiarities in our infrastructure which have since been fixed, at the time we ran some of the machine translation experiments, our models ran faster if every expert received exactly the same batch size. To accommodate this, we used a different gating function which we describe below.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_345786c2",
+                        "type": "paragraph",
+                        "text": "Recall that we define the softmax gating function to be:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8274e7ee",
+                        "type": "paragraph",
+                        "text": "Sparse Gating (alternate formulation): To obtain a sparse gating vector, we multiply G \u03c3 (x) component-wise with a sparse mask M (G \u03c3 (x)) and normalize the output. The mask itself is a function of G \u03c3 (x) and specifies which experts are assigned to each input example: M batchwise (X, m) j,i = 1 if X j,i is in the top m values for to expert i 0 otherwise (18)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a95af557",
+                        "type": "paragraph",
+                        "text": "As our experiments suggest and also observed in (Ioffe & Szegedy, 2015) , using a batchwise function during training (such as M batchwise ) requires modifications to the inference when we may not have a large batch of examples. Our solution to this is to train a vector T of per-expert threshold values to approximate the effects of the batchwise mask. We use the following mask at inference time:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_43b83525",
+                        "type": "paragraph",
+                        "text": "To learn the threshold values, we apply an additional loss at training time which is minimized when the batchwise mask and the threshold mask are identical. (M threshold (x, T ) i -M batchwise (X, m) j,i )(X j,i -T i ) (20)",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_20b1cd5b",
+                "title": "G ATTENTION FUNCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_64f29779",
+                        "type": "paragraph",
+                        "text": "The attention mechanism described in GNMT (Wu et al., 2016) involves a learned \"Attention Function\" A(x i , y j ) which takes a \"source vector\" x i and a \"target vector\" y j , and must be computed for every source time step i and target time step j. In GNMT, the attention function is implemented as a feed forward neural network with a hidden layer of size n. It can be expressed as:",
+                        "extracted_citations": [
+                            "Citation_b37"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0467354f",
+                        "type": "paragraph",
+                        "text": "Where U and W are trainable weight matrices and V is a trainable weight vector.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_849dca08",
+                        "type": "paragraph",
+                        "text": "For performance reasons, in our models, we used a slightly different attention function:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5c715d1e",
+                        "type": "paragraph",
+                        "text": "With our attention function, we can simultaneously compute the attention function on multiple source time steps and multiple target time steps using optimized matrix multiplications. We found little difference in quality between the two functions.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Tensorflow: Large-scale machine learning on heterogeneous distributed systems Mart\u00edn Abadi Ashish Agarwal Paul Barham Eugene Brevdo Zhifeng Chen Craig Citro Gregory S Corrado Andy Davis Jeffrey Dean Matthieu Devin Sanjay Ghemawat Ian J Goodfellow Andrew Harp Geoffrey Irving Michael Isard Yangqing Jia Rafal J\u00f3zefowicz Lukasz Kaiser Manjunath Kudlur Josh Levenberg Dan Man\u00e9 Rajat Monga Sherry Moore Derek Gordon Murray Chris Olah Mike Schuster Jonathon Shlens Benoit Steiner Ilya Sutskever Kunal Talwar Paul A Tucker Vincent Vanhoucke Vijay Vasudevan Fernanda B Vi\u00e9gas Oriol Vinyals Pete Warden Martin Wattenberg Martin Wicke Yuan Yu Xiaoqiang Zheng CoRR, abs/1603.04467 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Expert gate: Lifelong learning with a network of experts Rahaf Aljundi Punarjay Chakravarty Tinne Tuytelaars CoRR, abs/1611.06194 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Dynamic Capacity Networks A N Ballas T Cooijmans Y Zheng H Larochelle A Courville November 2015 ArXiv e-prints",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Dario Amodei Rishita Anubhai Eric Battenberg Carl Case Jared Casper Bryan Catanzaro Jingdong Chen Mike Chrzanowski Adam Coates Greg Diamos Erich Elsen Jesse Engel Linxi Fan Christopher Fougner Tony Han Awni Y Hannun Billy Jun Patrick Legresley Libby Lin Sharan Narang Andrew Y Ng Sherjil Ozair Ryan Prenger Jonathan Raiman Sanjeev Satheesh David Seetapun Shubho Sengupta Yi Wang Zhiqian Wang Chong Wang Bo Xiao Dani Yogatama Jun Zhan Zhenyao Zhu arXiv:1512.02595 End-to-end speech recognition in english and mandarin 2015 2 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Neural machine translation by jointly learning to align and translate Dzmitry Bahdanau Kyunghyun Cho Yoshua Bengio arXiv:1409.0473 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Emmanuel Bengio Pierre-Luc Bacon Joelle Pineau Doina Precup arXiv:1511.06297 Conditional computation in neural networks for faster models 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Estimating or propagating gradients through stochastic neurons for conditional computation Yoshua Bengio Nicholas L\u00e9onard Aaron Courville arXiv:1308.3432 2013 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "One billion word benchmark for measuring progress in statistical language modeling Ciprian Chelba Tomas Mikolov Mike Schuster Qi Ge Thorsten Brants Phillipp Koehn Tony Robinson arXiv:1312.3005 2013 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Exponentially Increasing the Capacity-to-Computation Ratio for Conditional Computation in Deep Learning K Cho Y Bengio June 2014 ArXiv e-prints",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "A parallel mixture of SVMs for very large scale problems Ronan Collobert Samy Bengio Yoshua Bengio Neural Computing 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Low-rank approximations for conditional feedforward computation in deep neural networks Andrew Davis Itamar Arel arXiv:1312.4461 2013 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Distributed Gaussian processes Marc Peter Deisenroth Jun Wei Ng ICML 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Adaptive subgradient methods for online learning and stochastic optimization John Duchi Elad Hazan Yoram Singer 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Edinburgh's phrase-based machine translation systems for wmt-14 Nadir Durrani Barry Haddow Philipp Koehn Kenneth Heafield Proceedings of the Ninth Workshop on Statistical Machine Translation the Ninth Workshop on Statistical Machine Translation 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Learning factored representations in a deep mixture of experts David Eigen Marc'aurelio Ranzato Ilya Sutskever arXiv:1312.4314 2013 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Ensemble learning for multi-source neural machine translation Ekaterina Garmash Christof Monz 2016 In staff.science.uva",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Learning to forget: Continual prediction with lstm Felix A Gers J\u00fcrgen A Schmidhuber Fred A Cummins Neural Computation 2000",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Memory-efficient backpropagation through time Audrunas Gruslys R\u00e9mi Munos Ivo Danihelka Marc Lanctot Alex Graves CoRR, abs/1606.03401 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Deep residual learning for image recognition Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun IEEE Conference on Computer Vision and Pattern Recognition 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Deep neural networks for acoustic modeling in speech recognition: The shared views of four research groups Geoffrey Hinton Li Deng Dong Yu George E Dahl Abdel-Rahman Mohamed Navdeep Jaitly Andrew Senior Vincent Vanhoucke Patrick Nguyen Tara N Sainath IEEE Signal Processing Magazine 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Long short-term memory Sepp Hochreiter J\u00fcrgen Schmidhuber arXiv:1502.03167 Sergey Ioffe and Christian Szegedy. Batch normalization: Accelerating deep network training by reducing internal covariate shift 1997. 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Adaptive mixtures of local experts Robert A Jacobs Michael I Jordan Steven J Nowlan Geoffrey E Hinton Neural Computing 1991",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Google's multilingual neural machine translation system: Enabling zero-shot translation Melvin Johnson Mike Schuster Quoc V Le Maxim Krikun Yonghui Wu Zhifeng Chen Nikhil Thorat Fernanda B Vi\u00e9gas Martin Wattenberg Greg Corrado Macduff Hughes Jeffrey Dean CoRR, abs/1611.04558 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Hierarchical mixtures of experts and the EM algorithm Michael I Jordan Robert A Jacobs Neural Computing 1994",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Exploring the limits of language modeling Rafal Jozefowicz Oriol Vinyals Mike Schuster Noam Shazeer Yonghui Wu arXiv:1602.02410 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Adam: A method for stochastic optimization Diederik Kingma Jimmy Ba ICLR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Improved backingoff for m-gram language modeling Reinhard Kneser Hermann Ney 1995",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Imagenet classification with deep convolutional neural networks Alex Krizhevsky Ilya Sutskever Geoffrey E Hinton NIPS 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Building high-level features using large scale unsupervised learning V Quoc Marc'aurelio Le Rajat Ranzato Matthieu Monga Kai Devin Greg S Chen Jeffrey Corrado Andrew Y Dean Ng ICML 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Patrick Gallinari Ludovic Denoyer arXiv:1410.0510 Deep sequential neural network 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Effective approaches to attentionbased neural machine translation Minh-Thang Luong Hieu Pham Christopher D Manning EMNLP 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Addressing the rare word problem in neural machine translation Minh-Thang Luong Ilya Sutskever Quoc V Le Oriol Vinyals Wojciech Zaremba ACL 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Infinite mixtures of Gaussian process experts Carl Edward Rasmussen Zoubin Ghahramani NIPS 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Long short-term memory recurrent neural network architectures for large scale acoustic modeling Hasim Sak Andrew W Senior Fran\u00e7oise Beaufays INTERSPEECH 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "Babak Shahbaba and Radford Neal. Nonlinear models using dirichlet process mixtures Mike Schuster Kaisuke Nakajima ICASSP 2012. 2009 JMLR",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Sequence to sequence learning with neural networks Ilya Sutskever Oriol Vinyals V Quoc Le NIPS 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b36",
+                "raw_text": "Generative image modeling using spatial LSTMs Lucas Theis Matthias Bethge NIPS, 2015. Volker Tresp. Mixtures of Gaussian Processes. In NIPS 2001",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b37",
+                "raw_text": "Yonghui Wu Mike Schuster Zhifeng Chen Quoc V Le Mohammad Norouzi Wolfgang Macherey Maxim Krikun Yuan Cao Qin Gao Klaus Macherey Jeff Klingner Apurva Shah Melvin Johnson Xiaobing Liu \u0141ukasz Kaiser Stephan Gouws Yoshikiyo Kato Taku Kudo Hideto Kazawa Keith Stevens George Kurian Nishant Patil Wei Wang arXiv:1609.08144 Oriol Vinyals, Greg Corrado, Macduff Hughes, and Jeffrey Dean. Google's neural machine translation system: Bridging the gap between human and machine translation Cliff Young, Jason Smith, Jason Riesa, Alex Rudnick 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b38",
+                "raw_text": "Hierarchical mixture of classification experts uncovers interactions between brain regions Bangpeng Yao Dirk Walther Diane Beck Li Fei-Fei NIPS 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b39",
+                "raw_text": "Wojciech Zaremba Ilya Sutskever Oriol Vinyals arXiv:1409.2329 Recurrent neural network regularization 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b40",
+                "raw_text": "Deep recurrent models with fast-forward connections for neural machine translation Jie Zhou Ying Cao Xuguang Wang Peng Li Wei Xu arXiv:1606.04199 2016 45 3 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b41",
+                "raw_text": "We evaluate our model using perplexity on a holdout dataset. Results are reported in Table 8. Perplexity after 100 billion training words is 39% lower for the 68-billion-parameter MoE Results",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.384,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "We thank the reviewers for their instructive feedback.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "We made a significant effort to improve our work both in terms of presentation and content to reflect the\nreviewers' suggestions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "We believe our latest draft clarifies in detail our contributions with respect to the previous state of the field (e.g., conditional computation).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "The main idea of our paper can be summarized as this:  Massively increasing the capacity of deep networks by employing efficient, general-purpose conditional computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "This idea seems hugely promising and hugely obvious.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "At first glance, it is utterly shocking that no one had successfully implemented it prior to us.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "In practice, however, there are major challenges in achieving high performance and high quality.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "We enumerate these challenges in the introduction section of our new draft.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Our paper discusses how other authors have attacked these challenges, as well as our particular solutions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "While some of our particular solutions (e.g., noisy-top-k gating, the particular batching schemes, the load-balancing loss, even the mixture-of-experts formalism) may not withstand the test of time, our main contribution, which is larger than these particulars, is to prove by example that efficient, general-purpose conditional computation in deep networks is possible and very beneficial.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "As such, this is likely a seminal paper in the field.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "Our apologies for not making this clearer in our first drafts.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "Please re-read our paper with this in mind, and consider updating your reviews accordingly, if appropriate.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "In addition to the major changes described above, we have made several other improvements:\n - We added experimental tests of our balancing losses (see Appendix A).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "- We added computational efficiency metrics (TFLOPS/GPU) to our language modeling experiments (see Tables 1, 7 and 8).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "- We added a set of language modeling experiments on a 100 billion word corpus, using MoE models with up to 137 billion parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "These demonstrate major quality improvements and good computational efficiency up to 68 billion parameters (see Section 5.2).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "- We added a set of experiments on learning a multilingual machine translation model, showing very large improvements over recently published results (see Table 5).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "- We moved some of the less important content to appendices, bringing the paper length down to 9 pages.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.6958,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "I read the paper and I feel the ratings are too low.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "The authors introduce a general-purpose mechanism to scale up neural networks significantly beyond their current size using sparsity of activation, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "by forcing the activation of most neurons in the net to be zero for any given training example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "Firstly, I believe the sheer size of the models successfully trained in this paper warrant an 8 rating all by themselves.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "Secondly, we know historically that sparsity of parameters is among the most important modelling principles in machine learning, being used with great success in e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "Lasso with the l1 penalty, in SVM with the hinge loss and in ConvNets by setting connections outside the receptive field to zero.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "This paper, in addition to sparsity of parameters (neurons in different experts are not connected) employs sparsity of activation, where the computation path is customized for each training example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "It is, as far as I can tell, the first paper to implement this in a practical, scalable and general way for neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "If sparsity of activation turns out to be even a small fraction as important as sparsity of parameters, this paper will have a major impact.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "Thirdly, I love the computational efficiency of the model presented.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "The authors achieve extreme sparsity yet fully utilize their GPUs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_11",
+                    "text": "In particular, the authors design the network in such a way that there are very few connections between active and non-active units.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_12",
+                    "text": "If we have, say, a sparsely activated fully-connected network, most computation would be wasted on network connections that start on active units and end on non-active units.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_13",
+                    "text": "Fourthly, the authors discuss and provide a practical and elegant strategy for large-scale cluster implementation, showcasing their technical sophistication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_14",
+                    "text": "It is perhaps unfortunate that current baseline datasets may not even be able to fully utilize the power of MoE or other to-be-designed networks following similar principles, but models like the one presented here are bound to only become more prominent in the future.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_15",
+                    "text": "I would rate this paper at least 9.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.4758,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "This paper proposes a method for significantly increasing the number of parameters in a single layer while keeping computation in par with (or even less than) current SOTA models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "The idea is based on using a large mixture of experts (MoE) (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "small networks), where only a few of them are adaptively activated via a gating network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "While the idea seems intuitive, the main novelty in the paper is in designing the gating network which is encouraged to achieve two objectives: utilizing all available experts (aka importance), and distributing computation fairly across them (aka load).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "Additionally, the paper introduces two techniques for increasing the batch-size passed to each expert, and hence maximizing parallelization in GPUs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_5",
+                    "text": "Experiments applying the proposed approach on RNNs in language modelling task show that it can beat SOTA results with significantly less computation, which is a result of selectively using much more parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_6",
+                    "text": "Results on machine translation show that a model with more than 30x number of parameters can beat SOTA while incurring half of the effective computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_7",
+                    "text": "I have the several comments on the paper:\n- I believe that the authors can do a better job in their presentation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_8",
+                    "text": "The paper currently is at 11 pages (which is too long in my opinion), but I find that Section 3.2 (the crux of the paper) needs better motivation and intuitive explanation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_9",
+                    "text": "For example, equation 8 deserves more description than currently devoted to it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_10",
+                    "text": "Additional space can be easily regained by moving details in the experiments section (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_11",
+                    "text": "architecture and training details) to the appendix for the curious readers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_12",
+                    "text": "Experiment section can be better organized by finishing on experiment completely before moving to the other one.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_13",
+                    "text": "There are also some glitches in the writing, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_14",
+                    "text": "the end of Section 3.1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_15",
+                    "text": "- The paper is missing some important references in conditional computation (e.g.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_6",
+            "type": "Human",
+            "liang_alpha_score": 0.5232,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": 5
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_6_s_0",
+                    "text": "This paper describes a method for greatly expanding network model size (in terms of number of stored parameters) in the context of a recurrent net, by applying a Mixture of Experts between recurrent net layers that is shared between all time steps.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_1",
+                    "text": "By process features from all timesteps at the same time, the effective batch size to the MoE is increased by a factor of the number of steps in the model; thus even for sparsely assigned experts, each expert can be used on a large enough sub-batch of inputs to remain computationally efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_2",
+                    "text": "Another second technique that redistributes elements within a distributed model is also described, further increasing per-expert batch sizes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_3",
+                    "text": "Experiments are performed on language modeling and machine translation tasks, showing significant gains by increasing the number of experts, compared to both SoA as well as explicitly computationally-matched baseline systems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_4",
+                    "text": "An area that falls a bit short is in presenting plots or statistics on the real computational load and system behavior.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_5",
+                    "text": "While two loss terms were employed to balance the use of experts, these are not explored in the experiments section.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_6",
+                    "text": "It would have been nice to see the effects of these more, along with the effects of increasing effective batch sizes, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_7",
+                    "text": "measurements of the losses over the course of training, compared to the counts/histogram distributions of per-expert batch sizes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_8",
+                    "text": "Overall I think this is a well-described system that achieves good results, using a nifty placement for the MoE that can overcome what otherwise might be a disadvantage for sparse computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_9",
+                    "text": "Small comment:\nI like Fig 3, but it's not entirely clear whether datapoints coincide between left and right plots.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_10",
+                    "text": "The H-H line has 3 points on left but 5 on the right?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_11",
+                    "text": "Also would be nice if the colors matched between corresponding lines.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_12",
+            "type": "Human",
+            "liang_alpha_score": 0.384,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_12_s_0",
+                    "text": "We thank the reviewers for their instructive feedback.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_1",
+                    "text": "We made a significant effort to improve our work both in terms of presentation and content to reflect the\nreviewers' suggestions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_2",
+                    "text": "We believe our latest draft clarifies in detail our contributions with respect to the previous state of the field (e.g., conditional computation).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_3",
+                    "text": "The main idea of our paper can be summarized as this:  Massively increasing the capacity of deep networks by employing efficient, general-purpose conditional computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_4",
+                    "text": "This idea seems hugely promising and hugely obvious.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_5",
+                    "text": "At first glance, it is utterly shocking that no one had successfully implemented it prior to us.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_6",
+                    "text": "In practice, however, there are major challenges in achieving high performance and high quality.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_7",
+                    "text": "We enumerate these challenges in the introduction section of our new draft.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_8",
+                    "text": "Our paper discusses how other authors have attacked these challenges, as well as our particular solutions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_9",
+                    "text": "While some of our particular solutions (e.g., noisy-top-k gating, the particular batching schemes, the load-balancing loss, even the mixture-of-experts formalism) may not withstand the test of time, our main contribution, which is larger than these particulars, is to prove by example that efficient, general-purpose conditional computation in deep networks is possible and very beneficial.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_10",
+                    "text": "As such, this is likely a seminal paper in the field.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_11",
+                    "text": "Our apologies for not making this clearer in our first drafts.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_12",
+                    "text": "Please re-read our paper with this in mind, and consider updating your reviews accordingly, if appropriate.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_13",
+                    "text": "In addition to the major changes described above, we have made several other improvements:\n - We added experimental tests of our balancing losses (see Appendix A).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_14",
+                    "text": "- We added computational efficiency metrics (TFLOPS/GPU) to our language modeling experiments (see Tables 1, 7 and 8).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_15",
+                    "text": "- We added a set of language modeling experiments on a 100 billion word corpus, using MoE models with up to 137 billion parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_16",
+                    "text": "These demonstrate major quality improvements and good computational efficiency up to 68 billion parameters (see Section 5.2).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_17",
+                    "text": "- We added a set of experiments on learning a multilingual machine translation model, showing very large improvements over recently published results (see Table 5).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_18",
+                    "text": "- We moved some of the less important content to appendices, bringing the paper length down to 9 pages.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_13",
+            "type": "Human",
+            "liang_alpha_score": 0.6958,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_13_s_0",
+                    "text": "I read the paper and I feel the ratings are too low.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_1",
+                    "text": "The authors introduce a general-purpose mechanism to scale up neural networks significantly beyond their current size using sparsity of activation, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_2",
+                    "text": "by forcing the activation of most neurons in the net to be zero for any given training example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_3",
+                    "text": "Firstly, I believe the sheer size of the models successfully trained in this paper warrant an 8 rating all by themselves.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_4",
+                    "text": "Secondly, we know historically that sparsity of parameters is among the most important modelling principles in machine learning, being used with great success in e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_5",
+                    "text": "Lasso with the l1 penalty, in SVM with the hinge loss and in ConvNets by setting connections outside the receptive field to zero.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_6",
+                    "text": "This paper, in addition to sparsity of parameters (neurons in different experts are not connected) employs sparsity of activation, where the computation path is customized for each training example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_7",
+                    "text": "It is, as far as I can tell, the first paper to implement this in a practical, scalable and general way for neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_8",
+                    "text": "If sparsity of activation turns out to be even a small fraction as important as sparsity of parameters, this paper will have a major impact.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_9",
+                    "text": "Thirdly, I love the computational efficiency of the model presented.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_10",
+                    "text": "The authors achieve extreme sparsity yet fully utilize their GPUs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_11",
+                    "text": "In particular, the authors design the network in such a way that there are very few connections between active and non-active units.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_12",
+                    "text": "If we have, say, a sparsely activated fully-connected network, most computation would be wasted on network connections that start on active units and end on non-active units.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_13",
+                    "text": "Fourthly, the authors discuss and provide a practical and elegant strategy for large-scale cluster implementation, showcasing their technical sophistication.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_14",
+                    "text": "It is perhaps unfortunate that current baseline datasets may not even be able to fully utilize the power of MoE or other to-be-designed networks following similar principles, but models like the one presented here are bound to only become more prominent in the future.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_15",
+                    "text": "I would rate this paper at least 9.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.4758,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "This paper proposes a method for significantly increasing the number of parameters in a single layer while keeping computation in par with (or even less than) current SOTA models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "The idea is based on using a large mixture of experts (MoE) (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "small networks), where only a few of them are adaptively activated via a gating network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "While the idea seems intuitive, the main novelty in the paper is in designing the gating network which is encouraged to achieve two objectives: utilizing all available experts (aka importance), and distributing computation fairly across them (aka load).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "Additionally, the paper introduces two techniques for increasing the batch-size passed to each expert, and hence maximizing parallelization in GPUs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_5",
+                    "text": "Experiments applying the proposed approach on RNNs in language modelling task show that it can beat SOTA results with significantly less computation, which is a result of selectively using much more parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_6",
+                    "text": "Results on machine translation show that a model with more than 30x number of parameters can beat SOTA while incurring half of the effective computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_7",
+                    "text": "I have the several comments on the paper:\n- I believe that the authors can do a better job in their presentation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_8",
+                    "text": "The paper currently is at 11 pages (which is too long in my opinion), but I find that Section 3.2 (the crux of the paper) needs better motivation and intuitive explanation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_9",
+                    "text": "For example, equation 8 deserves more description than currently devoted to it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_10",
+                    "text": "Additional space can be easily regained by moving details in the experiments section (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_11",
+                    "text": "architecture and training details) to the appendix for the curious readers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_12",
+                    "text": "Experiment section can be better organized by finishing on experiment completely before moving to the other one.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_13",
+                    "text": "There are also some glitches in the writing, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_14",
+                    "text": "the end of Section 3.1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_15",
+                    "text": "- The paper is missing some important references in conditional computation (e.g.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_16",
+            "type": "Human",
+            "liang_alpha_score": 0.5232,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": 5
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_16_s_0",
+                    "text": "This paper describes a method for greatly expanding network model size (in terms of number of stored parameters) in the context of a recurrent net, by applying a Mixture of Experts between recurrent net layers that is shared between all time steps.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_1",
+                    "text": "By process features from all timesteps at the same time, the effective batch size to the MoE is increased by a factor of the number of steps in the model; thus even for sparsely assigned experts, each expert can be used on a large enough sub-batch of inputs to remain computationally efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_2",
+                    "text": "Another second technique that redistributes elements within a distributed model is also described, further increasing per-expert batch sizes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_3",
+                    "text": "Experiments are performed on language modeling and machine translation tasks, showing significant gains by increasing the number of experts, compared to both SoA as well as explicitly computationally-matched baseline systems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_4",
+                    "text": "An area that falls a bit short is in presenting plots or statistics on the real computational load and system behavior.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_5",
+                    "text": "While two loss terms were employed to balance the use of experts, these are not explored in the experiments section.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_6",
+                    "text": "It would have been nice to see the effects of these more, along with the effects of increasing effective batch sizes, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_7",
+                    "text": "measurements of the losses over the course of training, compared to the counts/histogram distributions of per-expert batch sizes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_8",
+                    "text": "Overall I think this is a well-described system that achieves good results, using a nifty placement for the MoE that can overcome what otherwise might be a disadvantage for sparse computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_9",
+                    "text": "Small comment:\nI like Fig 3, but it's not entirely clear whether datapoints coincide between left and right plots.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_10",
+                    "text": "The H-H line has 3 points on left but 5 on the right?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_11",
+                    "text": "Also would be nice if the colors matched between corresponding lines.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_4aa55a7f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_4aa55a7f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_4aa55a7f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_4aa55a7f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_4aa55a7f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_4aa55a7f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_4aa55a7f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_4aa55a7f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4aa55a7f"
+        },
+        {
+            "source": "b_af113698",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_af113698",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_af113698",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_af113698",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_af113698",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_af113698"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b88c42ef"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e47fe7c0"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f451b72f"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_107631c0"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c1757f6c"
+        },
+        {
+            "source": "b_9d37d983",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d37d983"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b571755"
+        },
+        {
+            "source": "sec_051675d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ba54b1ef"
+        },
+        {
+            "source": "sec_f5a34aba",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_70effbd4"
+        },
+        {
+            "source": "b_66fdf084",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_f5a34aba",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_66fdf084"
+        },
+        {
+            "source": "b_f64b2161",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_f64b2161",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_f64b2161",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_f64b2161",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_f64b2161",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "b_f64b2161",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_f64b2161",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_f64b2161",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_3672be0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f64b2161"
+        },
+        {
+            "source": "b_5d2a0d38",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_3672be0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5d2a0d38"
+        },
+        {
+            "source": "b_8990d889",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_3672be0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8990d889"
+        },
+        {
+            "source": "sec_b8100ea5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_047b788b"
+        },
+        {
+            "source": "sec_b8100ea5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3af00c91"
+        },
+        {
+            "source": "sec_b8100ea5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9c2c8c60"
+        },
+        {
+            "source": "sec_b8100ea5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_03a7b584"
+        },
+        {
+            "source": "b_c9f42620",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_b8100ea5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c9f42620"
+        },
+        {
+            "source": "b_47b8af64",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "sec_37319d8d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47b8af64"
+        },
+        {
+            "source": "sec_37319d8d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dd0f70d3"
+        },
+        {
+            "source": "b_f802952b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_f802952b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_37319d8d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f802952b"
+        },
+        {
+            "source": "sec_f59a1877",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_50a57de2"
+        },
+        {
+            "source": "sec_f59a1877",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_98ea12f5"
+        },
+        {
+            "source": "b_f4fbf05b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_f59a1877",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f4fbf05b"
+        },
+        {
+            "source": "sec_35ee99b3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f80ef062"
+        },
+        {
+            "source": "b_9245c455",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_9245c455",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_9245c455",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_9245c455",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_9245c455",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_a76af5b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9245c455"
+        },
+        {
+            "source": "sec_a76af5b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_20298c71"
+        },
+        {
+            "source": "sec_a76af5b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ec849ea3"
+        },
+        {
+            "source": "b_ee31d7c1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_a76af5b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee31d7c1"
+        },
+        {
+            "source": "sec_a76af5b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fceeea7d"
+        },
+        {
+            "source": "sec_eeed4402",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d1289ee3"
+        },
+        {
+            "source": "sec_eeed4402",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4e4e9e9a"
+        },
+        {
+            "source": "sec_eeed4402",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a5c08f27"
+        },
+        {
+            "source": "b_d2c03de4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "sec_46d086f1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d2c03de4"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b40"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b40"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b40"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b40"
+        },
+        {
+            "source": "b_08e744be",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "sec_46d086f1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08e744be"
+        },
+        {
+            "source": "b_02c604b8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_02c604b8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_02c604b8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_ed8fe85a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_02c604b8"
+        },
+        {
+            "source": "sec_cf4e275e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_112fc0a2"
+        },
+        {
+            "source": "sec_e3a4f8cb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6d6f6d27"
+        },
+        {
+            "source": "sec_a8e9d837",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b5dcb0a8"
+        },
+        {
+            "source": "sec_a8e9d837",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5f0155ac"
+        },
+        {
+            "source": "sec_a8e9d837",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bfe8ea91"
+        },
+        {
+            "source": "sec_a8e9d837",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4fb619ac"
+        },
+        {
+            "source": "sec_a8e9d837",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b11d2444"
+        },
+        {
+            "source": "sec_a8e9d837",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a56ed2a1"
+        },
+        {
+            "source": "sec_27d2e530",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f2354254"
+        },
+        {
+            "source": "sec_27d2e530",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f81d8b94"
+        },
+        {
+            "source": "sec_27d2e530",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b429fbf3"
+        },
+        {
+            "source": "sec_27d2e530",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c2d0ea0e"
+        },
+        {
+            "source": "sec_27d2e530",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0fde4438"
+        },
+        {
+            "source": "b_4cc528ef",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_4cc528ef",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_4cc528ef",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b39"
+        },
+        {
+            "source": "b_4cc528ef",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_0c0b31d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4cc528ef"
+        },
+        {
+            "source": "sec_0c0b31d1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fbc492e5"
+        },
+        {
+            "source": "sec_c848fc01",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_226dee52"
+        },
+        {
+            "source": "sec_c848fc01",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9b5c140b"
+        },
+        {
+            "source": "sec_c848fc01",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_86b03c84"
+        },
+        {
+            "source": "sec_c848fc01",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6c91cba7"
+        },
+        {
+            "source": "b_7b383a71",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "b_7b383a71",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_c848fc01",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7b383a71"
+        },
+        {
+            "source": "b_2e9b585f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_2e9b585f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_c848fc01",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2e9b585f"
+        },
+        {
+            "source": "sec_c848fc01",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_821cb523"
+        },
+        {
+            "source": "b_64058a1e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_64058a1e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_64058a1e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_c848fc01",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_64058a1e"
+        },
+        {
+            "source": "b_7080c1e5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_7080c1e5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_7080c1e5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "sec_57d55bc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7080c1e5"
+        },
+        {
+            "source": "b_f34a7136",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "sec_57d55bc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f34a7136"
+        },
+        {
+            "source": "sec_57d55bc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1942e8f9"
+        },
+        {
+            "source": "b_2125c729",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_2125c729",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_2125c729",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b39"
+        },
+        {
+            "source": "sec_57d55bc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2125c729"
+        },
+        {
+            "source": "sec_57d55bc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_99da2651"
+        },
+        {
+            "source": "sec_57d55bc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9cc55c64"
+        },
+        {
+            "source": "sec_58c092f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_040216d5"
+        },
+        {
+            "source": "sec_58c092f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_345786c2"
+        },
+        {
+            "source": "sec_58c092f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8274e7ee"
+        },
+        {
+            "source": "sec_58c092f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a95af557"
+        },
+        {
+            "source": "sec_58c092f0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_43b83525"
+        },
+        {
+            "source": "b_64f29779",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "sec_20b1cd5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_64f29779"
+        },
+        {
+            "source": "sec_20b1cd5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0467354f"
+        },
+        {
+            "source": "sec_20b1cd5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_849dca08"
+        },
+        {
+            "source": "sec_20b1cd5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5c715d1e"
+        }
+    ]
+}

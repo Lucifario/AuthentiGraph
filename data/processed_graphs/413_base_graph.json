@@ -1,0 +1,1611 @@
+{
+    "paper_metadata": {
+        "paper_id": "413",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Accepted",
+        "total_reviews_available": 8
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_78e6bfbe",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_2bcc6137",
+                        "type": "paragraph",
+                        "text": "For most deep-learning architectures, the amount of computation required to process a sample of input data is independent of the contents of that data.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ddb7a370",
+                        "type": "paragraph",
+                        "text": "Natural data tends to contain a great deal of spatial and temporal redundancy. Researchers have taken advantage of such redundancy to design encoding schemes, like jpeg and mpeg, which introduce small compromises to image fidelity in exchange for substantial savings in the amount of memory required to store images and videos.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a11e0200",
+                        "type": "paragraph",
+                        "text": "In neuroscience, it seems clear that that some kind of sparse spatio-temporal coding is going on. Koch et al. (2006) estimate that the human retina transmits 8.75Mbps, which is about the same as compressed 1080p video at 30FPS.",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_20011907",
+                        "type": "paragraph",
+                        "text": "Thus it seems natural to think that perhaps we should be doing this in deep learning. In this paper, we propose a neural network where neurons only communicate discretized changes in their activations to one another. The computational cost of running such a network would be proportional to the amount of change in the input. Neurons send signals when the change in their input accumulates past some threshold, at which point they send a discrete \"spike\" notifying downstream neurons of the change. Such a system has at least two advantages over the conventional way of doing things.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_37ef0eba",
+                        "type": "paragraph",
+                        "text": "1. When extracting features from temporally redundant data, it is much more efficient to communicate the changes in activation than it is to re-process each frame.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3b30a9d4",
+                        "type": "paragraph",
+                        "text": "2. When receiving data asynchronously from different sources (e.g. sensors, or nodes in a distributed network) at different rates, it no longer makes sense to have a global network update.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e2bc357e",
+                        "type": "paragraph",
+                        "text": "We could recompute the network with every new input, reusing the stale inputs from the other sources, but this requires doing a great deal of repeated computation for only small differences in input data. We could keep a history of all inputs and update the network periodically, but then we lose the ability to respond immediately to new inputs. Our approach gets around this ugly tradeoff by allowing for efficient approximate updates of the network given a partial update to the input data. The computational cost of the update is proportional to the effect that the new information has on the network's state.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a61a65d9",
+                        "type": "paragraph",
+                        "text": "Our model contrasts with all of the above in that it is time-agnostic. Although we refer to sending \"temporal differences\" between neurons, our neurons have no concept of time -their is no \"leak\" in neuron potential, and our neurons' behaviour only depends on the order of the inputs. Our work also separates the concepts of nonlinearity and discretization, uses units that communicate differences rather than absolute signal values, and explicitly minimizes an objective function corresponding to computational cost.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_57d5e745",
+                        "type": "paragraph",
+                        "text": "Coming from another corner, Courbariaux et al. describe a scheme for binarizing networks with the aim of achieving reductions in the amount of computation and memory required to run neural nets.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_47e5ac17",
+                        "type": "paragraph",
+                        "text": "They introduce a number of tricks for training binarized neural networks -a normally difficult task due to the lack of gradient information. Esser et al. ( 2016 ) use a similar binarization scheme to efficiently implement a spiking neural network on the IBM TrueNorth chip. Ardakani et al. (2015) take another approach -to approximate real-valued operations of a neural net with a sequence of stochastic integer operations, and show how these can lead to cheaper computation.",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_40eb8c9a",
+                        "type": "paragraph",
+                        "text": "These discretization approaches differ from ours in that they do not aim to take advantage of temporal redundancy in data, but rather aim to find ways of saving computation by learning in a low-precision regime. Ideas from these works could be combined with the ideas presented in this paper.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c07bc11a",
+                        "type": "paragraph",
+                        "text": "The idea of sending quantized temporal differences has been applied to make event-based sensors, such as the Dynamic-Vision Sensor (Lichtsteiner et al., 2008) , which quantize changes in analog pixelvoltages and send out pixel-change events asynchronously. The model we propose in this paper could be used to efficiently process the outputs of such sensors.",
+                        "extracted_citations": [
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_afaae5bd",
+                        "type": "paragraph",
+                        "text": "Finally, our previous work, (O'Connor and Welling, 2016) develops a method for doing backpropagation with the same type of time-agnostic spiking neurons we use here. In this paper, we do not aim to train the network from scratch, but instead focus on how we can compute efficiently by sending temporal differences between neurons.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_30675d8a",
+                "title": "THE SIGMA-DELTA NETWORK",
+                "blocks": [
+                    {
+                        "block_id": "b_4855de7d",
+                        "type": "paragraph",
+                        "text": "In this Section, we describe how we start with a traditional deep neural network and apply two modifications -temporal-difference communication and rounding -to create the Sigma-Delta network. To explain the network, we follow the Figure 1 from top to bottom, starting with a standard deep network and progressing to our Sigma-Delta network. Here, we will think of the forward pass of a neural network as composition of subfunctions:",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_73e41bed",
+                "title": "TEMPORAL DIFFERENCE NETWORK",
+                "blocks": [
+                    {
+                        "block_id": "b_be381b7d",
+                        "type": "paragraph",
+                        "text": "We now define \"temporal difference\" (\u2206 T ) and \"temporal integration\" (\u03a3 T ) modules as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4e98221b",
+                        "type": "paragraph",
+                        "text": "Algorithm 1 Temporal Difference (\u2206 T ):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c53596d3",
+                        "type": "paragraph",
+                        "text": "Algorithm 2 Temporal Integration (\u03a3 T ):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6e77c0df",
+                        "type": "paragraph",
+                        "text": "So that when presented with a sequence of inputs x 1 , ...",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dad08fdd",
+                        "type": "paragraph",
+                        "text": "It should be noted that when we refer to \"temporal differences\", we refer not to the change in the signal over time, but in the change between two inputs presented sequentially. The output of our network only depends on the value and order of inputs, not on the temporal spacing between them. This distinction only matters when dealing with asynchronous inputs such as the Dynamic Vision Sensor, (Lichtsteiner et al., 2008) , which are not considered in this paper.",
+                        "extracted_citations": [
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e742bbbc",
+                        "type": "paragraph",
+                        "text": "Since \u03a3 T (\u2206 T (x t )) = x t , we can insert \u03a3 T \u2022 \u2206 T pairs into the network without affecting the function. So we can re-express our network function as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_172898be",
+                        "type": "paragraph",
+                        "text": "Now suppose our network consists of alternating linear functions w(x), and nonlinear functions h(x), so that f",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3cd65ace",
+                        "type": "paragraph",
+                        "text": "As before, we can harmlessly insert our \u03a3 T \u2022 \u2206 T pairs into the network. But this time, note that for a linear function w(x), the operations (\u03a3 T , w, \u2206 T ) all commute with one another. That is:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_548524d1",
+                        "type": "paragraph",
+                        "text": "Therefore we can replace all instances of",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cfb5c92e",
+                        "type": "paragraph",
+                        "text": ", which corresponds to the network shown in Figure 1 B. For now this is completely pointless, since we do not change the network function at all, but it will come in handy in the next section, where we discretize the output of the \u2206 T modules.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1fb2a0a3",
+                "title": "DISCRETIZATING THE DELTAS",
+                "blocks": [
+                    {
+                        "block_id": "b_43b8b873",
+                        "type": "paragraph",
+                        "text": "When dealing with data that is naturally spatiotemporally redundant, like most video, we expect the output of the \u2206 T modules to be a vector with mostly low values, with some peaks corresponding to temporal transitions at certain input positions. We expect the data to have this property not only at the input layer, but even more so at higher layers, which encode higher level features (edges, object parts, class labels), which we would expect to vary more slowly over time than pixel values. If we discretize this \"peaky\" vector, we end up with a sparse vector of integers, which can then be used to cheaply communicate the approximate change in state of a layer to its downstream layer(s).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_39fad7e9",
+                        "type": "paragraph",
+                        "text": "A sensible approach is to apply rounding before the temporal-difference operation -i.e. round the activation values and then send the temporal differences of these rounded values. It is then easy to show that the network's function will remain identical to that of the rounding network:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d7941ed6",
+                        "type": "paragraph",
+                        "text": "It's worth noting that this is equivalent to doing discrete-time Sigma-Delta modulation to quantize the temporal differences -this connection is explained in Appendix A.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_35df611a",
+                        "type": "paragraph",
+                        "text": "It follows from this result that our Sigma-Delta network depicted in Figure 1 D computes an identical function to that of the rounding network in Figure 1 C. In other words, the output y t of the Sigma-Delta network is solely dependent on the parameters of the network and the current input x t , and not on any of the previous inputs x 1 ..x t-1 . The amount of computation required for the update, however, depends on x t-1 . Specifically, if x t is similar to x t-1 , the Sigma-Delta network should require less computation to perform an update than the Rounding Network.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0f956e53",
+                "title": "SPARSE DOT PRODUCT",
+                "blocks": [
+                    {
+                        "block_id": "b_efdf2d4e",
+                        "type": "paragraph",
+                        "text": "Most of the computation in Deep Neural networks is consumed doing matrix multiplications and convolutions. The architecture we propose saves computation by translating the input to these operations into an integer array with a small L1 norm.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_91317d44",
+                        "type": "paragraph",
+                        "text": "With sparse, low-magnitude integer input, we can compute the vector-matrix dot product efficiently by decomposing it into a sequence of vector additions. We can see this by decomposing the vector x \u2208 I din into a set of indices",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b751305b",
+                        "type": "paragraph",
+                        "text": "s n e in , where e in is a one-hot vector with element i n hot, and N = | x| L1 is the total L1 magnitude of the vector. We can then compute the dot-product as a series of additions, as shown in Equation 3 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7ab0cb44",
+                        "type": "paragraph",
+                        "text": "Computing the dot product this way takes N \u2022 d out additions. A normal dense dot-product, by comparison, takes",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1d72b8f0",
+                        "type": "paragraph",
+                        "text": "This is where the energy savings come in. Horowitz (2014) estimates that on current 45nm silicon process, a 32-bit floating-point multiplication costs 3.7pJ, vs 0.9pJ for floating-point addition. With integer or fixed-point arithmetic, the difference is even more pronounced, with 3.1pJ for multiplication vs 0.1pJ for addition. This of course ignores the larger cost of processing instructions and moving memory, but gives us an idea of how these operations might compare on optimized hardware. So provided we can approximate the forward pass of a network to a satisfactory degree of precision without doing many more operations than the original network, we can potentially compute much more efficiently.",
+                        "extracted_citations": [
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b4bb0a32",
+                        "type": "paragraph",
+                        "text": "Figure 1 : A: An ordinary deep network, which consists of an alternating sequence of linear operations w i (x), and nonlinear transforms h i (x). B: The Temporal-Difference Network, described in Section 3.1, computes the exact same function as network A, but communicates differences in activation between layers. C: An approximation of network A where activations are rounded before being sent to the next layer. D: The Sigma-Delta Network combines the modifications of B and C. Functionally, it is identical to the Rounding Network, but it can compute forward passes more cheaply when input data is temporally redundant.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0c43896d",
+                "title": "PUTTING IT ALL TOGETHER",
+                "blocks": [
+                    {
+                        "block_id": "b_939c8d2a",
+                        "type": "paragraph",
+                        "text": "Figure 1 visually summarizes the four types of network we have described. Inserting the temporal sum and difference modules discussed in Section 3.1 leads to the Temporal Difference Network, which is functionally identical to the Original Network. Discretizing the output of the temporal difference modules, as discussed in Section 3.2, leads to the Sigma-Delta network. The Sigma-Delta Network is functionally equivalent to the Rounding network, except that it requires less computation per forward pass if it is fed with temporally redundant data.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8af1223a",
+                "title": "OPTIMIZING AN EXISTING NETWORK",
+                "blocks": [
+                    {
+                        "block_id": "b_518157e3",
+                        "type": "paragraph",
+                        "text": "In this work, we do not aim to train a quantized networks from scratch, as we did in O'Connor and Welling (2016) . Rather, we will take existing pretrained networks and optimize them as Sigma-Delta networks. In in our situation, we have two competing objectives: Error (with respect to a non-quantized forward pass), and Computation: the number of additions performed in a forward pass.",
+                        "extracted_citations": [
+                            "Citation_b11"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7f46311c",
+                "title": "RESCALING OUR NEURONS",
+                "blocks": [
+                    {
+                        "block_id": "b_0dbe58cf",
+                        "type": "paragraph",
+                        "text": "We can control the trade-off between these objectives by changing the scale of our discretization. We can thus extend our rounding function by adding a scale k \u2208 R + :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5d516168",
+                        "type": "paragraph",
+                        "text": "This scale can either be layerwise or unitwise (in which case we have a vector of scales per layer).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6f90b3db",
+                        "type": "paragraph",
+                        "text": "Higher k values will lead to higher precision, but also more computation, for the reason mentioned in Section 3.2. Note that the final division-by-k is equivalent to scaling the following weight matrix by 1 k ,. So in practice, our network functions become:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cd4b911e",
+                        "type": "paragraph",
+                        "text": "For the Rounding Network and the Sigma-Delta Network, respectively. By adjusting these scales k l , we can affect the tradeoff between computation and error. Note that if we use ReLU activation functions, parameters k l can simply be baked into the parameters of the network (see Appendix C.)",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a8efb7ac",
+                "title": "THE ART OF COMPROMISE",
+                "blocks": [
+                    {
+                        "block_id": "b_0dfc17bd",
+                        "type": "paragraph",
+                        "text": "In this section, we aim to find the optimal trade-offs between Error and Computation for the Rounding Network (Network C in Figure 1 ). We define our loss as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bdbaae11",
+                        "type": "paragraph",
+                        "text": "Where D(a, b) is some scalar distance function (We use KL-divergence for softmax output layers and L2-norm otherwise), f round (x) is the output of the Rounding Network, f true (x) is the output of the Original Network. L comp is the computational loss, defined as the total number of additions required in a forward pass. Each layer performs |s l | L1 d l+1 additions, where s l is the discrete output of the l'th layer, d l+1 is the dimensionality of the (l + 1)'th layer. Finally \u03bb is the tradeoff parameter balancing the importance of the two losses.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c42b142a",
+                        "type": "paragraph",
+                        "text": "We aim to use this loss function to optimize our layer-scales, k l to find an optimal tradeoff between accuracy and computation, given the tradeoff parameter \u03bb.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cd85c8d0",
+                "title": "DIFFERENTIATING THE UNDIFFERENTIABLE",
+                "blocks": [
+                    {
+                        "block_id": "b_56a36e1b",
+                        "type": "paragraph",
+                        "text": "We run into an obvious problem: y = round(k \u2022 x) is not differentiable with respect to our scale, k or our input, x. We get around this by using a similar method to Courbariaux et al., who in turn borrowed it from a lecture by Hinton (2012) . That is, on the backward pass, when computing the gradient with respect to the error \u2202Lerror \u2202k l , we simply pass the gradient through the rounding function in layers [l + 1, .., .L], i.e. we say \u2202 \u2202x round(x) \u2248 1.",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_41ef3f15",
+                        "type": "paragraph",
+                        "text": "When computing the gradient with respect to the computational cost, \u2202Lcomp \u2202k l , we again just pass the gradient through all rounding operations in the backward pass for layers [l + 1, .., .L]. We found instabilities in training when using the computational loss of higher layers: L comp,l : l \u2208 [l + 1, ..., L], to update the scale of layer l. Since we don't expect this term to have much effect anyway, we choose to only use the gradient of the computational cost in layer l when updating scale k l , i.e., we approximate:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ee6e8334",
+                        "type": "paragraph",
+                        "text": "Our scale parameters also must remain in the positive range, and stay well away from zero, where they can cause instability due to the division-by-k (see Equation 5 ). To handle this, we parametrize our scales in log-space, as \u03ba l = log(k l ). Our scale-parameter update rule becomes:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7f470433",
+                        "type": "paragraph",
+                        "text": "Where s l is the rounded signal from layer l, d l+1 is the \"fan-out\" (equivalent to the dimension of layer l + 1 in a fully-connected network), and pass : [l + 1..L] indicates that, on the backward pass, we simply pass the gradient through the rounding functions on layers [l + 1..L].",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2664e14f",
+                "title": "TOY PROBLEM: A RANDOM NETWORK",
+                "blocks": [
+                    {
+                        "block_id": "b_5387984b",
+                        "type": "paragraph",
+                        "text": "We start with a very simple toy problem to verify our method. We initialize a 2-layer (100-100-100) ReLU network with random weights using the initialization scheme proposed in Glorot and Bengio (2010) , then scaled the weights by 1 2 , 8, 1 4 . The weight-rescaling does not affect the function of the network but makes it very ill-adapted for discretization (the first layer will be represented too coarsely, causing error; the second too finely, causing wasted computation). We create random input data, and use it to optimize the layer scales according to Equation 10 . We verify, by comparing to a large collection of randomly drawn rescalings, that by tuning lambda we land on different places of the Pareto frontier balancing error and computation. Figure 2 shows that this is indeed the case. In this experiment, error and computation are evaluated just on the Rounding network -we test the Sigma-Delta network in the next experiment, which includes temporal data.",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ca714328",
+                "title": "TEMPORAL-MNIST",
+                "blocks": [
+                    {
+                        "block_id": "b_eb54465e",
+                        "type": "paragraph",
+                        "text": "In order to evaluate our network's ability to save computation on temporal data, we create a dataset that we call \"Temporal-MNIST\". This is just a reshuffling of the standard MNIST dataset so that similar frames tend to be nearby, giving the impression of a temporal sequence (see Appendix D for details). The columns of Figure 3 show eight snippets from the Temporal-MNIST dataset.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5607280c",
+                        "type": "paragraph",
+                        "text": "We started our experiment with a conventional ReLU network with layer sizes [784-200-200-10] pretrained on MNIST to a test-accuracy of 97.9%. We then apply the same scale-optimization procedure for the Rounding Network used in the previous experiment to find the optimal rescalings under a range of values for \u03bb. This time, we test the learned scale parameters on both the Rounding Network and the Sigma-Delta network. We do not attempt to directly optimize the scales with respect to the amount of computation in the Sigma-Delta network -we assume that the result should be similar to that for the rounding network, but verifying this is the topic of future work.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4d4203bd",
+                        "type": "paragraph",
+                        "text": "The results of this experiment can be seen in Figure 4 . We see that our discretized networks (Rounding and Sigma-Delta) converge to the error of the original network with fewer computations than are required for a forward pass of the original neural network. Note that the errors of the rounding and  Plot 1: Each point on the line for the Rounding (blue) and Sigma-Delta (green) network correspond to the performance of the network for a different value of the error-computation tradeoff parameter \u03bb, ranging from \u03bb = 10 -10 (in the high-computation, low-error regime) to \u03bb = 10 -5 (in the low-computation, high-error regime). The red line indicates the performance of the original, nondiscretized network. The red dot on the right indicates the number of flops required for a full forward pass when doing dense multiplication, and the dot on the left indicates the number of flops when factoring in layer sparsity. Note that for the Rounding and Sigma-Delta networks, we count the number of additions, and for the original network we count the numbers of multiplications and additions (as per Section 3.3). Plot 2: The same, but on the Temporal-MNIST dataset. We see that the Sigma-Delta network uses less computation thanks to the temporal redundancy in the data. Plots 3 and 4: Half of the original network's Ops were multiplies, which are more computational costly than the additions of the Rounding and Sigma-Delta networks. In these plots the x-axis is rescaled according to the energy use calculations of Horowitz (2014) , assuming the weights and parameters of the network are implemented with 32-bit integer arithmetic. Numbers are in Appendix E.",
+                        "extracted_citations": [
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_08020029",
+                        "type": "paragraph",
+                        "text": "Sigma-Delta networks are identical. This is a consequence of their equivalence, described in Section 3.2. Note also that the errors for all networks are identical between the MNIST and Temporal-MNIST datasets, since for all networks, the prediction function is independent of the order in which inputs are processed. We see that as expected, our Sigma-Delta network does fewer computations than the rounding network on the Temporal-MNIST dataset for the same error, because the update-mechanism of this network takes advantage of the temporal redundancy in the data.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_151e8c42",
+                "title": "A DEEP CONVOLUTIONAL NETWORK ON VIDEO",
+                "blocks": [
+                    {
+                        "block_id": "b_c6c056a3",
+                        "type": "paragraph",
+                        "text": "Our final experiment is a preliminary exploration into how Sigma Delta networks could perform on natural video data. We start with \"VGG 19\" -a 19 layer convolutional network, trained to recognise the 1000 ImageNet categories. The network was trained and made public by Simonyan and Zisserman (2014) . We take selected videos from the ILSVRC 2015 dataset (Russakovsky et al., 2015) , and apply the rescaling method from Section 4.1 to adjust the scales on a per-layer basis. We initially had some difficulty in optimizing the scale parameters of network to a stable point. The network would either fail to reduce computation when it could afford to, or reduce it to the point where the network's function was so corrupted that error gradients would be meaningless, causing computation loss to win out and activations to drop to zero. A simple solution was to replace the rounding operation in training with addition of uniform random noise \u223c U (-1 2 , 1 2 ). This seemed to prevent the network from pushing itself into a regime where all activations become zero. More work is need to understand why the addition of noise is necessary here. Figure 5 shows some preliminary results, which indicate that for video data we can get about 4-10x savings in the amount of computation required, in exchange for a modest loss in computational accuracy.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b12"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b89559df",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_940f7b26",
+                        "type": "paragraph",
+                        "text": "We have introduced Sigma-Delta Networks, which give us a new way compute the forward pass of a deep neural network. In Sigma-Delta Networks, neurons communicate not by telling other neurons about their current level of activation, but about their change in activation. By discretizing these changes, we end up with very sparse communication between layers. The more similar two consecutive inputs (x t , x t+1 ) are, the less computation is required to update the network. We show that, while the Sigma-Delta Network's internal state at time-step t depends on past inputs x 1 ..x t-1 , the output y t only depends on the current input x t . We show that there is a tradeoff between the accuracy of this network (with respect to the function of a traditional deep net with the same parameters), and the amount of computation required. Finally, we propose a method to jointly optimize error and computation, given a tradeoff parameter \u03bb that indicates how much accuracy we are willing to sacrifice in exchange for fewer computations. We demonstrate that this method substantially reduces the number of computations required to run a deep network on natural, temporally redundant data. However, we observe in our final experiment (Figure 5 , bottom) that our assumption that higher-level features would be more temporally stable -and thus require less computation in our Sigma-Delta net -was not true. We suspect that if we were to train the network from scratch on temporal data, we may learn more temporally stable \"slow\" features, but this is a topic of future work.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7511bf3c",
+                        "type": "paragraph",
+                        "text": "A huge amount of data (eg. video, audio) comes in the form of temporal sequences, and there is an increasingly obvious need to be able to process this data efficiently. There is much to be gained by only doing processing when necessary, based on the contents of the data, and we provide one method for doing that. Further work is needed to determine whether this method would be of use on modern computing hardware, namely GPUs. The problem is that these devices are designed for large, fixed-size array operations, and tend not to be good at taking advantage of sparsity in the data, which requires many random memory accesses to parameters. Fortunately, other devices such as the the IBM TrueNorth (Cassidy et al., 2013) are being designed which keep memory close to processing, and such handle sparse data (and random memory access) much more efficiently. This work opens up an interesting door. In asynchronous, distributed neural networks, a node may receive input from many different nodes asynchronously. Recomputing the function of the network every time a new input signals arrives may be prohibitively expensive. Our scheme deals with this by making the computational cost of an update proportional to the amount of change in the input. The next obvious step is to extend this approach to communicating changes in gradients, which may be helpful in setting up distributed, asynchronous schemes for training neural networks.",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_dfe166ad",
+                        "type": "paragraph",
+                        "text": "Code for our experiments can be found at: https://github.com/petered/sigma-delta/",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8a8cf08f",
+                "title": "Ratio",
+                "blocks": [
+                    {
+                        "block_id": "b_e9d67c96",
+                        "type": "paragraph",
+                        "text": "Figure 5 : A comparison of the Original VGG Net with the Rounding and Sigma-Delta Networks using the same parameters, after scale-optimization. Top: Frames taken from two videos from the ILSVRC2015 dataset. The two videos, with 201 frames in total, were spliced together. The first has a static background, and the second has more motion. Below every second image is the label generated for that image by VGGnet and the Sigma-Delta network (which is functionally equivalent to the Rounding Network, though numerical errors can lead to small changes, not shown here). Scale parameters were trained on separate videos. Second Plot: A comparison of the computational cost per-frame. The original VGG network has a fixed cost. The Sigma-Delta network has a cost that varies with the amount of action in the video. The spike in computation occurs at the point where the videos are spliced together. We can see that the Sigma-Delta network does more computation for the second video, in which there is more movement. During the first video it performs about 11 times less computation than the Original Network, during the second, about 4 times less. The difference would be more pronounced if we were to count energy use, as we did in Figure 4 . Third Plot: A plot of the cumulative mean error (over frames) of the Sigma-Delta/Rounding networks, as compared to the Original VGGnet. Most of the time, it gets the same result (Top-1) out of 1000 possible categories. On almost every frame, the guess of the Sigma-Delta network is one of the top-5 guesses of the original VGGNet. Fourth Plot: A breakdown of how much of the computational cost of each network comes from each layer. Fifth Plot: The layer-wise ratio of the computational cost of the Sigma-Delta net to the rounding net. We had expected (and hoped) this ratio to become very low in the upper layers, as the high-level features should not change much between frames. However this was not the case (as the ratio remains between 0.2 and 0.4 across all layers). It appears therefore that our assumption -that higher level features would be more temporally stable -is untrue. Appendix F shows that this is a property of the pretrained network, not our quantization scheme.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_91ab26fd",
+                        "type": "paragraph",
+                        "text": "A DELTA-HERDING PROOF Algorithm 3 Herding",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_43e299fa",
+                        "type": "paragraph",
+                        "text": "In previous work (O'Connor and Welling, 2016) , we used a quantization scheme which we refer to as herding for brevity and because of its relation to the deterministic sampling scheme in (Welling, 2009) , but could otherwise be called Discrete-Time Bidirectional Sigma-Delta Modulation. The procedure is described in Algorithm 3. The input is summed into a potential \u03c6 over time until crossing a quantization threshold (in this case the \u00b1 1 2 at which the round function changes value), and then resets. Here we prove that Algorithm 4 is equivalent to applying Algorithm 3 to the output of a temporal difference modules. i.e. herd(\u2206 t (x t )) = \u2206 T (round(x t ))\u2200t.",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_93aba29f",
+                        "type": "paragraph",
+                        "text": "First start by observing the following equivalence:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_61fe059f",
+                        "type": "paragraph",
+                        "text": "We can apply this to the update rule in Algorithm 3:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0e7d056d",
+                        "type": "paragraph",
+                        "text": "Now, if we unroll the two Equations 12 over time, with initial condition \u03c6 0 = 0, we see that.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ca405f73",
+                        "type": "paragraph",
+                        "text": "Using Equations 13 and 11, respectively, we can say:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6267f0a6",
+                        "type": "paragraph",
+                        "text": "Which can be rearranged to solve for s t .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9c3a50da",
+                        "type": "paragraph",
+                        "text": "Now if we receive inputs from a \u2206 T unit: x \u03c4 = u \u03c4 -u \u03c4 -1 with initial condition u 0 = 0, then:",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_670a8ca7",
+                "title": "C BAKING THE SCALES INTO THE PARAMETERS",
+                "blocks": [
+                    {
+                        "block_id": "b_bf7ff555",
+                        "type": "paragraph",
+                        "text": "In Section 4.1, we mention that we can \"bake the scales into the parameters\" for ReLU networks. Here we explain that statement.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ff486052",
+                        "type": "paragraph",
+                        "text": "Suppose you have a function",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_44318eeb",
+                        "type": "paragraph",
+                        "text": ", as is the case for relu(x) = max(0, x), we can collapse the scales k into the parameters:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9dae12bc",
+                        "type": "paragraph",
+                        "text": "So that after training scales, for a given network, we can simply incorporate them into the parameters, as:",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_49f3d86f",
+                "title": "D TEMPORAL MNIST",
+                "blocks": [
+                    {
+                        "block_id": "b_327ecc5b",
+                        "type": "paragraph",
+                        "text": "The Temporal MNIST dataset is a version of MNIST that is reshuffled so that similar frames end up being nearby. We generate this by iterating through the dataset, keeping a fixed-size buffer of candidates for the next frame. On every iteration, we compare all the candidates to the current frame, and select the closest one. The place that this winning candidate occupied in the buffer is then filled by a new sample from the dataset, and the winning candidate becomes the current frame. The process is repeated until we've sorted though all frames in the dataset. For the Original Network, the number of Flops is considered when using both (Dense / Sparse) matrix operations. The \"Class Error\" column shows the classification error on the training / test set respectively. The \"Energy\" is an estimate of the average energy that would be used by arithmetic operations per sample, if the network were implemented with all integer values. This is based on the estimates of Horowitz (2014) . Again, for the Original Network, the figure is based on the numbers for dense/sparse matrix operations.",
+                        "extracted_citations": [
+                            "Citation_b7"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a8750008",
+                "title": "F HIGH-LEVEL FEATURE STABILITY",
+                "blocks": [
+                    {
+                        "block_id": "b_3864921d",
+                        "type": "paragraph",
+                        "text": "We had initially expected that, when a convolutional network is tasked with processing subsequent frames of video, high-level features would change much more slowly than the pixels and low-level features. This would give a computational advantage to our Sigma-Delta networks, whose computational cost scales with the amount of change in the feature representations. To our surprise, this appeared not to be the case. See the final plot of Figure 5 . To verify that this was a property of the original convolutional network (and not somehow related our discretization scheme), we take the same snippet of video used for Figure 5 and measure the inter-frame differences. Figure 6 shows the results of this small experiment, and confirms that our initial belief -that inter-frame differences should become smaller and smaller at higher layers, was not quite correct. (columns) . The input is considered to be layer 0. Feature representations have been L1-normalized per-layer Bottom Left: The L1-Norms (which are 1 due to the normalization) and inter-frame L1-Distances for each layer, averaged over frames. Top and Bottom Right: The same measurements, with the cosine-similarity metric instead of L1. We note from these plots that the inter-frame difference is not much smaller in higher layers than it is at the pixel level, and that in the lower layers, feature representations of neighbouring frames are significantly more dissimilar than they are at the pixel level.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Arash Ardakani Franc \u00b8ois Leduc-Primeau Naoya Onizawa Takahiro Hanyu Warren J Gross arXiv:1509.08972 Vlsi implementation of deep neural network using integral stochastic computing 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Cognitive computing building block: A versatile and efficient digital neuron model for neurosynaptic cores Paul Andrew S Cassidy John V Merolla Steve K Arthur Bryan Esser Rodrigo Jackson Pallab Alvarez-Icaza Jun Datta Theodore M Sawada Vitaly Wong Feldman The 2013 International Joint Conference on IEEE 2013 Neural Networks (IJCNN)",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Matthieu Courbariaux Itay Hubara COM Daniel Soudry, Ran El-Yaniv, and Yoshua Bengio. Binarized neural networks: Training neural networks with weights and activations constrained to+ 1 or",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Fastclassifying, high-accuracy spiking deep networks through weight and threshold balancing Daniel Peter U Diehl Jonathan Neil Matthew Binas Shih-Chii Cook Michael Liu Pfeiffer 2015 International Joint Conference on Neural Networks (IJCNN) IEEE 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Paul A Steven K Esser John V Merolla Andrew S Arthur Rathinakumar Cassidy Alexander Appuswamy David J Andreopoulos Jeffrey L Berg Timothy Mckinstry Melano Davis R Barch arXiv:1603.08270 Convolutional networks for fast, energy-efficient neuromorphic computing 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Understanding the difficulty of training deep feedforward neural networks Xavier Glorot Yoshua Bengio In Aistats 9 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Neural networks for machine learning. coursera, video lectures Geoffrey Hinton 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "1.1 computing's energy problem (and what we can do about it) Mark Horowitz 2014 IEEE International Solid-State Circuits Conference Digest of Technical Papers (ISSCC) IEEE 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "How much the eye tells the brain Kristin Koch Judith Mclean Ronen Segev Michael A Freed Michael J Berry Vijay Balasubramanian Peter Sterling Current Biology 16 14 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Training deep spiking neural networks using backpropagation Jun Haeng Lee Tobi Delbruck Michael Pfeiffer arXiv:1608.08782 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "A 128\u00d7 128 120 db 15 \u00b5s latency asynchronous temporal contrast vision sensor. Solid-State Circuits Patrick Lichtsteiner Christoph Posch Tobi Delbruck IEEE Journal 43 2 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "O' Peter Max Connor Welling arXiv:1602.08323 Deep spiking networks 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "ImageNet Large Scale Visual Recognition Challenge Olga Russakovsky Jia Deng Hao Su Jonathan Krause Sanjeev Satheesh Sean Ma Zhiheng Huang Andrej Karpathy Aditya Khosla Michael Bernstein Alexander C Berg Li Fei-Fei 10.1007/s11263-015-0816-y International Journal of Computer Vision (IJCV) 115 3 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Very deep convolutional networks for large-scale image recognition Karen Simonyan Andrew Zisserman arXiv:1409.1556 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Herding dynamical weights to learn Max Welling Proceedings of the 26th Annual International Conference on Machine Learning the 26th Annual International Conference on Machine Learning ACM 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Lif and simplified srm neurons encode signals into spikes via a form of asynchronous pulse sigma-delta modulation Young C Yoon 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Fast and efficient asynchronous neural computation with adapting spiking neural networks Davide Zambrano Sander M Bohte arXiv:1609.02053 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.6131,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This is an interesting paper about quantized networks that work on temporal difference inputs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The basic idea is that when a network has only to process differences then this is computational much more efficient specifically with natural video data since large parts of an image would be fairly constant so that the network only has to process the informative sections of the image (video stream).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "This is of course how the human visual system works, and it is hence of interest even beyond the core machine learning community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "As an aside, there is a strong community interested in event-based vision such as the group of Tobi Delbr\u00fcck, and it might be interesting to connect to this community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "This might even provide a reference for your comments on page 1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "I guess the biggest novel contribution is that a rounding network can be replaced by a sigma-delta network, but that the order of discretization and summation doe make some difference in the actual processing load.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "I think I followed the steps and \nMost of my questions have already been answers in the pre-review period.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "My only question remaining is on page 3, \u201cIt should be noted that when we refer to \u201ctemporal differences\u201d, we refer not to the change in the signal over time, but in the change between two inputs presented sequentially.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "The output of our network only depends on the value and order of inputs, not on the temporal spacing between them.\u201d\n\nThis does not make sense to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "As I understand you just take the difference between two frames regardless if you call this temporal or not it is a change in one frame.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "So this statement rather confuses me and maybe should be dropped unless I do miss something here, in which case some more explanation would be necessary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "Figure 1 should be made bigger.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "An improvement of the paper that I could think about is a better discussion of the relevance of the findings.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "Yes, you do show that your sigma-delta network save some operation compared to threshold, but is this difference essential for a specific task, or does your solution has relevance for neuroscience?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.386,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The reviewers are in consensus that this paper introduces an interesting idea with potentially huge gains in the efficiency of video analysis tasks (dependent on hardware advances).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "There was extensive discussion during the question/review period.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Two of the reviewers scored this paper in the Top 50% of accepted papers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "The lower score is from the less confident reviewer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "This seems to the AC to be a clear accept.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "Dear Reviewers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Thank you for all your comments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "We have uploaded a final draft based on your feedback.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "Summary of changes:\n- Added to the discussion section, mentioning applicability for hardware, and how training on \"slow features\" may improve our network, as mentioned by Reviewers 1 and 2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "- Added new plots to the final figure, showing how computation breaks down across layers in different versions of the network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "- Added a small experiment, in appendix, demonstrating that in the pretrained VGGnet we used, features to not change significantly more slowly in higher layers than in lower layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "- Moved connection to herding to appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "- Clarified the point about Temporal vs Sequential differences brought up by Reviewer 3.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.6131,
+            "aspect_scores": {
+                "originality": 1,
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "This is an interesting paper about quantized networks that work on temporal difference inputs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "The basic idea is that when a network has only to process differences then this is computational much more efficient specifically with natural video data since large parts of an image would be fairly constant so that the network only has to process the informative sections of the image (video stream).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "This is of course how the human visual system works, and it is hence of interest even beyond the core machine learning community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "As an aside, there is a strong community interested in event-based vision such as the group of Tobi Delbr\u00fcck, and it might be interesting to connect to this community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "This might even provide a reference for your comments on page 1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "I guess the biggest novel contribution is that a rounding network can be replaced by a sigma-delta network, but that the order of discretization and summation doe make some difference in the actual processing load.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "I think I followed the steps and \nMost of my questions have already been answers in the pre-review period.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "My only question remaining is on page 3, \u201cIt should be noted that when we refer to \u201ctemporal differences\u201d, we refer not to the change in the signal over time, but in the change between two inputs presented sequentially.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "The output of our network only depends on the value and order of inputs, not on the temporal spacing between them.\u201d\n\nThis does not make sense to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "As I understand you just take the difference between two frames regardless if you call this temporal or not it is a change in one frame.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "So this statement rather confuses me and maybe should be dropped unless I do miss something here, in which case some more explanation would be necessary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_11",
+                    "text": "Figure 1 should be made bigger.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_12",
+                    "text": "An improvement of the paper that I could think about is a better discussion of the relevance of the findings.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_13",
+                    "text": "Yes, you do show that your sigma-delta network save some operation compared to threshold, but is this difference essential for a specific task, or does your solution has relevance for neuroscience?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_9",
+            "type": "Human",
+            "liang_alpha_score": 0.6131,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_9_s_0",
+                    "text": "This is an interesting paper about quantized networks that work on temporal difference inputs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_1",
+                    "text": "The basic idea is that when a network has only to process differences then this is computational much more efficient specifically with natural video data since large parts of an image would be fairly constant so that the network only has to process the informative sections of the image (video stream).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_2",
+                    "text": "This is of course how the human visual system works, and it is hence of interest even beyond the core machine learning community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_3",
+                    "text": "As an aside, there is a strong community interested in event-based vision such as the group of Tobi Delbr\u00fcck, and it might be interesting to connect to this community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_4",
+                    "text": "This might even provide a reference for your comments on page 1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_5",
+                    "text": "I guess the biggest novel contribution is that a rounding network can be replaced by a sigma-delta network, but that the order of discretization and summation doe make some difference in the actual processing load.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_6",
+                    "text": "I think I followed the steps and \nMost of my questions have already been answers in the pre-review period.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_7",
+                    "text": "My only question remaining is on page 3, \u201cIt should be noted that when we refer to \u201ctemporal differences\u201d, we refer not to the change in the signal over time, but in the change between two inputs presented sequentially.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_8",
+                    "text": "The output of our network only depends on the value and order of inputs, not on the temporal spacing between them.\u201d\n\nThis does not make sense to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_9",
+                    "text": "As I understand you just take the difference between two frames regardless if you call this temporal or not it is a change in one frame.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_10",
+                    "text": "So this statement rather confuses me and maybe should be dropped unless I do miss something here, in which case some more explanation would be necessary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_11",
+                    "text": "Figure 1 should be made bigger.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_12",
+                    "text": "An improvement of the paper that I could think about is a better discussion of the relevance of the findings.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_13",
+                    "text": "Yes, you do show that your sigma-delta network save some operation compared to threshold, but is this difference essential for a specific task, or does your solution has relevance for neuroscience?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_10",
+            "type": "Human",
+            "liang_alpha_score": 0.386,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_10_s_0",
+                    "text": "The reviewers are in consensus that this paper introduces an interesting idea with potentially huge gains in the efficiency of video analysis tasks (dependent on hardware advances).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_1",
+                    "text": "There was extensive discussion during the question/review period.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_2",
+                    "text": "Two of the reviewers scored this paper in the Top 50% of accepted papers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_3",
+                    "text": "The lower score is from the less confident reviewer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_4",
+                    "text": "This seems to the AC to be a clear accept.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_11",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_11_s_0",
+                    "text": "Dear Reviewers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_1",
+                    "text": "Thank you for all your comments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_2",
+                    "text": "We have uploaded a final draft based on your feedback.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_3",
+                    "text": "Summary of changes:\n- Added to the discussion section, mentioning applicability for hardware, and how training on \"slow features\" may improve our network, as mentioned by Reviewers 1 and 2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_4",
+                    "text": "- Added new plots to the final figure, showing how computation breaks down across layers in different versions of the network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_5",
+                    "text": "- Added a small experiment, in appendix, demonstrating that in the pretrained VGGnet we used, features to not change significantly more slowly in higher layers than in lower layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_6",
+                    "text": "- Moved connection to herding to appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_7",
+                    "text": "- Clarified the point about Temporal vs Sequential differences brought up by Reviewer 3.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.6131,
+            "aspect_scores": {
+                "originality": 1,
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "This is an interesting paper about quantized networks that work on temporal difference inputs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "The basic idea is that when a network has only to process differences then this is computational much more efficient specifically with natural video data since large parts of an image would be fairly constant so that the network only has to process the informative sections of the image (video stream).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "This is of course how the human visual system works, and it is hence of interest even beyond the core machine learning community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "As an aside, there is a strong community interested in event-based vision such as the group of Tobi Delbr\u00fcck, and it might be interesting to connect to this community.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "This might even provide a reference for your comments on page 1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_5",
+                    "text": "I guess the biggest novel contribution is that a rounding network can be replaced by a sigma-delta network, but that the order of discretization and summation doe make some difference in the actual processing load.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_6",
+                    "text": "I think I followed the steps and \nMost of my questions have already been answers in the pre-review period.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_7",
+                    "text": "My only question remaining is on page 3, \u201cIt should be noted that when we refer to \u201ctemporal differences\u201d, we refer not to the change in the signal over time, but in the change between two inputs presented sequentially.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_8",
+                    "text": "The output of our network only depends on the value and order of inputs, not on the temporal spacing between them.\u201d\n\nThis does not make sense to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_9",
+                    "text": "As I understand you just take the difference between two frames regardless if you call this temporal or not it is a change in one frame.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_10",
+                    "text": "So this statement rather confuses me and maybe should be dropped unless I do miss something here, in which case some more explanation would be necessary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_11",
+                    "text": "Figure 1 should be made bigger.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_12",
+                    "text": "An improvement of the paper that I could think about is a better discussion of the relevance of the findings.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_13",
+                    "text": "Yes, you do show that your sigma-delta network save some operation compared to threshold, but is this difference essential for a specific task, or does your solution has relevance for neuroscience?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2bcc6137"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ddb7a370"
+        },
+        {
+            "source": "b_a11e0200",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a11e0200"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_20011907"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_37ef0eba"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3b30a9d4"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e2bc357e"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a61a65d9"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_57d5e745"
+        },
+        {
+            "source": "b_47e5ac17",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47e5ac17"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_40eb8c9a"
+        },
+        {
+            "source": "b_c07bc11a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c07bc11a"
+        },
+        {
+            "source": "sec_78e6bfbe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_afaae5bd"
+        },
+        {
+            "source": "sec_30675d8a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4855de7d"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_be381b7d"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4e98221b"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c53596d3"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6e77c0df"
+        },
+        {
+            "source": "b_dad08fdd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dad08fdd"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e742bbbc"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_172898be"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3cd65ace"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_548524d1"
+        },
+        {
+            "source": "sec_73e41bed",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cfb5c92e"
+        },
+        {
+            "source": "sec_1fb2a0a3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_43b8b873"
+        },
+        {
+            "source": "sec_1fb2a0a3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_39fad7e9"
+        },
+        {
+            "source": "sec_1fb2a0a3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d7941ed6"
+        },
+        {
+            "source": "sec_1fb2a0a3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_35df611a"
+        },
+        {
+            "source": "sec_0f956e53",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_efdf2d4e"
+        },
+        {
+            "source": "sec_0f956e53",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_91317d44"
+        },
+        {
+            "source": "sec_0f956e53",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b751305b"
+        },
+        {
+            "source": "sec_0f956e53",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ab0cb44"
+        },
+        {
+            "source": "b_1d72b8f0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_0f956e53",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d72b8f0"
+        },
+        {
+            "source": "sec_0f956e53",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b4bb0a32"
+        },
+        {
+            "source": "sec_0c43896d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_939c8d2a"
+        },
+        {
+            "source": "b_518157e3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_8af1223a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_518157e3"
+        },
+        {
+            "source": "sec_7f46311c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0dbe58cf"
+        },
+        {
+            "source": "sec_7f46311c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5d516168"
+        },
+        {
+            "source": "sec_7f46311c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6f90b3db"
+        },
+        {
+            "source": "sec_7f46311c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cd4b911e"
+        },
+        {
+            "source": "sec_a8efb7ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0dfc17bd"
+        },
+        {
+            "source": "sec_a8efb7ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bdbaae11"
+        },
+        {
+            "source": "sec_a8efb7ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c42b142a"
+        },
+        {
+            "source": "b_56a36e1b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_cd85c8d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_56a36e1b"
+        },
+        {
+            "source": "sec_cd85c8d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_41ef3f15"
+        },
+        {
+            "source": "sec_cd85c8d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee6e8334"
+        },
+        {
+            "source": "sec_cd85c8d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7f470433"
+        },
+        {
+            "source": "b_5387984b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_2664e14f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5387984b"
+        },
+        {
+            "source": "sec_ca714328",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb54465e"
+        },
+        {
+            "source": "sec_ca714328",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5607280c"
+        },
+        {
+            "source": "b_4d4203bd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_ca714328",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4d4203bd"
+        },
+        {
+            "source": "sec_ca714328",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08020029"
+        },
+        {
+            "source": "b_c6c056a3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_c6c056a3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_151e8c42",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c6c056a3"
+        },
+        {
+            "source": "sec_b89559df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_940f7b26"
+        },
+        {
+            "source": "b_7511bf3c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_b89559df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7511bf3c"
+        },
+        {
+            "source": "sec_b89559df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dfe166ad"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e9d67c96"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_91ab26fd"
+        },
+        {
+            "source": "b_43e299fa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_43e299fa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_43e299fa"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_93aba29f"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_61fe059f"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0e7d056d"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ca405f73"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6267f0a6"
+        },
+        {
+            "source": "sec_8a8cf08f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9c3a50da"
+        },
+        {
+            "source": "sec_670a8ca7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bf7ff555"
+        },
+        {
+            "source": "sec_670a8ca7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff486052"
+        },
+        {
+            "source": "sec_670a8ca7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_44318eeb"
+        },
+        {
+            "source": "sec_670a8ca7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9dae12bc"
+        },
+        {
+            "source": "b_327ecc5b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_49f3d86f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_327ecc5b"
+        },
+        {
+            "source": "sec_a8750008",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3864921d"
+        }
+    ]
+}

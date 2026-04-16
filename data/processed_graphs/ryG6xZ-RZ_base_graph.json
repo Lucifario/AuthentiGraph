@@ -1,0 +1,913 @@
+{
+    "paper_metadata": {
+        "paper_id": "ryG6xZ-RZ",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_b367078b",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_545ac7fa",
+                        "type": "paragraph",
+                        "text": "Within the deep learning community, most current approaches to neural networks make use of high-level frameworks with a tensor domain-specific language (DSL) such as Torch (Collobert et al., 2011) , TensorFlow (Abadi et al., 2016) , PyTorch (PyTorch Development Team, 2016) , and MXNet (Chen et al., 2015) . Traditionally, developers would build a computation graph (or dynamically generate graph nodes) using a DSL and let the framework interpret the computation graph on parallel architectures such as NVIDIA GPUs. While using hand-tuned GPU subroutines usually yields the best performance for complex operators, advanced compiler techniques can be applied to simplify computation, merge high-level operators based on shaping conditions, and fuse compatible elementwise operators to a single kernel to minimize the latency between kernel launches. Recent projects, the TensorFlow XLA compiler (Leary & Wang, 2017) and the NNVM compiler (NNVM, 2017) including TVM (Chen et al., 2017) , have begun to apply compiler techniques to deep learning systems, targeting LLVM (Lattner & Adve, 2004) and various back-ends to achieve good performance. However, their design and implementation have not entirely followed established best practices in widely-used compiler frameworks in the industry.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b0",
+                            "Citation_b1",
+                            "Citation_b2",
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_92e0f1a6",
+                        "type": "paragraph",
+                        "text": "Moreover, some frameworks use operator-overloading algorithmic differentiation (AD) to compute gradients, leaving the gradient computation unoptimizable. The other approach to AD, source code transformation, can produce more efficient code. While frameworks such as TensorFlow already perform AD as a graph transformation and apply various optimizations, their AD transformation is not designed as a transformation pass in the pipeline of their compiler framework, but as part of the DSL library. Making AD part of the compiler framework would greatly simplify the development of DSLs, achieving separation of concerns. We introduce DLVM, a new compiler infrastructure for deep learning systems that addresses shortcomings of existing deep learning frameworks. Our solution includes (1) a domain-specific intermediate representation specifically designed for tensor computation, (2) principled use of modern compiler optimization techniques to substantially simplify neural network computation, including algebra simplification, AD checkpointing, compute kernel fusion, and various traditional compiler optimizations, (3) code generation through a mature compiler infrastructure that allows for transparent targeting of various hardware, and (4) an embedded DSL that supports static analysis, type safety, and natural expression of tensor computation, and has a just-in-time (JIT) compiler targeting DLVM for AD, optimizations, and code generation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_22e6579f",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_f5108912",
+                        "type": "paragraph",
+                        "text": "Numerous existing projects provide specialized systems for machine learning but are not closely related to our work. These include Apache SystemML (Ghoting et al., 2011) , a high-level language and framework for writing and executing machine learning problems targeting Apache Spark, and TACO (Kjolstad et al., 2017) , a C++ library for compiling and optimizing kernels that is more similar to Halide (Ragan- Kelley et al., 2013) than to our work. Our work treats the creation of neural networks as a compilers problem to be addressed using mature compiler techniques. SystemML does not consider this issue at all; TACO does use compiler optimization, but only at a very low level to generate individual kernels.",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b9",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c889d3ee",
+                        "type": "paragraph",
+                        "text": "Two projects closely related to this work are the TensorFlow XLA compiler and the NNVM compiler. The code representation in these frameworks is a \"sea of nodes\" representation, embedding control flow nodes and composite nodes in a data flow graph. To apply algorithmic differentiation on this IR requires non-standard processing. In contrast, our approach is designed from the start around the idea that a neural network (and its associated tensor computations) is itself a program, which is best optimized through robust application of mature techniques in a principled compilation pipeline. We represent tensor computation in static single assignment (SSA) form with control flow graph, and perform algorithmic differentiation, domain-specific optimizations, general-purpose optimizations, low-level optimizations, and code generation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5abf10f2",
+                        "type": "paragraph",
+                        "text": "XLA takes a similar approach to ours, transforming TensorFlow sub-graphs to XLA's HLO graph and performing optimizations. Our intermediate representation is much more expressive than XLA's by including modular IR components and general-purpose instructions; this enables our approach to support full-fledged DSLs including standalone compiled DSLs and perform more extensive optimizations such as inlining and interprocedual optimizations. Our approach also differs from XLA by representing composite functions such as min and max directly through primitive instructions  such as compare and select, which enables us to apply generic AD, and by using SSA form with control flow graph, which allows for reusing battle-tested SSA optimization algorithms in the LLVM community. Importantly, our entire infrastructure was designed from the start around a robust compile-time framework for tensor DSLs, whereas XLA has been adapted around the existing TensorFlow infrastructure with a particular focus on hardware support for Google's Tensor Processing Units (Jouppi et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_bb9d2244",
+                        "type": "paragraph",
+                        "text": "Where TVM and NNVM are built as a DSL and a graph library in Python with a C++ implementation, DLVM's architecture is closer to LLVM and the Swift Intermediate Language (Groff & Lattner, 2015) , having an IR file format and a full-fledged command line toolchain. More specifically, our work differs from NNVM and XLA in the design and presence of an IR that has a textual parsable format, a module/function/basic block hierarchy, custom type declarations and memory semantics. The textual IR enables robust unit testing via FileCheck, which is used extensively in LLVM and most LLVM-based compilers. Moreover, DLVM and its associated DSLs are implemented entirely in Swift, a safe systems programming language, and thus have an elegantly compact codebase and type-safe APIs.",
+                        "extracted_citations": [
+                            "Citation_b7"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_17802ce0",
+                "title": "DLVM",
+                "blocks": [
+                    {
+                        "block_id": "b_bacfebc0",
+                        "type": "paragraph",
+                        "text": "Deep Learning Virtual Machine (DLVM) is a compiler infrastructure designed for modern deep learning systems. 1 DLVM is designed to apply a multi-stage compiler optimization strategy to both high-level linear algebra and low-level parallelism, perform domain-specific transformations, relieve the overhead in front-end languages, and serve as the host for research and development of DSLs for deep learning. The complete DLVM software stack, including sample front-end deep learning DSLs, is shown in Figure 1 on the preceding page.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9dfb3b0f",
+                        "type": "paragraph",
+                        "text": "Figure 2 illustrates the major stages in the DLVM compilation pipeline. The DLVM compilation stages address algorithmic differentiation, domain-specific optimizations, general-purpose optimizations, and static code generation targeting a variety of compute architectures. The raw and optimizable stages allow constructs for high-level tensor operations and various high-level optimizations. The compute and schedule stages allow constructs for low-level array operations lowered from tensor operations in high-level stages, borrowing the design from Halide (Ragan- Kelley et al., 2013) .",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6225189a",
+                        "type": "paragraph",
+                        "text": "The DLVM Intermediate Representation (IR) is the core language of the system. It uses static single assignment (SSA) form, control flow graphs, high-level types including a first-class tensor type, and a set of linear algebra operators combined with a general-purpose instruction set (see Table 1 ). The system enables a wide variety of domain-specific analyses and transformations, such as reverse-mode AD, AD checkpointing, algebra simplification and linear algebra fusion.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3119fa36",
+                        "type": "paragraph",
+                        "text": "To demonstrate how DLVM helps the development of domain-specific languages (DSLs), in Section 3.4 we present one prototypical staged DSL: NNKit. NNKit features safe and natural expression of tensor computation alongside the host program, and targets DLVM for differentiation, optimizations and static code generation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_78aad09b",
+                "title": "Kind",
+                "blocks": [
+                    {
+                        "block_id": "b_b5ee572a",
+                        "type": "paragraph",
+                        "text": "Example Element-wise unary tanh %a: <10 x f32> Element-wise binary power %a: <10 x f32>, %b: 2: f32 Dot dot %a: <10 x 20 x f32>, %b: <20 x 2 x f32> Reduce reduce %a: <10 x 30 x f32> by add along 1 Transpose transpose %m: <2 x 3 x 4 x 5 x f32> Slice slice %a: <10 x 20 x i32> from 1 upto 5 Compare gt %a: <10 x 20 x bool>, %b: <1 x 20 x bool> Data type cast dataTypeCast %x: <10 x f32> to f64 Function application apply %foo(%x: f32, %y: f32): (f32, f32) -> f32 Branch branch 'block_name(%a: i32, %b: i32) Conditional branch conditional %cond: bool then 'bb0() else 'bb1() Shape cast shapeCast %a: <1 x 40 x f32> to 2 x 20",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_86d03f96",
+                        "type": "paragraph",
+                        "text": "Table 1 : This table illustrates a selection of the instructions in the DLVM virtual instruction set. The instruction set includes linear algebra operations such as tanh and dot in addition to control flow instructions such as branch.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_21e7b374",
+                "title": "DLVM CORE",
+                "blocks": [
+                    {
+                        "block_id": "b_d40bb443",
+                        "type": "paragraph",
+                        "text": "DLVM Core contains essential components for an optimizing compiler: IR, pass manager, and passes (see Figure 1 on page 2). The DLVM IR consists of a virtual instruction set, control flow graph and data flow representation. Passes are functions that traverse the intermediate representation of a program, either producing useful results as analyses of the program (analysis passes), or mutating the program for differentiation and optimizations (transform passes).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8863724b",
+                "title": "A DOMAIN-SPECIFIC COMPILER INTERMEDIATE REPRESENTATION FOR DLVM",
+                "blocks": [
+                    {
+                        "block_id": "b_d441d543",
+                        "type": "paragraph",
+                        "text": "Inspired by the LLVM IR (Lattner & Adve, 2004 ) and the Swift Intermediate Language (Groff & Lattner, 2015) , DLVM IR is a graph-based, modular code representation, with both an in-memory format and a textual format. The code representation has a hierarchy of abstractions: module, function, basic block, and instruction. An instruction is the minimal unit of code that operates on values, which can be globals, function arguments or temporary virtual registers produced by instructions. Each module contains a collection of type definitions, global values and functions. Each function has a control flow graph formed by basic blocks and control flow edges. Each basic block contains an ordered list of instructions with data dependencies forming a directed acyclic graph.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c2ef8348",
+                        "type": "paragraph",
+                        "text": "The DLVM IR has a high-level type system with tensor as a first-class type. The DLVM virtual instruction set includes domain-specific primitive math operators, as well as general-purpose instructions for memory management, control flow and function application. Domain-specific instructions include element-wise unary operators, such as tanh and negate, element-wise binary operators, such as add and power, and complex operators such as dot, transpose, and convolve. All element-wise binary operators support broadcasting. A sample of DLVM IR code is shown in Figure 3 on the next page.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_183b526b",
+                        "type": "paragraph",
+                        "text": "The DLVM instruction set does not include composite math functions such as softmax, sigmoid, min or max. All of these functions can be composed of primitive math instructions and control flow constructs. This design allows for the standard AD algorithm to be applied to any differentiable program, with no need for special handling of composite cases.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_aec2725a",
+                "title": "DOMAIN-SPECIFIC COMPILER PASSES FOR DLVM",
+                "blocks": [
+                    {
+                        "block_id": "b_a80f1d32",
+                        "type": "paragraph",
+                        "text": "DLVM has a full-fledged pass infrastructure, performing various analyses and two kinds of transformations: differentiation and optimization. Differentiation constructs function definitions from gradient declarations using adjoint code generation (see Section 3.1.3 below). Optimization is then performed on the resulting IR, maximizing the code performance. Optimizations include domainspecific optimizations, such as algebra simplification, linear algebra fusion, matrix multiplication reordering, and AD checkpointing, and traditional compiler optimizations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_16ef5f60",
+                        "type": "paragraph",
+                        "text": "module \"my_module\" stage raw // Representing function foo(x, w, b) = dot(x, w) + b func @foo: (<1 x 784 x f32>, <784 x 10 x f32>, <1 x 10 x f32>) -> <1 x 10 x f32> { 'entry(%x: <1 x 784 x f32>, %w: <784 x 10 x f32>, %b: <1 x 10 x f32>): %v0 = dot %x: <1 x 784 x f32>, %w: <784 x 10 x f32> %v1 = add %v0: <1 x 10 x f32>, %b: <1 x 10 x f32> return %v1: <1 x 10 x f32> } // Gradient of @foo with respect to all arguments [gradient @foo] func @foo_grad: (<1 x 784 x f32>, <784 x 10 x f32>, <1 x 10 x f32>) -> (<1 x 784 x f32>, <784 x 10 x f32>, <1 x 10 x f32>)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_32e469e9",
+                        "type": "paragraph",
+                        "text": "// Gradient of @foo with respect to arguments 1 and 2 // Keeping original output 0 // Seedable, able to take back-propagated gradient as a seed for AD [gradient @foo wrt 1, 2 keeping 0 seedable] func @foo_grad_3: (<1 x 784 x f32>, <784 x 10 x f32>, <1 x 10 x f32>, <1 x 10 x f32>) -> (<784 x 10 x f32>, <1 x 10 x f32>, <1 x 10 x f32>)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4e3c2689",
+                        "type": "paragraph",
+                        "text": "Figure 3 : Example code in DLVM intermediate representation. Note that some functions are annotated as defining the gradient of another function with respect some or all arguments. The body of these gradient functions will be automatically generated.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c2501280",
+                        "type": "paragraph",
+                        "text": "Since DLVM IR is aware of mathematical operators such as tanh and power, the algebra simplification pass can find and simplify certain mathematical operations that are expensive or redundant. For example, x 2 can be simplified to x x ( stands for element-wise multiplication), and x 0 can be simplified to constant 1. Matrix multiplication reordering is another classic optimization that minimizes the number of sub-operations in a chain of matrix multiplications with different dimensionality, based on matrix multiplication's associativity.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2dc3a779",
+                        "type": "paragraph",
+                        "text": "Since the DLVM optimizer is aware of linear algebra operations with static dimensionality, maximizing the performance by fusing verbose linear operations into a single matrix multiplication is beneficial as well. For example, it is very common to encounter expressions of the form Wx + b. When unoptimized, the matrix multiplication and the addition will be parallelized separately. Since launching compute kernels separately can be expensive, DLVM performs linear algebra fusion, which transforms subexpressions involving both matrix multiplication and element-wise operations into a single matrix multiplication instruction on padded tensors. Besides the simple pattern like an addition of matrix multiplication and a vector, we can apply the same approach to a polynomial of multiple matrix multiplications, turning the polynomial into a single matrix multiplication. For example, in a simple recurrent neural network (RNN), each cell of the recurrence is a feed forward neural network that takes two inputs: x t , the input local to the current timestep, and h t , the hidden state carried along the recurrence. The linear algebra fusion pass can simplify operations in h t = f (Wx t-1 +Uh t-1 +b) from two matrix multiplications and two additions into a single matrix multiplication. A more aggressive, interprocedural version of linear algebra fusion can optimize parameter passing and memory allocation, so that the entire concatenated matrix can be created and passed around in the first place without reallocation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_92fd7725",
+                "title": "ALGORITHMIC DIFFERENTIATION THROUGH ADJOINT CODE GENERATION",
+                "blocks": [
+                    {
+                        "block_id": "b_2d79b270",
+                        "type": "paragraph",
+                        "text": "Algorithmic differentiation (AD), also known as automatic differentiation, encompasses a family of a well-known techniques for algorithmically obtaining the derivatives of a function f : x \u2208 R n \u2192 y \u2208 R m (Naumann, 2011). The function f can be represented as a directed acyclic computation graph representing the composition of elementary computational operations for which the respective derivatives are well known. The partial derivative \u2202yj \u2202xi can be computed through recursive applications of the chain rule, either in the forward direction (corresponding to a bottom-up traversal of the computation graph) or in the backward direction (corresponding to a top-down traversal of the computation graph). The former approach, called forward-mode or tangent-mode AD, is used in some research communities, most commonly when m n (Goodfellow et al., 2016) . The latter approach, which includes the back-propagation algorithm (Rumelhart et al., 1986 ) as a special case, is called reverse-mode or adjoint-mode AD, and encompasses the techniques most commonly used for training the weights in neural networks.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fa8971d1",
+                        "type": "paragraph",
+                        "text": "In DLVM, the differentiation pass is responsible for performing reverse-mode AD. This pass is responsible for generating DLVM IR code that calculates the derivative of a differentiable function. A function is marked as being automatically differentiable via gradient declarations. A gradient declaration is a function in a module that is declared with its mathematical relation with another function in the module and no function body. The function @foo_grad in Figure 3 is an example of such a function. Gradient declarations are configurable, e.g. specifying arguments to differentiate with respect to, keeping original outputs, and toggling seedability to accept back-propagated gradients. The differentiation pass, when applied, canonicalizes every gradient declaration in the module to a normal function definition with basic blocks and instructions. The canonicalization process first copies basic blocks and instructions from the original function to the new function body, and then applies adjoint code generation to the function. Unlike many of the existing deep learning frameworks, AD in DLVM is a source code transformation, not interpretation (operator overloading) over the same program. This makes the compiler able to perform optimizations on the gradient computation separately and enables higher order differentiation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b4c03a88",
+                        "type": "paragraph",
+                        "text": "Given a differentiable function f (x 1 , x 2 , . . . , x n ), this pass creates a new function that computes the Jacobian J f . This approach to AD has several advantages with respect to AD performed by operator overloading / graph interpretation. Unlike operator overloading, the gradient function produced by AD is a standalone function that sits uniformly alongside other functions in an IR module, representationally unrelated to the original function. The generated function takes original inputs and produces a tuple of partial derivatives with respect to the inputs. In AD, not all values in the forward evaluation will necessarily be used to compute derivatives. In DLVM, unused operations can be easily eliminated by the aggressive dead code elimination pass in the compilation pipeline (see Section 3.1.4). In addition, an AD-specific optimization technique called checkpointing can further reduce memory consumption during gradient computation. AD in DLVM is configurable. The front-end can choose to differentiate a function with respect to selected arguments, to keep some of the outputs of the original function, to apply differentiation to a specific output when there are multiple return values, or to enable the function to accept backpropagated gradients (seeds) through function composition, all by gradient declarations. If the function returns multiple values in a tuple, the gradient declaration can also specify which tuple element to differentiate. Our approach to AD is implemented as a transformation from one function to another function. This approach also makes higher-order differentiation possible; this can be accomplished by declaring a higher-order gradient function that differentiates the original gradient function.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ba6b30d5",
+                "title": "GENERAL-PURPOSE OPTIMIZATIONS FOR DLVM",
+                "blocks": [
+                    {
+                        "block_id": "b_c3773917",
+                        "type": "paragraph",
+                        "text": "General-purpose optimizations refer to traditional compiler optimizations applied to DLVM IR. These optimizations are important at the DLVM stage in the compilation pipeline, since linear algebra computation can be highly optimized or eliminated before they get lowered to LLVM IR which contain parallel execution and low-level information that prevent LLVM optimizations from identifying high-level patterns. Some of these optimizations are aggressive dead code elimination, common subexpression elimination, and sparse conditional constant propagation. Applying such optimizations on gradient computation is not feasible in other approaches to AD that use graph interpretation (operator overloading), because the forward pass and the backward pass are tied together in a single graph; mutating either evaluation pass will alter the semantics of the other.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2e948ce0",
+                "title": "CODE GENERATION",
+                "blocks": [
+                    {
+                        "block_id": "b_75f5cbb8",
+                        "type": "paragraph",
+                        "text": "Two major design goals of DLVM are the ability to target multiple heterogenous parallel architectures from the same front-end DSL code (and corresponding DLVM IR), and the ability to perform aggressive optimizations on lowered programs. In order to attain these goals, DLVM code generation transforms DLVM IR into LLVM IR. LLVM is a robust and mature compiler infrastructure with multiple back-ends, including NVIDIA GPUs. Many high-level DLVM IR linear algebra instructions over tensors abstract lower-level operations. The DLVM compiler transforms the high-level DLVM IR into lower-level stages and ultimately into calls to BLAS and compute kernels in LLVM IR. Existing LLVM utilities are used to compile the generated LLVM IR to the final binary.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ac45e094",
+                        "type": "paragraph",
+                        "text": "In order to take full advantage of a variety of emerging heterogeneous parallel architectures, we plan for future versions of DLVM to target the IR of HPVM (Srivastava et al., 2016) , a higherlevel heterogeneous compiler extension to LLVM IR that allows for transparent targeting of diverse architectures from a data flow graph.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7f0b4b9d",
+                "title": "DLVM COMMAND LINE TOOLCHAIN",
+                "blocks": [
+                    {
+                        "block_id": "b_3bfc613d",
+                        "type": "paragraph",
+                        "text": "The front-end software associated with each DSL (see Section 3.4) is responsible for generating a DLVM IR for a given source language program to be compiled. The DLVM compiler infrastructure itself is a compiler from DLVM IR to LLVM IR, therefore having a command line toolchain is necessary for verifying, transforming and compiling batches of DLVM IR files ( * .dl). Unlike XLA and NNVM/TVM, which only provide a Python/C++ interface to their users, DLVM provides a command line interface like any industry-standard compiler.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e65a8c32",
+                        "type": "paragraph",
+                        "text": "The DLVM optimizer utility, dlopt, accepts * .dl IR files and applies user-specified optimization passes on them. The DLVM compiler driver, dlc, accepts * .dl IR files and performs user-specified tasks, such as verification, differentiation, optimization passes, stage lowering passes, and code generation; the driver invokes the DLVM core library to achieve these tasks. Because of having a textual format of the IR, the DLVM framework can easily make use of the LLVM Integrated Tester (lit) and FileCheck to perform robust unit testing. In future development, we plan to introduce a DLVM bitcode format for compact storage and high-throughput processing of DLVM code.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7de44ce0",
+                "title": "NEURAL NETWORK DSLS",
+                "blocks": [
+                    {
+                        "block_id": "b_93a52469",
+                        "type": "paragraph",
+                        "text": "Most of existing deep learning DSLs are embedded in a dynamically typed scripting language such as Python and Lua. While these scripting languages provide flexibility and a large number of libraries for scientific computing, they can act as a barrier between lightweight prototyping code and systematic production code. This barrier significantly reduces the reliability of ML software, resulting in suboptimal programming experience and unnecessarily effortful development cycles.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a600f451",
+                        "type": "paragraph",
+                        "text": "In software engineering, a proven approach to tackle this problem is language and compiler technologies, starting from a language that is amenable to static analysis. A well-designed deep learning DSL should support the needs of deep learning software developers by providing a safe environment for rapid prototyping, while simultaneously generating highly efficient code for training and inference. DSLs in a scripting language can easily achieve rapid prototyping, but they are generally incapable of providing a safe environment with optimal performance. We believe that the best solution is DSLs embedded in a type-safe, type-inferring programming language that is both fast and easy to learn. In our initial release of DLVM, we provide one such DSL, both as a proof-of-concept and as a reference implementation that showcases the capabilities of DLVM as a platform for deep learning DSL development.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_08ff13b4",
+                        "type": "paragraph",
+                        "text": "NNKit is a staged DSL embedded in Swift, featuring natural expression of tensor computation alongside the host program without losing static analyses and optimizations on the tensor program. Inspired by Lightweight Modular Staging (Rompf & Odersky, 2010) , NNKit leverages the static type system of Swift to guarantee type safety of the DSL. Tensor types are wrapped in Rep<T>, meaning the representation of some computation that produces data of type T. Tensor operators overloaded for Rep are essentially AST builders for delayed evaluation. Instead of generating computation nodes at runtime and performing operator-overloading AD like PyTorch or TensorFlow Eager (Google Brain Team, 2017), NNKit tensor computations are staged once during the lifetime of the host program. At invocation time of staged functions, NNKit emits shape-specialized DLVM IR and leverages DLVM // Second order derivative of 'g' with respect to 'w' let d2g_dw2 = gradient(of: dg, from: 0, withRespectTo: (1)) // 'd2g_dw2' has type: // Rep<(Float2D, Float2D, Float2D) -> Float2D> The NNKit just-in-time compiler has four important phases: The first phase, expression staging, produces an unshaped graph IR of the tensor computation. The second phase, shape specialization, prepares to generate statically shaped DLVM IR for staged functions when they are applied to shaped tensors. The third phase, lowering, generates DLVM IR and passes it through DLVM, producing a dynamic library containing a function symbol. The final phase, function reification, loads the binary and wraps the low-level function to a Swift function.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6a9850a1",
+                        "type": "paragraph",
+                        "text": "We anticipate other existing deep learning frameworks, such as TensorFlow, could be adapted to use DLVM as a back-end to their tensor math DSLs.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_abd21aaa",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_ed5b742c",
+                        "type": "paragraph",
+                        "text": "The deep learning research community has a rich variety of available frameworks. While two existing projects have attempted a compilers approach to deep learning frameworks, and have respectively achieved good integration with existing systems (TensorFlow XLA) and good performance (NNVM + TVM), their design philosophies have not entirely followed established best practices in optimizing compiler design. While well intentioned, the remaining vast majority of other frameworks have failed to observe that the problem of front-end DSLs, algorithmic differentiation, and converting a neural network into efficient executable code is, at its core, a compilers problem. As a result, important issues of extensibility and optimization have been addressed in less than optimal fashion in such frameworks. Nevertheless, several such frameworks have achieved wide adoption. We believe that the principled application of optimizing compiler techniques will lead to substantial improvements in the tools available to deep learning researchers. DLVM and its associated front-end DSLs have a major role to play in this future. Our existing implementation supports reverse-mode AD in the core language, and utilizes LLVM to target NVIDIA GPUs. In our ongoing work, we plan to substantially increase the number of supported hardware architectures by utilizing HPVM as an additional back-end, and explore more advanced AD techniques such as mixing forward and reverse modes.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "TensorFlow: Large-scale machine learning on heterogeneous distributed systems Mart\u00edn Abadi Ashish Agarwal Paul Barham Eugene Brevdo Zhifeng Chen Craig Citro Gregory S Corrado Andy Davis Jeffrey Dean Matthieu Devin Sanjay Ghemawat Ian J Goodfellow Andrew Harp Geoffrey Irving Michael Isard Yangqing Jia Rafal J\u00f3zefowicz Lukasz Kaiser Manjunath Kudlur Josh Levenberg Dan Man\u00e9 Rajat Monga Sherry Moore Derek Gordon Murray Chris Olah Mike Schuster Jonathon Shlens Benoit Steiner Ilya Sutskever Kunal Talwar Paul A Tucker Vincent Vanhoucke Vijay Vasudevan Fernanda B Vi\u00e9gas Oriol Vinyals Pete Warden Martin Wattenberg Martin Wicke Yuan Yu Xiaoqiang Zheng CoRR, abs/1603.04467 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Mxnet: A flexible and efficient machine learning library for heterogeneous distributed systems Tianqi Chen Mu Li Yutian Li Min Lin Naiyan Wang Minjie Wang Tianjun Xiao Bing Xu Chiyuan Zhang Zheng Zhang CoRR, abs/1512.01274 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "TVM: An end to end IR stack for deploying deep learning workloads on hardware platforms Tianqi Chen Thierry Moreau Ziheng Jiang Haichen Shen 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Torch7: A Matlab-like environment for machine learning Ronan Collobert Koray Kavukcuoglu Cl\u00e9ment Farabet NIPS Big Learning Workshop: Algorithms, Systems, and Tools for Learning at Scale December 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Systemml: Declarative machine learning on MapReduce Amol Ghoting Rajasekar Krishnamurthy Edwin Pednault Berthold Reinwald Vikas Sindhwani Shirish Tatikonda Yuanyuan Tian Shivakumar Vaithyanathan 10.1109/ICDE.2011.5767930 Proceedings of the 2011 IEEE 27th International Conference on Data Engineering, ICDE '11 the 2011 IEEE 27th International Conference on Data Engineering, ICDE '11 Washington, DC, USA IEEE Computer Society 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Deep Learning Ian Goodfellow Yoshua Bengio Aaron Courville 2016 MIT Press",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Eager Execution: An imperative, define-by-run interface to TensorFlow Google Brain Team 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Swift's High-Level IR: A Case Study of Complementing LLVM IR with Language-Specific Optimization Joe Groff Chris Lattner LLVM Developers' Meeting 2015. 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Norman P Jouppi Cliff Young Nishant Patil David Patterson Gaurav Agrawal Raminder Bajwa Sarah Bates Suresh Bhatia Nan Boden Al Borchers Rick Boyle Pierre-Luc Cantin Clifford Chao Chris Clark Jeremy Coriell Mike Daley Matt Dau Jeffrey Dean Ben Gelb Tara Vazir Ghaemmaghami Rajendra Gottipati William Gulland Robert Hagmann Richard C Ho Doug Hogberg John Hu Robert Hundt Dan Hurt Julian Ibarz Aaron Jaffey Alek Jaworski Alexander Kaplan Harshit Khaitan Andy Koch Naveen Kumar Steve Lacy James Laudon James Law Diemthu Le Chris Leary Zhuyuan Liu Kyle Lucke Alan Lundin Gordon Mackean Adriana Maggiore Maire Mahony Kieran Miller Rahul Nagarajan Ravi Narayanaswami Ray Ni Kathy Nix Thomas Norrie Mark Omernick Narayana Penukonda Andy Phelps Jonathan Ross Amir Salek Emad Samadiani Chris Severn Gregory Sizikov Matthew Snelham Jed Souter Dan Steinberg Andy Swing Mercedes Tan Gregory Thorson Bo Tian Horia Toma Erick Tuttle Vijay Vasudevan Richard Walter Walter Wang Eric Wilcox Doe Hyun Yoon CoRR, abs/1704.04760 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "The tensor algebra compiler Fredrik Kjolstad Shoaib Kamil Stephen Chou David Lugato Saman Amarasinghe 10.1145/3133901 Proc. ACM Program. Lang 2475-1421 1 October 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "LLVM: A Compilation Framework for Lifelong Program Analysis & Transformation Chris Lattner Vikram Adve Proceedings of the 2004 International Symposium on Code Generation and Optimization (CGO'04) the 2004 International Symposium on Code Generation and Optimization (CGO'04) Palo Alto, California Mar 2004",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Uwe Naumann. The Art of Differentiating Computer Programs Chris Leary Todd Wang 10.1137/1.9781611972078 Society for Industrial and Applied Mathematics 2017. February 2017. 2011 XLA: TensorFlow, compiled! TensorFlow Dev Summit",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "NNVM compiler: Open compiler for AI frameworks Nnvm 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Tensors and Dynamic neural networks in Python with strong GPU acceleration 2016 PyTorch Development Team",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Halide: A language and compiler for optimizing parallelism, locality, and recomputation in image processing pipelines Jonathan Ragan-Kelley Connelly Barnes Andrew Adams Sylvain Paris Fr\u00e9do Durand Saman Amarasinghe 10.1145/2491956.2462176 Proceedings of the 34th ACM SIGPLAN Conference on Programming Language Design and Implementation, PLDI '13 the 34th ACM SIGPLAN Conference on Programming Language Design and Implementation, PLDI '13 New York, NY, USA ACM 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Lightweight modular staging: A pragmatic approach to runtime code generation and compiled dsls Tiark Rompf Martin Odersky 10.1145/1868294.1868314 Proceedings of the Ninth International Conference on Generative Programming and Component Engineering, GPCE '10 the Ninth International Conference on Generative Programming and Component Engineering, GPCE '10 New York, NY, USA ACM 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "David E Rumelhart James L Mcclelland Parallel Distributed Processing: Explorations in the Microstructure of Cognition Corporate Pdp Research Group Cambridge, MA, USA MIT Press 1986 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "HPVM: A portable virtual instruction set for heterogeneous parallel systems Prakalp Srivastava Maria Kotsifakou Vikram S Adve CoRR, abs/1611.00860 2016",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.579,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "Modern-day deep learning engines (e.g., tensorflow, caffe) perform code generation (to generated the backward pass) and a host of other optimizations to run today's deep learning workloads.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Unfortunately, the manner in which they go about doing this is ad hoc and does not adopt best practices developed in the compilers and programming languages communities.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The obvious consequence is missed opportunities for optimizing deep learning workloads.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "This paper proposes to fix this by re-designing from ground up the deep learning engine placing particular focus on code generation, compilation (e.g., type checking), optimization (e.g., fusion, matrix chain reordering, common subexpression elimination) etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Unfortunately, the paper falls short in two significant respects: It does not adequately cite related work and it does not present any experiments to quantify the benefits they claim will be achieved by their new compiler.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Pros:\n- The paper proposes a very relevant and timely proposal to design a modern day deep learning compiler framework.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "- Their design includes a number of optimizations that are missing from currently available deep learning engines which can lead to significant benefits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "Cons:\n- Related work is not adequately referenced.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Here are two (others should be easy to find): Apache SystemML (https://systemml.apache.org/), TACO (http://tensor-compiler.org/)\n- Experiments section is conspicuous by its absence.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "They provide no micro benchmarks or end-to-end deep learning use cases to quantify the benefits of their compiler vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "some of the currently available ones.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.9065,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The success of Deep Learning is, in no small part, due the development of libraries and frameworks which have made building novel models much easier, faster and less error prone and also make taking advantage of modern hardware (such as GPUs) more accessible.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "This is still a vital area of work, as new types of models and hardware are developed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "This work argues that prior solutions do not take advantage of the fact that a tensor compiler is, essentially, just a compiler.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "They introduce  DLVM (and NNKit) which comprises LLVM based compiler infrastructure and a DSL allowing the use of Swift to describe a typed tensor graph.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "Unusually, compared to most frameworks, gradients are calculated using source code transformation, which is argued to allow for easier optimization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "This paper is not well-adapted for an ICLR audience, many of which are not experts in compilers or LLVM.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "For example, the Figure 3, table 1 would be benefit from being shorter with more exposition on what the reader should understand and take away from them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "The primary weakness of this work is the lack of careful comparison with existing framework.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "The authors mention several philosophical arguments in favor of their approach, but is there a concrete example of an model which is cumbersome to write in an existing framework but easy here?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "recent libraries pytorch, TF eager can express conditional logic much more simply than previous approaches, its easy to communicate why you might use them).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Because of this work seems likely to be of limited interest to the ICLR audience, most of which are potentially interested users rather than compiler experts.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "There is also no benchmarking, which is at odds with the claims the compiler approaches allows easier optimization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "One aspect that seemed under-addressed and which often a crucial aspect of a good framework, is how general purpose code e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "for loading data or logging interacts with the accelerated tensor code.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.3146,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "Deep learning is a technique that has attracted a lot of attention.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Typically, when using a deep learning framework we describe the network using some kind of computation graph, e.g., as in TensorFlow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "A drawback is that the execution performance can be limited, e.g., due to run-time interpretation of the computation graph.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "This paper takes a different approach and presents a compiler framework that allows definition of domain-specific languages (DSLs) for deep learning system, defines a number of compilation stages that can take advantage of standard compiler optimizations as well as specialized optimizations for neural networks using an intermediate representation, and also a back-end.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Thus a computation graph is compiled directly to binary code, which increases the performance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "For example, the compiler infrastructure enables optimization over multiple kernels using kernel fusion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "I find the paper very interesting and the findings can have a significant impact on how we develop deep learning systems in the future.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "The paper addresses an important problem, is very well written, and is easy to follow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "The different optimization stages are well describe and also motive why they improve performance over existing techniques.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "The intention is to provide the framework as open source in the future.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "The main drawback of the paper is the lack of evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "Although the framework is well described, its application and use are only demonstrated with a very small code example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "No comparison with existing frameworks is done, and no evaluation of the actual performance is done.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_545ac7fa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_545ac7fa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_545ac7fa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_545ac7fa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_545ac7fa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_b367078b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_545ac7fa"
+        },
+        {
+            "source": "sec_b367078b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_92e0f1a6"
+        },
+        {
+            "source": "b_f5108912",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_f5108912",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_f5108912",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_22e6579f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f5108912"
+        },
+        {
+            "source": "sec_22e6579f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c889d3ee"
+        },
+        {
+            "source": "b_5abf10f2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_22e6579f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5abf10f2"
+        },
+        {
+            "source": "b_bb9d2244",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_22e6579f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bb9d2244"
+        },
+        {
+            "source": "sec_17802ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bacfebc0"
+        },
+        {
+            "source": "b_9dfb3b0f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_17802ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9dfb3b0f"
+        },
+        {
+            "source": "sec_17802ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6225189a"
+        },
+        {
+            "source": "sec_17802ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3119fa36"
+        },
+        {
+            "source": "sec_78aad09b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b5ee572a"
+        },
+        {
+            "source": "sec_78aad09b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_86d03f96"
+        },
+        {
+            "source": "sec_21e7b374",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d40bb443"
+        },
+        {
+            "source": "b_d441d543",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_d441d543",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_8863724b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d441d543"
+        },
+        {
+            "source": "sec_8863724b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c2ef8348"
+        },
+        {
+            "source": "sec_8863724b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_183b526b"
+        },
+        {
+            "source": "sec_aec2725a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a80f1d32"
+        },
+        {
+            "source": "sec_aec2725a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_16ef5f60"
+        },
+        {
+            "source": "sec_aec2725a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_32e469e9"
+        },
+        {
+            "source": "sec_aec2725a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4e3c2689"
+        },
+        {
+            "source": "sec_aec2725a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c2501280"
+        },
+        {
+            "source": "sec_aec2725a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2dc3a779"
+        },
+        {
+            "source": "b_2d79b270",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_2d79b270",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_92fd7725",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2d79b270"
+        },
+        {
+            "source": "sec_92fd7725",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fa8971d1"
+        },
+        {
+            "source": "sec_92fd7725",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b4c03a88"
+        },
+        {
+            "source": "sec_ba6b30d5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c3773917"
+        },
+        {
+            "source": "sec_2e948ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_75f5cbb8"
+        },
+        {
+            "source": "b_ac45e094",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_2e948ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ac45e094"
+        },
+        {
+            "source": "sec_7f0b4b9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3bfc613d"
+        },
+        {
+            "source": "sec_7f0b4b9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e65a8c32"
+        },
+        {
+            "source": "sec_7de44ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_93a52469"
+        },
+        {
+            "source": "sec_7de44ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a600f451"
+        },
+        {
+            "source": "b_08ff13b4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_7de44ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08ff13b4"
+        },
+        {
+            "source": "sec_7de44ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6a9850a1"
+        },
+        {
+            "source": "sec_abd21aaa",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ed5b742c"
+        }
+    ]
+}

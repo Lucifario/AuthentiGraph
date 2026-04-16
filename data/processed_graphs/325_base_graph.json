@@ -1,0 +1,2346 @@
+{
+    "paper_metadata": {
+        "paper_id": "325",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Accepted",
+        "total_reviews_available": 10
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_693a7cf7",
+                "title": "INTRODUCTION AND MOTIVATION",
+                "blocks": [
+                    {
+                        "block_id": "b_167fe0d6",
+                        "type": "paragraph",
+                        "text": "To go beyond the relatively simpler tasks of classification and regression, advancing our ability to learn good generative models of high-dimensional data appears essential. There are many scenarios where one needs to efficiently produce good high-dimensional outputs where output dimensions have unknown intricate statistical dependencies: from generating realistic images, segmentations, text, speech, keypoint or joint positions, etc..., possibly as an answer to the same, other, or multiple input modalities. These are typically cases where there is not just one right answer but a variety of equally valid ones following a non-trivial and unknown distribution. A fundamental ingredient for such scenarios is thus the ability to learn a good generative model from data, one from which we can subsequently efficiently generate varied samples of high quality.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7e3fb35a",
+                        "type": "paragraph",
+                        "text": "Many approaches for learning to generate high dimensional samples have been and are still actively being investigated. These approaches can be roughly classified under the following broad categories:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3bbc6c8e",
+                        "type": "paragraph",
+                        "text": "\u2022 Ordered visible dimension sampling (van den Oord et al., 2016; Larochelle & Murray, 2011) . In this type of auto-regressive approach, output dimensions (or groups of conditionally independent dimensions) are given an arbitrary fixed ordering, and each is sampled conditionally on the previous sampled ones. This strategy is often implemented using a recurrent network (LSTM or GRU). Desirable properties of this type of strategy are that the exact log likelihood can usually be computed tractably, and sampling is exact. Undesirable properties follow from the forced ordering, whose arbitrariness feels unsatisfactory especially for domains that do not have a natural ordering (e.g. images), and imposes for high-dimensional output a long sequential generation that can be slow. \u2022 Undirected graphical models with multiple layers of latent variables. These make inference, and thus learning, particularly hard and tend to be costly to sample from (Salakhutdinov & Hinton, 2009 ). \u2022 Directed graphical models trained as variational autoencoders (VAE) (Kingma & Welling, 2014; Rezende et al., 2014) \u2022 Adversarially-trained generative networks. (GAN) (Goodfellow et al., 2014) \u2022 Stochastic neural networks, i.e. networks with stochastic neurons, trained by an adapted form of stochastic backpropagation \u2022 Generative uses of denoising autoencoders (Vincent et al., 2010) and their generalization as Generative Stochastic Networks (Alain et al., 2016) \u2022 Inverting a non-equilibrium thermodynamic slow diffusion process (Sohl-Dickstein et al., 2015) \u2022 Continuous transformation of a distribution by invertible functions (Dinh et al. (2014) , also used for variational inference in Rezende & Mohamed (2015) )",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b11",
+                            "Citation_b19",
+                            "Citation_b9",
+                            "Citation_b17",
+                            "Citation_b6",
+                            "Citation_b26",
+                            "Citation_b0",
+                            "Citation_b22",
+                            "Citation_b4",
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_309061df",
+                        "type": "paragraph",
+                        "text": "Several of these approaches are based on maximizing an explicit or implicit model log-likelihood or a lower bound of its log-likelihood, but some successful ones are not e.g. GANs. The approach we propose here is based on the notion of \"denoising\" and thus takes its root in denoising autoencoders and the GSN type of approaches. It is also highly related to the non-equilibrium thermodynamics inverse diffusion approach of Sohl-Dickstein et al. (2015) . One key aspect that distinguishes these types of methods from others listed above is that sample generation is achieved thanks to a learned stochastic mapping from input space to input space, rather than from a latent-space to input-space.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8d0596c4",
+                        "type": "paragraph",
+                        "text": "Specifically, in the present work, we propose to learn to generate high quality samples through a process of progressive, stochastic, denoising, starting from a simple initial \"noise\" sample generated in input space from a simple factorial distribution i.e. one that does not take into account any dependency or structure between dimensions. This, in effect, amounts to learning the transition operator of a Markov chain operating on input space. Starting from such an initial \"noise\" input, and repeatedly applying the operator for a small fixed number T of steps, we aim to obtain a high quality resulting sample, effectively modeling the training data distribution. Our training procedure uses a novel \"target-infusion\" technique, designed to slightly bias model sampling to move towards a specific data point during training, and thus provide inputs to denoise which are likely under the model's sample generation paths. By contrast with Sohl-Dickstein et al. (2015) which consists in inverting a slow and fixed diffusion process, our infusion chains make a few large jumps and follow the model distribution as the learning progresses.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_61113fd1",
+                        "type": "paragraph",
+                        "text": "The rest of this paper is structured as follows: Section 2 formally defines the model and training procedure. Section 3 discusses and contrasts our approach with the most related methods from the literature. Section 4 presents experiments that validate the approach. Section 5 concludes and proposes future work directions.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3a70ccf7",
+                "title": "SETUP",
+                "blocks": [
+                    {
+                        "block_id": "b_51a41483",
+                        "type": "paragraph",
+                        "text": "We are given a finite data set D containing n points in R d , supposed drawn i.i.d from an unknown distribution q * . The data set D is supposed split into training, validation and test subsets D train , D valid , D test . We will denote q * train the empirical distribution associated to the training set, and use x to denote observed samples from the data set. We are interested in learning the parameters of a generative model p conceived as a Markov Chain from which we can efficiently sample. Note that we are interested in learning an operator that will display fast \"burn-in\" from the initial factorial \"noise\" distribution, but beyond the initial T steps we are not concerned about potential slow mixing or being stuck. We will first describe the sampling procedure used to sample from a trained model, before explaining our training procedure.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cbc1fa05",
+                "title": "GENERATIVE MODEL SAMPLING PROCEDURE",
+                "blocks": [
+                    {
+                        "block_id": "b_652cf3ad",
+                        "type": "paragraph",
+                        "text": "The generative model p is defined as the following sampling procedure:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_70866ec2",
+                        "type": "paragraph",
+                        "text": "\u2022 Using a simple factorial distribution p (0) (z (0) ), draw an initial sample z (0) \u223c p (0) , where z (0) \u2208 R d . Since p (0) is factorial, the d components of z (0) are independent: p 0 cannot model any dependency structure. z (0) can be pictured as essentially unstructured random noise. \u2022 Repeatedly apply T times a stochastic transition operator p (t) (z (t) |z (t-1) ), yielding a more \"denoised\" sample z (t) \u223c p (t) (z (t) |z (t-1) ), where all z (t) \u2208 R d .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f75e3ecd",
+                        "type": "paragraph",
+                        "text": "Figure 1 : The model sampling chain. Each row shows a sample from p(z (0) , . . . , z (T ) ) for a model that has been trained on MNIST digits. We see how the learned Markov transition operator progressively denoises an initial unstructured noise sample. We can also see that there remains ambiguity in the early steps as to what digit this could become. This ambiguity gets resolved only in later steps.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_394c6869",
+                        "type": "paragraph",
+                        "text": "Even after a few initial steps, stochasticity could have made a chain move to a different final digit shape.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5f13677f",
+                        "type": "paragraph",
+                        "text": "\u2022 Output z (T ) as the final generated sample.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_247318a1",
+                        "type": "paragraph",
+                        "text": "Our generative model distribution is thus p(z (T ) ), the marginal associated to joint p(z (0) , . . . ,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ff8493db",
+                        "type": "paragraph",
+                        "text": "In summary, samples from model p are generated, starting with an initial sample from a simple distribution p (0) , by taking the T th sample along Markov chain z (0) \u2192 z (1) \u2192 z (2) \u2192 . . . \u2192 z (T ) whose transition operator is p (t) (z (t) |z (t-1) ). We will call this chain the model sampling chain. Figure 1 illustrates this sampling procedure using a model (i.e. transition operator) that was trained on MNIST. Note that we impose no formal requirement that the chain converges to a stationary distribution, as we simply read-out z (T ) as the samples from our model p. The chain also needs not be time-homogeneous, as highlighted by notation p (t) for the transitions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c9f2090b",
+                        "type": "paragraph",
+                        "text": "The set of parameters \u03b8 of model p comprise the parameters of p (0) and the parameters of transition operator p (t) (z (t) |z (t-1) ). For tractability, learnability, and efficient sampling, these distributions will be chosen factorial, i.e. p (0) (z",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_52ff8d4a",
+                        "type": "paragraph",
+                        "text": "i |z (t-1) ). Note that the conditional distribution of an individual component i, p",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fa173c7d",
+                        "type": "paragraph",
+                        "text": "i |z (t-1) ) may however be multimodal, e.g. a mixture in which case p (t) (z (t) |z (t-1) ) would be a product of independent mixtures (conditioned on z (t-1) ), one per dimension. In our experiments, we will take the p (t) (z (t) |z (t-1) ) to be simple diagonal Gaussian yielding a Deep Latent Gaussian Model (DLGM) as in Rezende et al. (2014) .",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_65088213",
+                "title": "INFUSION TRAINING PROCEDURE",
+                "blocks": [
+                    {
+                        "block_id": "b_5a8ea5b4",
+                        "type": "paragraph",
+                        "text": "We want to train the parameters of model p such that samples from D train are likely of being generated under the model sampling chain. Let \u03b8 (0) be the parameters of p (0) and let \u03b8 (t) be the parameters of p (t) (z (t) |z (t-1) ). Note that parameters \u03b8 (t) for t > 0 can straightforwardly be shared across time steps, which we will be doing in practice. Having committed to using (conditionally) factorial distributions for our p (0) (z (0) ) and p (t) (z (t) |z (t-1) ), that are both easy to learn and cheap to sample from, let us first consider the following greedy stagewise procedure. We can easily learn p (0) i (z (0) ) to model the marginal distribution of each component x i of the input, by training it by gradient descent on a maximum likelihood objective, i.e.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_47aaceaf",
+                        "type": "paragraph",
+                        "text": "This gives us a first, very crude unstructured (factorial) model of q * .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4b483bec",
+                        "type": "paragraph",
+                        "text": "Having learned this p (0) , we might be tempted to then greedily learn the next stage p (1) of the chain in a similar fashion, after drawing samples z (0) \u223c p (0) in an attempt to learn to \"denoise\" the sampled z (0) into x. Yet the corresponding following training objective \u03b8 (1) = arg max \u03b8 E x\u223cq * train ,z (0) \u223cp (0) log p (1) (x|z (0) ; \u03b8) makes no sense: x and z (0) are sampled independently of each other so z (0) contains no information about x, hence p (1) (x|z (0) ) = p (1) (x). So maximizing this second objective becomes essentially the same as what we did when learning p (0) . We would learn nothing more. It is essential, if we hope to learn a useful conditional distribution p (1) (x|z (0) ) that it be trained on particular z (0) containing some information about x. In other words, we should not take our training inputs to be samples from p (0) but from a slightly different distribution, biased towards containing some information about x. Let us call it q (0) (z (0) |x). A natural choice for it, if it were possible, would be to take q (0) (z (0) |x) = p(z (0) |z (T ) = x) but this is an intractable inference, as all intermediate z (t) between z (0) and z (T ) are effectively latent states that we would need to marginalize over. Using a workaround such as a variational or MCMC approach would be a usual fallback. Instead, let us focus on our initial intent of guiding a progressive stochastic denoising, and think if we can come up with a different way to construct q (0) (z (0) |x) and similarly for the next steps q",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e8c072b3",
+                        "type": "paragraph",
+                        "text": "Eventually, we expect a sequence of samples from Markov chain p to move from initial \"noise\" towards a specific example x from the training set rather than another one, primarily if a sample along the chain \"resembles\" x to some degree. This means that the transition operator should learn to pick up a minor resemblance with an x in order to transition to something likely to be even more similar to x. In other words, we expect samples along a chain leading to x to both have high probability under the transition operator of the chain p (t) (z (t) |z (t-1) ), and to have some form of at least partial \"resemblance\" with x likely to increase as we progress along the chain. One highly inefficient way to emulate such a chain of samples would be, for teach step t, to sample many candidate samples from the transition operator (a conditionally factorial distribution) until we generate one that has some minimal \"resemblance\" to x (e.g. for a discrete space, this resemblance measure could be based on their Hamming distance). A qualitatively similar result can be obtained at a negligible cost by sampling from a factorial distribution that is very close to the one given by the transition operator, but very slightly biased towards producing something closer to x. Specifically, we can \"infuse\" a little of x into our sample by choosing for each input dimension, whether we sample it from the distribution given for that dimension by the transition operator, or whether, with a small probability, we take the value of that dimension from x. Samples from this biased chain, in which we slightly \"infuse\" x, will provide us with the inputs of our input-target training pairs for the transition operator. The target part of the training pairs is simply x.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_74f75db7",
+                "title": "THE INFUSION CHAIN",
+                "blocks": [
+                    {
+                        "block_id": "b_2d375c42",
+                        "type": "paragraph",
+                        "text": "Formally we define an infusion chain z (0) \u2192 z (1) \u2192 . . . \u2192 z (T -1) whose distribution q( z (0) , . . . , z (T -1) |x) will be \"close\" to the sampling chain z",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f5af3ac8",
+                        "type": "paragraph",
+                        "text": "of model p in the sense that q (t) (z (t) |z (t-1) , x) will be close to p (t) (z (t) |z (t-1) ), but will at every step be slightly biased towards generating samples closer to target x, i.e. x gets progressively \"infused\" into the chain. This is achieved by defining q",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3a73b14a",
+                        "type": "paragraph",
+                        "text": "(with a large mixture weight) and \u03b4 x i , a concentrated unimodal distribution around x i , such as a Gaussian with small variance (with a small mixture weight) 1 . Formally q",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_867dcf02",
+                        "type": "paragraph",
+                        "text": ", where 1 -\u03b1 (t) and \u03b1 (t) are the mixture weights 2 . In other words, when sampling a value for z(0) i from q (0) i there will be a small probability \u03b1 (0) to pick value close to x i (as sampled from \u03b4 x i ) rather than sampling the value from p (0) i . We call \u03b1 (t) the infusion rate. We define the transition operator of the infusion chain similarly as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a3ed8abf",
+                        "type": "paragraph",
+                        "text": "1 Note that \u03b4x i does not denote a Dirac-Delta but a Gaussian with small sigma. 2 In all experiments, we use an increasing schedule \u03b1",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a5680863",
+                        "type": "paragraph",
+                        "text": "and \u03c9 constant. This allows to build our chain such that in the first steps, we give little information about the target and in the last steps we give more informations about the target. This forces the network to have less confidence (greater incertitude) at the beginning of the chain and more confidence on the convergence point at the end of the chain. Each of these images were at a time provided as the input part of the (input, target) training pairs for the network. The network was trained to denoise all of them into target 3. We see that as training progresses, the model has learned to pick up the cues provided by target infusion, to move towards that target. Note also that a single denoising step, even with target infusion, is not sufficient for the network to produce a sharp well identified digit.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_08dc9357",
+                "title": "DENOISING-BASED INFUSION TRAINING PROCEDURE",
+                "blocks": [
+                    {
+                        "block_id": "b_4f7051eb",
+                        "type": "paragraph",
+                        "text": "For all x \u2208 D train :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b127830c",
+                        "type": "paragraph",
+                        "text": "precisely so: z0 \u223c q (0) (z (0) |x) . . . z(t) \u223c q (t) (z (t) |z (t-1) , x) . . . \u2022 Perform a gradient step so that p learns to \"denoise\" every z(t) into x.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_35cbffc8",
+                        "type": "paragraph",
+                        "text": "\u2202\u03b8 (t)  where \u03b7 (t) is a scalar learning rate. 3 As illustrated in Figure 2 , the distribution of samples from the infusion chain evolves as training progresses, since this chain remains close to the model sampling chain.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_077bc1c5",
+                "title": "STOCHASTIC LOG LIKELIHOOD ESTIMATION",
+                "blocks": [
+                    {
+                        "block_id": "b_b1178d72",
+                        "type": "paragraph",
+                        "text": "The exact log-likelihood of the generative model implied by our model p is intractable. The logprobability of an example x can however be expressed using proposal distribution q as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e0f6e208",
+                        "type": "paragraph",
+                        "text": "Using Jensen's inequality we can thus derive the following lower bound:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_430b1db8",
+                        "type": "paragraph",
+                        "text": "A stochastic estimation can easily be obtained by replacing the expectation by an average using a few samples from q( z|x). We can thus compute a lower bound estimate of the average log likelihood over training, validation and test data.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_914f1605",
+                        "type": "paragraph",
+                        "text": "Similarly in addition to the lower-bound based on Eq.3 we can use the same few samples from q( z|x) to get an importance-sampling estimate of the likelihood based on Eq. 2 4 .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4117fa71",
+                "title": "LOWER-BOUND-BASED INFUSION TRAINING PROCEDURE",
+                "blocks": [
+                    {
+                        "block_id": "b_bfeecd98",
+                        "type": "paragraph",
+                        "text": "Since we have derived a lower bound on the likelihood, we can alternatively choose to optimize this stochastic lower-bound directly during training. This alternative lower-bound based infusion training procedure differs only slightly from the denoising-based infusion training procedure by using z(t) as a training target at step t (performing a gradient step to increase log p (t) (z (t) |z (t-1) ; \u03b8 (t) )) whereas denoising training always uses x as its target (performing a gradient step to increase log p (t) (x|z (t-1) ; \u03b8 (t) )). Note that the same reparametrization trick as used in Variational Autoencoders (Kingma & Welling, 2014) can be used here to backpropagate through the chain's Gaussian sampling.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_be4a5da8",
+                "title": "MARKOV CHAIN MONTE CARLO FOR ENERGY-BASED MODELS",
+                "blocks": [
+                    {
+                        "block_id": "b_7bc33605",
+                        "type": "paragraph",
+                        "text": "Generating samples as a repeated application of a Markov transition operator that operates on input space is at the heart of Markov Chain Monte Carlo (MCMC) methods. They allow sampling from an energy-model, where one can efficiently compute the energy or unnormalized negated log probability (or density) at any point. The transition operator is then derived from an explicit energy function such that the Markov chain prescribed by a specific MCMC method is guaranteed to converge to the distribution defined by that energy function, as the equilibrium distribution of the chain. MCMC techniques have thus been used to obtain samples from the energy model, in the process of learning to adjust its parameters.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ca4df945",
+                        "type": "paragraph",
+                        "text": "By contrast here we do not learn an explicit energy function, but rather learn directly a parameterized transition operator, and define an implicit model distribution based on the result of running the Markov chain.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e17854d9",
+                "title": "VARIATIONAL AUTO-ENCODERS",
+                "blocks": [
+                    {
+                        "block_id": "b_3ee108d1",
+                        "type": "paragraph",
+                        "text": "Variational auto-encoders (VAE) (Kingma & Welling, 2014; Rezende et al., 2014 ) also start from an unstructured (independent) noise sample and non-linearly transform this into a distribution that matches the training data. One difference with our approach is that the VAE typically maps from a lower-dimensional space to the observation space. By contrast we learn a stochastic transition operator from input space to input space that we repeat for T steps. Another key difference, is that the VAE learns a complex heavily parameterized approximate posterior proposal q whereas our infusion based q can be understood as a simple heuristic proposal distribution based on p. Importantly the specific heuristic we use to infuse x into q makes sense precisely because our operator is a map from input space to input space, and couldn't be readily applied otherwise. The generative network in Rezende et al. ( 2014 ) is a Deep Latent Gaussian Model (DLGM) just as ours. But their approximate posterior q is taken to be factorial, including across all layers of the DLGM, whereas our infusion based q involves an ordered sampling of the layers, as we sample from q (t) (z (t) |z (t-1) , x).",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d58e0a58",
+                        "type": "paragraph",
+                        "text": "More recent proposals involve sophisticated approaches to sample from better approximate posteriors, as the work of Salimans et al. (2015) in which Hamiltonian Monte Carlo is combined with variational inference, which looks very promising, though computationally expensive, and Rezende & Mohamed (2015) that generalizes the use of normalizing flows to obtain a better approximate posterior.",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b16"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e654e4ae",
+                "title": "SAMPLING FROM AUTOENCODERS AND GENERATIVE STOCHASTIC NETWORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_0f7542eb",
+                        "type": "paragraph",
+                        "text": "Earlier works that propose to directly learn a transition operator resulted from research to turn autoencoder variants that have a stochastic component, in particular denoising autoencoders (Vincent et al., 2010) , into generative models that one can sample from. This development is natural, since a stochastic auto-encoder is a stochastic transition operator form input space to input space. Generative Stochastic Networks (GSN) (Alain et al., 2016) generalized insights from earlier stochastic autoencoder sampling heuristics (Rifai et al., 2012) into a more formal and general framework. These previous works on generative uses of autoencoders and GSNs attempt to learn a chain whose equilibrium distribution will fit the training data. Because autoencoders and the chain are typically started from or very close to training data points, they are concerned with the chain mixing quickly between modes. By contrast our model chain is always restarted from unstructured noise, and is not required to reach or even have an equilibrium distribution. Our concern is only what happens during the T \"burn-in\" initial steps, and to make sure that it transforms the initial factorial noise distribution into something that best fits the training data distribution. There are no mixing concerns beyond those T initial steps.",
+                        "extracted_citations": [
+                            "Citation_b26",
+                            "Citation_b0",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6d638d52",
+                        "type": "paragraph",
+                        "text": "A related aspect and limitation of previous denoising autoencoder and GSN approaches is that these were mainly \"local\" around training samples: the stochastic operator explored space starting from and primarily centered around training examples, and learned based on inputs in these parts of space only. Spurious modes in the generated samples might result from large unexplored parts of space that one might encounter while running a long chain.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6b171fb3",
+                "title": "REVERSING A DIFFUSION PROCESS IN NON-EQUILIBRIUM THERMODYNAMICS",
+                "blocks": [
+                    {
+                        "block_id": "b_062de4c4",
+                        "type": "paragraph",
+                        "text": "The approach of Sohl-Dickstein et al. ( 2015 ) is probably the closest to the approach we develop here. Both share a similar model sampling chain that starts from unstructured factorial noise. Neither are concerned about an equilibrium distribution. They are however quite different in several key aspects: Sohl-Dickstein et al. ( 2015 ) proceed to invert an explicit diffusion process that starts from a training set example and very slowly destroys its structure to become this random noise, they then learn to reverse this process i.e. an inverse diffusion. To maintain the theoretical argument that the exact reverse process has the same distributional form (e.g. p(x (t-1) |x (t) ) and p(x (t) |x (t-1) ) both factorial Gaussians), the diffusion has to be infinitesimal by construction, hence the proposed approaches uses chains with thousands of tiny steps. Instead, our aim is to learn an operator that can yield a high quality sample efficiently using only a small number T of larger steps. Also our infusion training does not posit a fixed a priori diffusion process that we would learn to reverse. And while the distribution of diffusion chain samples of Sohl-Dickstein et al. ( 2015 ) is fixed and remains the same all along the training, the distribution of our infusion chain samples closely follow the model chain as our model learns. Our proposed infusion sampling technique thus adapts to the changing generative model distribution as the learning progresses.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_77e8513e",
+                        "type": "paragraph",
+                        "text": "Drawing on both Sohl-Dickstein et al. (2015) and the walkback procedure introduced for GSN in Alain et al. (2016) , a variational variant of the walkback algorithm was investigated by Goyal et al. (2017) at the same time as our work. It can be understood as a different approach to learning a Markov transition operator, in which a \"heating\" diffusion operator is seen as a variational approximate posterior to the forward \"cooling\" sampling operator with the exact same form and parameters, except for a different temperature.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b0",
+                            "Citation_b7"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_116169bf",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_97c01424",
+                        "type": "paragraph",
+                        "text": "We trained models on several datasets with real-valued examples. We used as prior distribution p (0) a factorial Gaussian whose parameters were set to be the mean and variance for each pixel through the training set. Similarly, our models for the transition operators are factorial Gaussians. Their mean and elementwise variance is produced as the output of a neural network that receives the previous z (t-1) as its input, i.e. p (t) (z",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5d6fa4bc",
+                        "type": "paragraph",
+                        "text": ")) where \u00b5 and \u03c3 2 are computed as output vectors of a neural network. We trained such a model using our infusion training procedure on MNIST (LeCun & Cortes, 1998) , Toronto Face Database (Susskind et al., 2010) , CIFAR-10 (Krizhevsky & Hinton, 2009) , and CelebA (Liu et al., 2015) . For all datasets, the only preprocessing we did was to scale the integer pixel values down to range [0,1]. The network Table 3 : Inception score (with standard error) of 50 000 samples generated by models trained on CIFAR-10. We use the models in Salimans et al. (2016) as baseline. 'SP' corresponds to the best model described by Salimans et al. (2016) trained in a semi-supervised fashion. '-L' corresponds to the same model after removing the label in the training process (unsupervised way), '-MBF' corresponds to a supervised training without minibatch features.",
+                        "extracted_citations": [
+                            "Citation_b23",
+                            "Citation_b14",
+                            "Citation_b21",
+                            "Citation_b21"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_84e00cd7",
+                "title": "Model",
+                "blocks": [
+                    {
+                        "block_id": "b_9c5c41e7",
+                        "type": "paragraph",
+                        "text": "Real data SP -L -MBF Infusion training Inception score 11.24 \u00b1 .12 8.09 \u00b1 .07 4.36 \u00b1 .06 3.87 \u00b1 .03 4.62 \u00b1 .06 trained on MNIST and TFD is a MLP composed of two fully connected layers with 1200 units using batch-normalization (Ioffe & Szegedy, 2015) 5 . The network trained on CIFAR-10 is based on the same generator as the GANs of Salimans et al. (2016) , i.e. one fully connected layer followed by three transposed convolutions. CelebA was trained with the previous network where we added another transposed convolution. We use rectifier linear units (Glorot et al., 2011) on each layer inside the networks. Each of those networks have two distinct final layers with a number of units corresponding to the image size. They use sigmoid outputs, one that predict the mean and the second that predict a variance scaled by a scalar \u03b2 (In our case we chose \u03b2 = 0.1) and we add an epsilon = 1e -4 to avoid an excessively small variance. For each experiment, we trained the network on 15 steps of denoising with an increasing infusion rate of 1% (\u03c9 = 0.01, \u03b1 (0) = 0), except on CIFAR-10 where we use an increasing infusion rate of 2% (\u03c9 = 0.02, \u03b1 (0) = 0) on 20 steps.",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b21",
+                            "Citation_b5"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a94f531d",
+                "title": "NUMERICAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_63d3dd67",
+                        "type": "paragraph",
+                        "text": "Since we can't compute the exact log-likelihood, the evaluation of our model is not straightforward. However we use the lower bound estimator derived in Section 2.4 to evaluate our model during training and prevent overfitting (see Figure 3 ). Since most previous published results on non-likelihood based models (such as GANs) used a Parzen-window-based estimator (Breuleux et al., 2011) , we use it as our first comparison tool, even if it can be misleading (Lucas Theis & Bethge, 2016) . Results are shown in Table 1 , we use 10 000 generated samples and \u03c3 = 0.17 . To get a better estimate of the log-likelihood, we then computed both the stochastic lower bound and the importance sampling estimate (IS) given in Section 2.4. For the IS estimate in our MNIST-trained model, we used 20 000 intermediates samples. In Table 2 we compare our model with the recent Annealed Importance Sampling results (Wu et al., 2016) . Note that following their procedure we add an uniform noise of 1/256 to the (scaled) test point before evaluation to avoid overevaluating models that might have overfitted on the 8 bit quantization of pixel values. Another comparison tool that we used is the Inception score as in Salimans et al. (2016) which was developed for natural images and is thus most relevant for CIFAR-10. Since Salimans et al. (2016) used a GAN trained in a semi-supervised way with some tricks, the comparison with our unsupervised trained model isn't straightforward. However, we can see in Table 3 that our model outperforms the traditional GAN trained without labeled data.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b27",
+                            "Citation_b21",
+                            "Citation_b21"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e5a88a7e",
+                "title": "SAMPLE GENERATION",
+                "blocks": [
+                    {
+                        "block_id": "b_e54169fb",
+                        "type": "paragraph",
+                        "text": "Another common qualitative way to evaluate generative models is to look at the quality of the samples generated by the model. In Figure 4 we show various samples on each of the datasets we used.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_54c759d2",
+                        "type": "paragraph",
+                        "text": "In order to get sharper images, we use at sampling time more denoising steps than in the training time (In the MNIST case we use 30 denoising steps for sampling with a model trained on 15 denoising steps). To make sure that our network didn't learn to copy the training set, we show in the last column the nearest training-set neighbor to the samples in the next-to last column. We can see that our training method allow to generate very sharp and accurate samples on various dataset. Model Test DBM (Bengio et al., 2013) 138 \u00b1 2 SCAE (Bengio et al., 2013) 121 \u00b1 1.6 GSN (Bengio et al., 2014) 214 \u00b1 1.1 Diffusion (Sohl-Dickstein et al., 2015) 220 \u00b1 1.9",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b1",
+                            "Citation_b2",
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_70783d64",
+                        "type": "paragraph",
+                        "text": "GANs (Goodfellow et al.) 225 \u00b1 2 GMMN + AE (Li et al.) 282 \u00b1 2 Infusion training (Our) 312 \u00b1 1.7",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f561dcac",
+                        "type": "paragraph",
+                        "text": "Table 1 : Parzen-window-based estimator of lower bound on average test log-likelihood on MNIST (in nats).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9e7996a3",
+                        "type": "paragraph",
+                        "text": "Table 2 : Log-likelihood (in nats) estimated by AIS on MNIST test and training sets as reported in Wu et al. (2016) and the log likelihood estimates of our model obtained by infusion training (last three lines). Our initial model uses a Gaussian output with diagonal covariance, and we applied both our lower bound and importance sampling (IS) log-likelihood estimates to it. Since Wu et al. (2016) used only an isotropic output observation model, in order to be comparable to them, we also evaluated our model after replacing the output by an isotropic Gaussian output (same fixed variance for all pixels). Average and standard deviation over 10 repetitions of the evaluation are provided. Note that AIS might provide a higher evaluation of likelihood than our current IS estimate, but this is left for future work.    Figure 5 shows that the model is able to generate a varied set of bottom halves, all consistent with the same top half, displaying different type of smiles and expression. We also see that the generated bottom halves transfer some information about the provided top half of the images (such as pose and more or less coherent hair cut).",
+                        "extracted_citations": [
+                            "Citation_b27",
+                            "Citation_b27"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2cf88832",
+                "title": "CONCLUSION AND FUTURE WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_de438e9a",
+                        "type": "paragraph",
+                        "text": "We presented a new training procedure that allows a neural network to learn a transition operator of a Markov chain. Compared to the previously proposed method of Sohl-Dickstein et al. (2015) based on inverting a slow diffusion process, we showed empirically that infusion training requires far fewer denoising steps, and appears to provide more accurate models. Currently, many successful generative models, judged on sample quality, are based on GAN architectures. However these require to use two different networks, a generator and a discriminator, whose balance is reputed delicate to adjust, which can be source of instability during training. Our method avoids this problem by using only a single network and a simpler training objective.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_082edc64",
+                        "type": "paragraph",
+                        "text": "Denoising-based infusion training optimizes a heuristic surrogate loss for which we cannot (yet) provide theoretical guarantees, but we empirically verified that it results in increasing log-likelihood estimates. On the other hand the lower-bound-based infusion training procedure does maximize an explicit variational lower-bound on the log-likelihood. While we have run most of our experiments with the former, we obtained similar results on the few problems we tried with lower-bound-based infusion training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f992ce07",
+                        "type": "paragraph",
+                        "text": "Future work shall further investigate the relationship and quantify the compromises achieved with respect to other Markov Chain methods including Sohl-Dickstein et al. (2015) ; Salimans et al. (2015) and also to powerful inference methods such as Rezende & Mohamed (2015) . As future work, we also plan to investigate the use of more sophisticated neural net generators, similar to DCGAN's (Radford et al., 2016) and to extend the approach to a conditional generator applicable to structured output problems.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b20",
+                            "Citation_b16",
+                            "Citation_b15"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fbb70922",
+                "title": "A DETAILS ON THE EXPERIMENTS A.1 MNIST EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_0265415d",
+                        "type": "paragraph",
+                        "text": "We show the impact of the infusion rate \u03b1 (t) = \u03b1 (t-1) + \u03c9 for different numbers of training steps on the lower bound estimate of log-likelihood on the Validation set of MNIST in Figure 6 . We also show the quality of generated samples and the lower bound evaluated on the test set in Table 4 . Each experiment in Table 4 uses the corresponding models of Figure 6 that obtained the best lower bound value on the validation set. We use the same network architecture as described in Section 4, i.e two fully connected layers with Relu activations composed of 1200 units followed by two distinct fully connected layers composed of 784 units, one that predicts the means, the other one that predicts the variances. Each mean and variance is associated with one pixel. All of the the parameters of the model are shared across different steps except for the batch norm parameters. During training, we use the batch statistics of the current mini-batch in order to evaluate our model on the train and validation sets. At test time (Table 4 ), we first compute the batch statistics over the entire train set for each step and then use the computed statistics to evaluate our model on the test test.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f59ab660",
+                        "type": "paragraph",
+                        "text": "We did some experiments to evaluate the impact of \u03b1 or \u03c9 in \u03b1 (t) = \u03b1 (t-1) + \u03c9. Figure 6 shows that as the number of steps increases, the optimal value for infusion rate decreases. Therefore, if we want to use many steps, we should have a small infusion rate. These conclusions are valid for both increasing and constant infusion rate. For example, the optimal \u03b1 for a constant infusion rate, in Figure 6e with 10 steps is 0.08 and in Figure 6f with 15 steps is 0.06. If the number of steps is not enough or the infusion rate is too small, the network will not be able to learn the target distribution as shown in the first rows of all subsection in Table 4 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_399a1c93",
+                        "type": "paragraph",
+                        "text": "In order to show the impact of having a constant versus an increasing infusion rate, we show in Figure 7 the samples created by infused and sampling chains. We observe that having a small infusion rate over many steps ensures a slow blending of the model distribution into the target distribution.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c9f1b6d5",
+                        "type": "paragraph",
+                        "text": "In Table 4 , we can see high lower bound values on the test set with few steps even if the model can't generate samples that are qualitatively satisfying. These results indicate that we can't rely on the lower bound as the only evaluation metric and this metric alone does not necessarily indicate the suitability of our model to generated good samples. However, it is still a useful tool to prevent overfitting (the networks in Figure 6e and 6f overfit when the infusion rate becomes too high).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fba76388",
+                        "type": "paragraph",
+                        "text": "Concerning the samples quality, we observe that having a small infusion rate over an adequate number of steps leads to better samples.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c27a62f3",
+                "title": "A.2 INFUSION AND MODEL SAMPLING CHAINS ON NATURAL IMAGES DATASETS",
+                "blocks": [
+                    {
+                        "block_id": "b_299ba425",
+                        "type": "paragraph",
+                        "text": "In order to show the behavior of our model trained by Infusion on more complex datasets, we show in Figure 8 Table 4 : Infusion rate impact on the lower bound log-likelihood (test set) and the samples generated by a network trained with different number of steps. Each sub-table corresponds to a fixed number of steps. Each row corresponds to a different infusion rate, where we show its lower bound and also its corresponding generated samples from the trained model. Note that for images, we show the mean of the Gaussian distributions instead of the true samples. As the number of steps increases, the optimal infusion rate decreases. Higher number of steps contributes to better qualitative samples, as the best samples can be seen with 15 steps using \u03b1 = 0.01.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "GSNs: generative stochastic networks Guillaume Alain Yoshua Bengio Li Yao Jason Yosinski Eric Thibodeau-Laufer Saizheng Zhang Pascal Vincent 10.1093/imaiai/iaw003 Information and Inference 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Better mixing via deep representations Yoshua Bengio Gr\u00e9goire Mesnil Yann Dauphin Salah Rifai Proceedings of the 30th International Conference on Machine Learning (ICML 2013) the 30th International Conference on Machine Learning (ICML 2013) 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Deep generative stochastic networks trainable by backprop Yoshua Bengio Eric Laufer Guillaume Alain Jason Yosinski Proceedings of the 31st International Conference on Machine Learning (ICML 2014) the 31st International Conference on Machine Learning (ICML 2014) 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Quickly generating representative samples from an rbm-derived process Olivier Breuleux Yoshua Bengio Pascal Vincent Neural Computation 23 8 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Laurent Dinh David Krueger Yoshua Bengio Nice arXiv:1410.8516 Non-linear independent components estimation 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Deep sparse rectifier neural networks Xavier Glorot Antoine Bordes Yoshua Bengio In Aistats 15 275 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Generative adversarial nets Ian Goodfellow Jean Pouget-Abadie Mehdi Mirza Bing Xu David Warde-Farley Sherjil Ozair Aaron Courville Yoshua Bengio Advances in Neural Information Processing Systems Z Ghahramani M Welling C Cortes N D Lawrence K Q Weinberger Curran Associates, Inc 2014 27",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "The variational walkback algorithm Anirudh Goyal Nan Rosemary Ke Alex Lamb Yoshua Bengio 2017 Universit\u00e9 de Montr\u00e9al Technical report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Batch normalization: Accelerating deep network training by reducing internal covariate shift Sergey Ioffe Christian Szegedy Proceedings of The 32nd International Conference on Machine Learning The 32nd International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Auto-encoding variational bayes P Diederik Max Kingma Welling Proceedings of the 2nd International Conference on Learning Representations (ICLR 2014) the 2nd International Conference on Learning Representations (ICLR 2014) 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Learning multiple layers of features from tiny images Alex Krizhevsky Geoffrey E Hinton 2009 Department of Computer Science, University of Toronto Master's thesis",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "The neural autoregressive distribution estimator Hugo Larochelle Iain Murray AISTATS 2011 1 2",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "The mnist database of handwritten digits Yann Lecun Corinna Cortes 1998",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Generative moment matching networks Yujia Li Kevin Swersky Richard Zemel International Conference on Machine Learning (ICML 2015) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "A\u00e4ron van den Oord Lucas Theis and Matthias Bethge. A note on the evaluation of generative models Ziwei Liu Ping Luo Xiaogang Wang Xiaoou Tang Proceedings of the 4th International Conference on Learning Representations the 4th International Conference on Learning Representations December 2015. 2016. 2016 Proceedings of International Conference on Computer Vision (ICCV 2015)",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Unsupervised representation learning with deep convolutional generative adversarial networks Alec Radford Luke Metz Soumith Chintala International Conference on Learning Representations 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Variational inference with normalizing flows Danilo Rezende Shakir Mohamed Proceedings of the 32nd International Conference on Machine Learning (ICML 2015) the 32nd International Conference on Machine Learning (ICML 2015) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Stochastic backpropagation and approximate inference in deep generative models Danilo Jimenez Rezende Shakir Mohamed Daan Wierstra Proceedings of the 31th International Conference on Machine Learning, ICML 2014 the 31th International Conference on Machine Learning, ICML 2014 Beijing, China June 2014. 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "A generative process for sampling contractive auto-encoders Salah Rifai Yoshua Bengio Yann Dauphin Pascal Vincent Proceedings of the 29th International Conference on Machine Learning the 29th International Conference on Machine Learning 2012. 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Deep boltzmann machines Ruslan Salakhutdinov Geoffrey E Hinton AISTATS 2009 1 3",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Markov chain monte carlo and variational inference: Bridging the gap Tim Salimans Diederik Kingma Max Welling Proceedings of The 32nd International Conference on Machine Learning The 32nd International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Improved techniques for training gans Tim Salimans Ian J Goodfellow Wojciech Zaremba Vicki Cheung Alec Radford Xi Chen CoRR, abs/1606.03498 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Deep Unsupervised Learning using Nonequilibrium Thermodynamics Jascha Sohl-Dickstein Eric A Weiss Niru Maheswaranathan Surya Ganguli Proceedings of the 32nd International Conference on Machine Learning the 32nd International Conference on Machine Learning 2015 37 JMLR.org",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "The toronto face database Josh M Susskind Adam K Anderson Geoffrey E Hinton Tech. Rep 3 2010 Toronto, ON, Canada Department of Computer Science, University of Toronto",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Theano: A Python framework for fast computation of mathematical expressions Theano Development Team abs/1605.02688 may 2016 arXiv e-prints",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Pixel recurrent neural networks A\u00e4ron Van Den Oord Nal Kalchbrenner Koray Kavukcuoglu Proceedings of the 33nd International Conference on Machine Learning the 33nd International Conference on Machine Learning 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Stacked denoising autoencoders: Learning useful representations in a deep network with a local denoising criterion Pascal Vincent Hugo Larochelle Isabelle Lajoie Yoshua Bengio Pierre-Antoine Manzagol Journal of Machine Learning Research 11 Dec. 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "On the quantitative analysis of decoder-based generative models Yuhuai Wu Yuri Burda Ruslan Salakhutdinov Roger B Grosse CoRR, abs/1611.04273 2016",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.4114,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "Summary:\nThis paper introduces a heuristic approach for training a deep directed generative model, where similar to the transition operator of a Markov chain each layer samples from the same conditional distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Similar to optimizing a variational lower bound, the approach is to approximate the gradient by replacing the posterior over latents with an alternative distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "However, the approximating distribution is not updated to improve the lower bound but heuristically constructed in each step.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "A further difference to variational optimization is that the conditional distributions are optimized greedily rather than following the gradient of the joint log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Review:\nThe proposed approach is interesting and to me seems worth exploring more.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Given that there are approaches for training the same class of models which are 1) theoretically more sound, 2) of similar computational complexity, and 3) work well in practice (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "Rezende & Mohamed, 2015), I am nevertheless not sure of its potential to generate impact.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "My bigger concern, however, is that the empirical evaluation is still quite limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "I appreciate the authors included proper estimates of the log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "This will enable and encourage future comparisons with this method on continuous MNIST.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "However, the authors should point out that the numbers taken from Wu et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "(2016) are not representative of the performance of a VAE.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "(From the paper: \u201cTherefore, the log-likelihood values we report should not be compared directly against networks which have a more flexible observation model.\u201d \u201cSuch observation models can easily achieve much higher log-likelihood scores, [\u2026].\u201d)\n\nComparisons with inpainting results using other methods would have been nice.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "How practical is the proposed approach compared to other approaches?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "Similar to the diffusion approach by Sohl-Dickstein et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "(2015), the proposed approach seems to be both efficient and effective for inpainting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "Not making this a bigger point and performing the proper evaluations seems like a missed opportunity.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "Minor:\n\u2013\u00a0I am missing citations for \u201cordered visible dimension sampling\u201d\n\u2013\u00a0Typos and frequent incorrect use of \\citet and \\citep",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "We updated the paper, the main changes are:\n\nAdded better log-likelihood estimates (one stochastic lower bound and one based on importance sampling)\n\nAdded curves showing that log-likelihood bound improves as infusion training progresses \n\nAdded references to related and relevant works: Rezende & Mohamed, 2015;  Salimans et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "2015; Dinh et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "2014; Wu et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "Added results tables for likelihood comparison with models from the literature (Parzen estimates by Sohl-Dickstein et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "2015 and AIS estimates by Wu et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "2016)\n\nAdded further experimental details.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Added an Appendix containing details regarding the infusion rate schedule as well as examples of infused and sampled chains on cifar10 and celebA\n\nCorrected the typos mentioned by the reviewers",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.0355,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": 4
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "This paper trains a generative model which transforms noise into model samples by a gradual denoising process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "It is similar to a generative model based on diffusion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "Unlike the diffusion approach:\n- It uses only a small number of denoising steps, and is thus far more computationally efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "- Rather than consisting of a reverse trajectory, the conditional chain for the approximate posterior jumps to q(z(0) | x), and then runs in the same direction as the generative model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "This allows the inference chain to behave like a perturbation around the generative model, that pulls it towards the data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "(This also seems somewhat related to ladder networks.)\n- There is no tractable variational bound on the log likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "I liked the idea, and found the visual sample quality given a short chain impressive.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "The inpainting results were particularly nice, since one shot inpainting is not possible under most generative modeling frameworks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "It would be much more convincing to have a log likelihood comparison that doesn't depend on Parzen likelihoods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "Detailed comments follow:\n\nSec.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "2:\n\"theta(0) the\" -> \"theta(0) be the\"\n\"theta(t) the\" -> \"theta(t) be the\"\n\"what we will be using\" -> \"which we will be doing\"\nI like that you infer q(z^0|x), and then run inference in the same order as the generative chain.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_11",
+                    "text": "This reminds me slightly of ladder networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_12",
+                    "text": "Having learned\" -> \"q*.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_13",
+                    "text": "[paragraph break] Having learned\"\nSec 3.3:\n\"learn to inverse\" -> \"learn to reverse\"\nSec.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_14",
+                    "text": "4:\n\"For each experiments\" -> \"For each experiment\"\nHow sensitive are your results to infusion rate?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_15",
+                    "text": "5: \"appears to provide more accurate models\" I don't think you showed this -- there's no direct comparison to the Sohl-Dickstein paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "The paper presents a method for training a generative model via an iterative denoising procedure.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "The denoising process is initialized with a random sample from a crude approximation to the data distribution and produces a high quality sample via multiple denoising steps.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "Training is performed by setting-up a Markov chain that slowly blends propositions from the current denoising model with a real example from the data distribution; using this chain the current denoising model is updated towards reproducing the changed, \"better\", samples from the blending process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "This is a clearly written paper that considers an interesting approach for training generative models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "I was intrigued by the simplicity of the presented approach and really enjoyed reading the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "The proposed method is novel although it has clear ties to other recent work aiming to use denoising models for sampling from distributions such as the work by Sohl-Dickstein and the recent work on using DAEs as generative models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "I think this general direction of research is important.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "The proposed procedure takes inspiration from the perspective of generating samples by minimizing an energy function via transitions along a Markov chain and, if successful, it can potentially sidestep many problems of current procedures for training directed generative models such as:\n- convergence and mode coverage problems as in generative adversarial networks\n- problems with modeling multi-modal distributions which can arise when a too restrictive approximate inference model is paired with a powerful generative model\n\nThat being said, another method that seems promising for addressing these issues that also has some superficially similarity to the presented work is the idea of combining Hamiltonian Monte Carlo inference with variational inference as in [1].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "As such I am not entirely convinced that the method presented here will be able to perform better than the mentioned paper; although it might be simpler to train.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "Similarly, although I agree that using a MCMC chain to generate samples via a MC-EM like procedure is likely very costly I am not convinced such a procedure won't at least also work reasonably well for the simple MNIST example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "In general a more direct comparison between different inference methods using an MCMC chain like procedure would be nice to have but I understand that this is perhaps out of the scope of this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_11",
+                    "text": "One thing that I would have expected, however, is a direct comparison to the procedure from Sohl-Dickstein in terms of sampling steps and generation quality as it is so directly related.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_12",
+                    "text": "Other major points (good and bad):\n- Although in general the method is explained well some training details are missing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_13",
+                    "text": "Most importantly it is never mentioned how alpha or omega are set (I am assuming omega is 0.01 as that is the increase mentioned in the experimental setup).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_14",
+                    "text": "It is also unclear how alpha affects the capabilities of the generator.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_15",
+                    "text": "While it intuitively seems reasonable to use a small alpha over many steps to ensure slow blending of the two distributions it is not clear how necessary this is or at what point the procedure would break (I assume alpha = 1 won't work as the generator then would have to magically denoise a sample from the relatively uninformative draw from p0 ?).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_16",
+                    "text": "The authors do mention in one of the figure captions that the denoising model does not produce good samples in only 1-2 steps but that might also be an artifact of training the model with small alpha (at least I see no a priori reason for this).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_17",
+                    "text": "More experiments should be carried out here.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_18",
+                    "text": "- No infusion chains or generating chains are shown for any of the more complicated data distributions, this is unfortunate as I feel these would be interesting to look at.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_19",
+                    "text": "- The paper does a good job at evaluating the model with respect to several different metrics.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_20",
+                    "text": "The bound on the log-likelihood is nice to have as well!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_21",
+                    "text": "- Unfortunately the current approach does not come with any theoretical guarantees.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_22",
+                    "text": "It is unclear for what choices of alpha the procedure will work and whether there is some deeper connection to MCMC sampling or energy based models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_23",
+                    "text": "In my eyes this does not subtract from the value of the paper but would perhaps be worth a short sentence in the conclusion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_24",
+                    "text": "Minor points:\n- The second reference seems broken\n- Figure 3 starts at 100 epochs and, as a result, contains little information.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_25",
+                    "text": "Perhaps it would be more useful to show the complete training procedure and put the x-axis on a log-scale ?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_26",
+                    "text": "- The explanation regarding the convolutional networks you use makes no sense to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_27",
+                    "text": "You write that you use the same structure as in the \"Improved GANs\" paper which, unlike your model, generates samples from a fixed length random input.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_28",
+                    "text": "I thus suppose you don't really use a generator with 1 fully connected network followed by up-convolutions but rather have several stages of convolutions followed by a fully connected layer and then up-convolutions ?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_29",
+                    "text": "- The choice of parametrizing the variance via a sigmoid output unit is somewhat unusual, was there a specific reason for this choice ?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_30",
+                    "text": "- footnote 1 contains errors: \"This allow to\" -> \"allows to\",  \"few informations\" -> \"little information\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_31",
+                    "text": "\"This force the network\" -> \"forces\"\n- Page 1 error: etc...",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_32",
+                    "text": "- Page 4 error: \"operator should to learn\"\n\n[1] Markov Chain Monte Carlo and Variational Inference: Bridging the Gap, Tim Salimans and Diedrik P.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_33",
+                    "text": "Kingma and Max Welling, ICML 2015\n\n\n>>> Update <<<<\nCopied here from my response below: \n\nI believe the response of the authors clarifies all open issues.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_34",
+                    "text": "I strongly believe the paper should be accepted to the conference.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_35",
+                    "text": "The only remaining issue I have with the paper is that, as the authors acknowledge the architecture of the generator is likely highly sub-optimal and might hamper the performance of the method in the evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_36",
+                    "text": "This however does not at all subtract from any of the main points of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_37",
+                    "text": "I am thus keeping my score as a clear accept.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_38",
+                    "text": "I want to emphasize that I believe the paper should be published (just in case the review process results in some form of cut-off threshold that is high due to overall \"inflated\" review scores).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_6",
+            "type": "Human",
+            "liang_alpha_score": 0.4114,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": 4,
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_6_s_0",
+                    "text": "Summary:\nThis paper introduces a heuristic approach for training a deep directed generative model, where similar to the transition operator of a Markov chain each layer samples from the same conditional distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_1",
+                    "text": "Similar to optimizing a variational lower bound, the approach is to approximate the gradient by replacing the posterior over latents with an alternative distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_2",
+                    "text": "However, the approximating distribution is not updated to improve the lower bound but heuristically constructed in each step.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_3",
+                    "text": "A further difference to variational optimization is that the conditional distributions are optimized greedily rather than following the gradient of the joint log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_4",
+                    "text": "Review:\nThe proposed approach is interesting and to me seems worth exploring more.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_5",
+                    "text": "Given that there are approaches for training the same class of models which are 1) theoretically more sound, 2) of similar computational complexity, and 3) work well in practice (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_6",
+                    "text": "Rezende & Mohamed, 2015), I am nevertheless not sure of its potential to generate impact.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_7",
+                    "text": "My bigger concern, however, is that the empirical evaluation is still quite limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_8",
+                    "text": "I appreciate the authors included proper estimates of the log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_9",
+                    "text": "This will enable and encourage future comparisons with this method on continuous MNIST.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_10",
+                    "text": "However, the authors should point out that the numbers taken from Wu et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_11",
+                    "text": "(2016) are not representative of the performance of a VAE.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_12",
+                    "text": "(From the paper: \u201cTherefore, the log-likelihood values we report should not be compared directly against networks which have a more flexible observation model.\u201d \u201cSuch observation models can easily achieve much higher log-likelihood scores, [\u2026].\u201d)\n\nComparisons with inpainting results using other methods would have been nice.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_13",
+                    "text": "How practical is the proposed approach compared to other approaches?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_14",
+                    "text": "Similar to the diffusion approach by Sohl-Dickstein et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_15",
+                    "text": "(2015), the proposed approach seems to be both efficient and effective for inpainting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_16",
+                    "text": "Not making this a bigger point and performing the proper evaluations seems like a missed opportunity.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_17",
+                    "text": "Minor:\n\u2013\u00a0I am missing citations for \u201cordered visible dimension sampling\u201d\n\u2013\u00a0Typos and frequent incorrect use of \\citet and \\citep",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_9",
+            "type": "Human",
+            "liang_alpha_score": 0.4114,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_9_s_0",
+                    "text": "Summary:\nThis paper introduces a heuristic approach for training a deep directed generative model, where similar to the transition operator of a Markov chain each layer samples from the same conditional distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_1",
+                    "text": "Similar to optimizing a variational lower bound, the approach is to approximate the gradient by replacing the posterior over latents with an alternative distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_2",
+                    "text": "However, the approximating distribution is not updated to improve the lower bound but heuristically constructed in each step.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_3",
+                    "text": "A further difference to variational optimization is that the conditional distributions are optimized greedily rather than following the gradient of the joint log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_4",
+                    "text": "Review:\nThe proposed approach is interesting and to me seems worth exploring more.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_5",
+                    "text": "Given that there are approaches for training the same class of models which are 1) theoretically more sound, 2) of similar computational complexity, and 3) work well in practice (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_6",
+                    "text": "Rezende & Mohamed, 2015), I am nevertheless not sure of its potential to generate impact.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_7",
+                    "text": "My bigger concern, however, is that the empirical evaluation is still quite limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_8",
+                    "text": "I appreciate the authors included proper estimates of the log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_9",
+                    "text": "This will enable and encourage future comparisons with this method on continuous MNIST.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_10",
+                    "text": "However, the authors should point out that the numbers taken from Wu et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_11",
+                    "text": "(2016) are not representative of the performance of a VAE.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_12",
+                    "text": "(From the paper: \u201cTherefore, the log-likelihood values we report should not be compared directly against networks which have a more flexible observation model.\u201d \u201cSuch observation models can easily achieve much higher log-likelihood scores, [\u2026].\u201d)\n\nComparisons with inpainting results using other methods would have been nice.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_13",
+                    "text": "How practical is the proposed approach compared to other approaches?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_14",
+                    "text": "Similar to the diffusion approach by Sohl-Dickstein et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_15",
+                    "text": "(2015), the proposed approach seems to be both efficient and effective for inpainting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_16",
+                    "text": "Not making this a bigger point and performing the proper evaluations seems like a missed opportunity.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_9_s_17",
+                    "text": "Minor:\n\u2013\u00a0I am missing citations for \u201cordered visible dimension sampling\u201d\n\u2013\u00a0Typos and frequent incorrect use of \\citet and \\citep",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_11",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_11_s_0",
+                    "text": "We updated the paper, the main changes are:\n\nAdded better log-likelihood estimates (one stochastic lower bound and one based on importance sampling)\n\nAdded curves showing that log-likelihood bound improves as infusion training progresses \n\nAdded references to related and relevant works: Rezende & Mohamed, 2015;  Salimans et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_1",
+                    "text": "2015; Dinh et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_2",
+                    "text": "2014; Wu et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_3",
+                    "text": "Added results tables for likelihood comparison with models from the literature (Parzen estimates by Sohl-Dickstein et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_4",
+                    "text": "2015 and AIS estimates by Wu et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_5",
+                    "text": "2016)\n\nAdded further experimental details.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_6",
+                    "text": "Added an Appendix containing details regarding the infusion rate schedule as well as examples of infused and sampled chains on cifar10 and celebA\n\nCorrected the typos mentioned by the reviewers",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_12",
+            "type": "Human",
+            "liang_alpha_score": 0.0355,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": 4
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_12_s_0",
+                    "text": "This paper trains a generative model which transforms noise into model samples by a gradual denoising process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_1",
+                    "text": "It is similar to a generative model based on diffusion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_2",
+                    "text": "Unlike the diffusion approach:\n- It uses only a small number of denoising steps, and is thus far more computationally efficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_3",
+                    "text": "- Rather than consisting of a reverse trajectory, the conditional chain for the approximate posterior jumps to q(z(0) | x), and then runs in the same direction as the generative model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_4",
+                    "text": "This allows the inference chain to behave like a perturbation around the generative model, that pulls it towards the data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_5",
+                    "text": "(This also seems somewhat related to ladder networks.)\n- There is no tractable variational bound on the log likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_6",
+                    "text": "I liked the idea, and found the visual sample quality given a short chain impressive.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_7",
+                    "text": "The inpainting results were particularly nice, since one shot inpainting is not possible under most generative modeling frameworks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_8",
+                    "text": "It would be much more convincing to have a log likelihood comparison that doesn't depend on Parzen likelihoods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_9",
+                    "text": "Detailed comments follow:\n\nSec.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_10",
+                    "text": "2:\n\"theta(0) the\" -> \"theta(0) be the\"\n\"theta(t) the\" -> \"theta(t) be the\"\n\"what we will be using\" -> \"which we will be doing\"\nI like that you infer q(z^0|x), and then run inference in the same order as the generative chain.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_11",
+                    "text": "This reminds me slightly of ladder networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_12",
+                    "text": "Having learned\" -> \"q*.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_13",
+                    "text": "[paragraph break] Having learned\"\nSec 3.3:\n\"learn to inverse\" -> \"learn to reverse\"\nSec.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_14",
+                    "text": "4:\n\"For each experiments\" -> \"For each experiment\"\nHow sensitive are your results to infusion rate?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_15",
+                    "text": "5: \"appears to provide more accurate models\" I don't think you showed this -- there's no direct comparison to the Sohl-Dickstein paper.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "The paper presents a method for training a generative model via an iterative denoising procedure.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "The denoising process is initialized with a random sample from a crude approximation to the data distribution and produces a high quality sample via multiple denoising steps.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "Training is performed by setting-up a Markov chain that slowly blends propositions from the current denoising model with a real example from the data distribution; using this chain the current denoising model is updated towards reproducing the changed, \"better\", samples from the blending process.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "This is a clearly written paper that considers an interesting approach for training generative models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "I was intrigued by the simplicity of the presented approach and really enjoyed reading the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_5",
+                    "text": "The proposed method is novel although it has clear ties to other recent work aiming to use denoising models for sampling from distributions such as the work by Sohl-Dickstein and the recent work on using DAEs as generative models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_6",
+                    "text": "I think this general direction of research is important.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_7",
+                    "text": "The proposed procedure takes inspiration from the perspective of generating samples by minimizing an energy function via transitions along a Markov chain and, if successful, it can potentially sidestep many problems of current procedures for training directed generative models such as:\n- convergence and mode coverage problems as in generative adversarial networks\n- problems with modeling multi-modal distributions which can arise when a too restrictive approximate inference model is paired with a powerful generative model\n\nThat being said, another method that seems promising for addressing these issues that also has some superficially similarity to the presented work is the idea of combining Hamiltonian Monte Carlo inference with variational inference as in [1].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_8",
+                    "text": "As such I am not entirely convinced that the method presented here will be able to perform better than the mentioned paper; although it might be simpler to train.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_9",
+                    "text": "Similarly, although I agree that using a MCMC chain to generate samples via a MC-EM like procedure is likely very costly I am not convinced such a procedure won't at least also work reasonably well for the simple MNIST example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_10",
+                    "text": "In general a more direct comparison between different inference methods using an MCMC chain like procedure would be nice to have but I understand that this is perhaps out of the scope of this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_11",
+                    "text": "One thing that I would have expected, however, is a direct comparison to the procedure from Sohl-Dickstein in terms of sampling steps and generation quality as it is so directly related.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_12",
+                    "text": "Other major points (good and bad):\n- Although in general the method is explained well some training details are missing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_13",
+                    "text": "Most importantly it is never mentioned how alpha or omega are set (I am assuming omega is 0.01 as that is the increase mentioned in the experimental setup).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_14",
+                    "text": "It is also unclear how alpha affects the capabilities of the generator.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_15",
+                    "text": "While it intuitively seems reasonable to use a small alpha over many steps to ensure slow blending of the two distributions it is not clear how necessary this is or at what point the procedure would break (I assume alpha = 1 won't work as the generator then would have to magically denoise a sample from the relatively uninformative draw from p0 ?).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_16",
+                    "text": "The authors do mention in one of the figure captions that the denoising model does not produce good samples in only 1-2 steps but that might also be an artifact of training the model with small alpha (at least I see no a priori reason for this).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_17",
+                    "text": "More experiments should be carried out here.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_18",
+                    "text": "- No infusion chains or generating chains are shown for any of the more complicated data distributions, this is unfortunate as I feel these would be interesting to look at.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_19",
+                    "text": "- The paper does a good job at evaluating the model with respect to several different metrics.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_20",
+                    "text": "The bound on the log-likelihood is nice to have as well!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_21",
+                    "text": "- Unfortunately the current approach does not come with any theoretical guarantees.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_22",
+                    "text": "It is unclear for what choices of alpha the procedure will work and whether there is some deeper connection to MCMC sampling or energy based models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_23",
+                    "text": "In my eyes this does not subtract from the value of the paper but would perhaps be worth a short sentence in the conclusion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_24",
+                    "text": "Minor points:\n- The second reference seems broken\n- Figure 3 starts at 100 epochs and, as a result, contains little information.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_25",
+                    "text": "Perhaps it would be more useful to show the complete training procedure and put the x-axis on a log-scale ?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_26",
+                    "text": "- The explanation regarding the convolutional networks you use makes no sense to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_27",
+                    "text": "You write that you use the same structure as in the \"Improved GANs\" paper which, unlike your model, generates samples from a fixed length random input.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_28",
+                    "text": "I thus suppose you don't really use a generator with 1 fully connected network followed by up-convolutions but rather have several stages of convolutions followed by a fully connected layer and then up-convolutions ?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_29",
+                    "text": "- The choice of parametrizing the variance via a sigmoid output unit is somewhat unusual, was there a specific reason for this choice ?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_30",
+                    "text": "- footnote 1 contains errors: \"This allow to\" -> \"allows to\",  \"few informations\" -> \"little information\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_31",
+                    "text": "\"This force the network\" -> \"forces\"\n- Page 1 error: etc...",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_32",
+                    "text": "- Page 4 error: \"operator should to learn\"\n\n[1] Markov Chain Monte Carlo and Variational Inference: Bridging the Gap, Tim Salimans and Diedrik P.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_33",
+                    "text": "Kingma and Max Welling, ICML 2015\n\n\n>>> Update <<<<\nCopied here from my response below: \n\nI believe the response of the authors clarifies all open issues.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_34",
+                    "text": "I strongly believe the paper should be accepted to the conference.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_35",
+                    "text": "The only remaining issue I have with the paper is that, as the authors acknowledge the architecture of the generator is likely highly sub-optimal and might hamper the performance of the method in the evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_36",
+                    "text": "This however does not at all subtract from any of the main points of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_37",
+                    "text": "I am thus keeping my score as a clear accept.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_38",
+                    "text": "I want to emphasize that I believe the paper should be published (just in case the review process results in some form of cut-off threshold that is high due to overall \"inflated\" review scores).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_15",
+            "type": "Human",
+            "liang_alpha_score": 0.4114,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": 4,
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_15_s_0",
+                    "text": "Summary:\nThis paper introduces a heuristic approach for training a deep directed generative model, where similar to the transition operator of a Markov chain each layer samples from the same conditional distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_1",
+                    "text": "Similar to optimizing a variational lower bound, the approach is to approximate the gradient by replacing the posterior over latents with an alternative distribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_2",
+                    "text": "However, the approximating distribution is not updated to improve the lower bound but heuristically constructed in each step.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_3",
+                    "text": "A further difference to variational optimization is that the conditional distributions are optimized greedily rather than following the gradient of the joint log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_4",
+                    "text": "Review:\nThe proposed approach is interesting and to me seems worth exploring more.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_5",
+                    "text": "Given that there are approaches for training the same class of models which are 1) theoretically more sound, 2) of similar computational complexity, and 3) work well in practice (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_6",
+                    "text": "Rezende & Mohamed, 2015), I am nevertheless not sure of its potential to generate impact.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_7",
+                    "text": "My bigger concern, however, is that the empirical evaluation is still quite limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_8",
+                    "text": "I appreciate the authors included proper estimates of the log-likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_9",
+                    "text": "This will enable and encourage future comparisons with this method on continuous MNIST.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_10",
+                    "text": "However, the authors should point out that the numbers taken from Wu et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_11",
+                    "text": "(2016) are not representative of the performance of a VAE.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_12",
+                    "text": "(From the paper: \u201cTherefore, the log-likelihood values we report should not be compared directly against networks which have a more flexible observation model.\u201d \u201cSuch observation models can easily achieve much higher log-likelihood scores, [\u2026].\u201d)\n\nComparisons with inpainting results using other methods would have been nice.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_13",
+                    "text": "How practical is the proposed approach compared to other approaches?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_14",
+                    "text": "Similar to the diffusion approach by Sohl-Dickstein et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_15",
+                    "text": "(2015), the proposed approach seems to be both efficient and effective for inpainting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_16",
+                    "text": "Not making this a bigger point and performing the proper evaluations seems like a missed opportunity.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_17",
+                    "text": "Minor:\n\u2013\u00a0I am missing citations for \u201cordered visible dimension sampling\u201d\n\u2013\u00a0Typos and frequent incorrect use of \\citet and \\citep",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_693a7cf7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_167fe0d6"
+        },
+        {
+            "source": "sec_693a7cf7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7e3fb35a"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_3bbc6c8e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_693a7cf7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3bbc6c8e"
+        },
+        {
+            "source": "b_309061df",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_693a7cf7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_309061df"
+        },
+        {
+            "source": "b_8d0596c4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_693a7cf7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8d0596c4"
+        },
+        {
+            "source": "sec_693a7cf7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_61113fd1"
+        },
+        {
+            "source": "sec_3a70ccf7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_51a41483"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_652cf3ad"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_70866ec2"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f75e3ecd"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_394c6869"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5f13677f"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_247318a1"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff8493db"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c9f2090b"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_52ff8d4a"
+        },
+        {
+            "source": "b_fa173c7d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_cbc1fa05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fa173c7d"
+        },
+        {
+            "source": "sec_65088213",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5a8ea5b4"
+        },
+        {
+            "source": "sec_65088213",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_47aaceaf"
+        },
+        {
+            "source": "sec_65088213",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4b483bec"
+        },
+        {
+            "source": "sec_65088213",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e8c072b3"
+        },
+        {
+            "source": "sec_74f75db7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2d375c42"
+        },
+        {
+            "source": "sec_74f75db7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f5af3ac8"
+        },
+        {
+            "source": "sec_74f75db7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3a73b14a"
+        },
+        {
+            "source": "sec_74f75db7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_867dcf02"
+        },
+        {
+            "source": "sec_74f75db7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a3ed8abf"
+        },
+        {
+            "source": "sec_74f75db7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a5680863"
+        },
+        {
+            "source": "sec_08dc9357",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4f7051eb"
+        },
+        {
+            "source": "sec_08dc9357",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b127830c"
+        },
+        {
+            "source": "sec_08dc9357",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_35cbffc8"
+        },
+        {
+            "source": "sec_077bc1c5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b1178d72"
+        },
+        {
+            "source": "sec_077bc1c5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e0f6e208"
+        },
+        {
+            "source": "sec_077bc1c5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_430b1db8"
+        },
+        {
+            "source": "sec_077bc1c5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_914f1605"
+        },
+        {
+            "source": "sec_4117fa71",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bfeecd98"
+        },
+        {
+            "source": "sec_be4a5da8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7bc33605"
+        },
+        {
+            "source": "sec_be4a5da8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ca4df945"
+        },
+        {
+            "source": "b_3ee108d1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_3ee108d1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_e17854d9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3ee108d1"
+        },
+        {
+            "source": "b_d58e0a58",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_d58e0a58",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_e17854d9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d58e0a58"
+        },
+        {
+            "source": "b_0f7542eb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_0f7542eb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_0f7542eb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_e654e4ae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0f7542eb"
+        },
+        {
+            "source": "sec_e654e4ae",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6d638d52"
+        },
+        {
+            "source": "sec_6b171fb3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_062de4c4"
+        },
+        {
+            "source": "b_77e8513e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_77e8513e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_77e8513e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_6b171fb3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_77e8513e"
+        },
+        {
+            "source": "sec_116169bf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_97c01424"
+        },
+        {
+            "source": "b_5d6fa4bc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_5d6fa4bc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_5d6fa4bc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_5d6fa4bc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_116169bf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5d6fa4bc"
+        },
+        {
+            "source": "b_9c5c41e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_9c5c41e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_9c5c41e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_84e00cd7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9c5c41e7"
+        },
+        {
+            "source": "b_63d3dd67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_63d3dd67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_63d3dd67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_63d3dd67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_a94f531d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_63d3dd67"
+        },
+        {
+            "source": "sec_e5a88a7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e54169fb"
+        },
+        {
+            "source": "b_54c759d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_54c759d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_54c759d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_54c759d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_e5a88a7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_54c759d2"
+        },
+        {
+            "source": "sec_e5a88a7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_70783d64"
+        },
+        {
+            "source": "sec_e5a88a7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f561dcac"
+        },
+        {
+            "source": "b_9e7996a3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_9e7996a3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "sec_e5a88a7e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9e7996a3"
+        },
+        {
+            "source": "b_de438e9a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_2cf88832",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_de438e9a"
+        },
+        {
+            "source": "sec_2cf88832",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_082edc64"
+        },
+        {
+            "source": "b_f992ce07",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_f992ce07",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_f992ce07",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_f992ce07",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_2cf88832",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f992ce07"
+        },
+        {
+            "source": "sec_fbb70922",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0265415d"
+        },
+        {
+            "source": "sec_fbb70922",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f59ab660"
+        },
+        {
+            "source": "sec_fbb70922",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_399a1c93"
+        },
+        {
+            "source": "sec_fbb70922",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c9f1b6d5"
+        },
+        {
+            "source": "sec_fbb70922",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fba76388"
+        },
+        {
+            "source": "sec_c27a62f3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_299ba425"
+        }
+    ]
+}

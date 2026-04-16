@@ -1,0 +1,1551 @@
+{
+    "paper_metadata": {
+        "paper_id": "Hko85plCW",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Accepted",
+        "total_reviews_available": 2
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_4ece6265",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_9365615a",
+                        "type": "paragraph",
+                        "text": "Sequence-to-sequence models (Sutskever et al., 2014; Cho et al., 2014) with a soft attention mechanism (Bahdanau et al., 2015) have been successfully applied to a plethora of sequence transduction problems (Luong et al., 2015; Xu et al., 2015; Chorowski et al., 2015; Wang et al., 2017; See et al., 2017) . In their most familiar form, these models process an input sequence with an encoder recurrent neural network (RNN) to produce a sequence of hidden states, referred to as a memory. A decoder RNN then autoregressively produces the output sequence. At each output timestep, the decoder is directly conditioned by an attention mechanism, which allows the decoder to refer back to entries in the encoder's hidden state sequence. This use of the encoder's hidden states as a memory gives the model the ability to bridge long input-output time lags (Raffel & Ellis, 2015) , which provides a distinct advantage over sequence-to-sequence models lacking an attention mechanism (Bahdanau et al., 2015) . Furthermore, visualizing where in the input the model was attending to at each output timestep produces an input-output alignment which provides valuable insight into the model's behavior.",
+                        "extracted_citations": [
+                            "Citation_b27",
+                            "Citation_b5",
+                            "Citation_b2",
+                            "Citation_b20",
+                            "Citation_b30",
+                            "Citation_b7",
+                            "Citation_b29",
+                            "Citation_b26",
+                            "Citation_b24",
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8526ac4f",
+                        "type": "paragraph",
+                        "text": "As originally defined, soft attention inspects every entry of the memory at each output timestep, effectively allowing the model to condition on any arbitrary input sequence entry. This flexibility comes at a distinct cost, namely that decoding with a soft attention mechanism has a quadratic time and space cost O(T U ), where T and U are the input and output sequence lengths respectively. This precludes its use on very long sequences, e.g. summarizing extremely long documents. In addition, because soft attention considers the possibility of attending to every entry in the memory at every output timestep, it must wait until the input sequence has been processed before producing output. This makes it inapplicable to real-time sequence transduction problems. Raffel et al. (2017) recently pointed out that these issues can be mitigated when the input-output alignment is monotonic, i.e. the correspondence between elements in the input and output sequence does not involve reordering. This property is present in various real-world problems, such as speech recognition and synthesis, where the input and output share a natural temporal order (see, for example, fig. 2 ). In other settings, the alignment only involves local reorderings, e.g. machine translation for certain language pairs (Birch et al., 2008) .",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_98bd46f0",
+                        "type": "paragraph",
+                        "text": "Based on this observation, Raffel et al. (2017) introduced an attention mechanism that explicitly enforces a hard monotonic input-output alignment, which allows for online and linear-time decoding. Figure 1 : Schematics of the attention mechanisms discussed in this paper. Each node represents the possibility of the model attending to a given memory entry (horizontal axis) at a given output timestep (vertical axis). (a) In soft attention, the model assigns a probability (represented by the shade of gray of each node) to each memory entry at each output timestep. The context vector is computed as the weighted average of the memory, weighted by these probabilities. (b) At test time, monotonic attention inspects memory entries from left-to-right, choosing whether to move on to the next memory entry (shown as nodes with \u00d7) or stop and attend (shown as black nodes). The context vector is hard-assigned to the memory entry that was attended to. At the next output timestep, it starts again from where it left off. (c) MoChA utilizes a hard monotonic attention mechanism to choose the endpoint (shown as nodes with bold borders) of the chunk over which it attends. The chunk boundaries (here, with a window size of 3) are shown as dotted lines. The model then performs soft attention (with attention weighting shown as the shade of gray) over the chunk, and computes the context vector as the chunk's weighted average. However, the hard monotonicity constraint also limits the expressivity of the model compared to soft attention (which can induce an arbitrary soft alignment). Indeed, experimentally it was shown that the performance of sequence-to-sequence models utilizing this monotonic attention mechanism lagged behind that of standard soft attention.",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_204a4178",
+                        "type": "paragraph",
+                        "text": "In this paper, we aim to close this gap by introducing a novel attention mechanism which retains the online and linear-time benefits of hard monotonic attention while allowing for soft alignments. Our approach, which we dub \"Monotonic Chunkwise Attention\" (MoChA), allows the model to perform soft attention over small chunks of the memory preceding where a hard monotonic attention mechanism has chosen to attend. It also has a training procedure which allows it to be straightforwardly applied to existing sequence-to-sequence models and trained with standard backpropagation. We show experimentally that MoChA effectively closes the gap between monotonic and soft attention on online speech recognition and provides a 20% relative improvement over monotonic attention on document summarization (a task which does not exhibit monotonic alignments). These benefits incur only a modest increase in the number of parameters and computational cost. We also provide a discussion of related work and ideas for future research using our proposed mechanism.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b9d20525",
+                "title": "DEFINING MOCHA",
+                "blocks": [
+                    {
+                        "block_id": "b_9d4fc259",
+                        "type": "paragraph",
+                        "text": "To develop our proposed attention mechanism, we will first review the sequence-to-sequence framework and the most common form of soft attention used with it. Because MoChA can be considered a generalization of monotonic attention, we then re-derive this approach and point out some of its shortcomings. From there, we show how soft attention over chunks can be straightforwardly added to hard monotonic attention, giving us the MoChA attention mechanism. We also show how MoChA can be trained efficiently with respect to the mechanism's expected output, which allows us to use standard backpropagation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cab3d6e8",
+                "title": "SEQUENCE-TO-SEQUENCE MODELS",
+                "blocks": [
+                    {
+                        "block_id": "b_5b53c70d",
+                        "type": "paragraph",
+                        "text": "A sequence-to-sequence model is one which transduces an input sequence x = {x 1 , . . . , x T } to an output sequence (potentially of a different modality) y = {y 1 , . . . , y U }. Typically, the input sequence is first converted to a sequence of hidden states h = {h 1 , . . . , h T } by an encoder recurrent neural network (RNN):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0bb1ee20",
+                        "type": "paragraph",
+                        "text": "A decoder RNN then updates its hidden state autoregressively and an output layer (typically using a softmax nonlinearity) produces the output sequence:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1bd8a37b",
+                        "type": "paragraph",
+                        "text": "where s i is the decoder's state and c i is a \"context\" vector which is computed as a function of the encoder hidden state sequence h. Note that c i is the sole conduit through which the decoder has access to information about the input sequence.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5d9e6f27",
+                        "type": "paragraph",
+                        "text": "In the originally proposed sequence-to-sequence framework (Sutskever et al., 2014) , the context vector is simply set to the final encoder hidden state, i.e. c i = h T . It was subsequently found that this approach exhibits degraded performance when transducing long sequences (Bahdanau et al., 2015) . Instead, it has become standard to use an attention mechanism which treats the hidden state sequence as a (soft-)addressable memory whose entries are used to compute the context vector c i .",
+                        "extracted_citations": [
+                            "Citation_b27",
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9caa8b90",
+                        "type": "paragraph",
+                        "text": "In the following subsections, we discuss three such approaches for computing c i ; otherwise, the sequence-to-sequence framework remains unchanged.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f9107214",
+                "title": "STANDARD SOFT ATTENTION",
+                "blocks": [
+                    {
+                        "block_id": "b_cb469a8d",
+                        "type": "paragraph",
+                        "text": "Currently, the most commonly used attention mechanism is the one originally proposed in (Bahdanau et al., 2015) . At each output timestep i, this approach proceeds as follows: First, an unnormalized scalar \"energy\" value e i,j is produced for each memory entry:",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_cb0b3b6a",
+                        "type": "paragraph",
+                        "text": "A common choice for Energy(\u2022) is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2731acfd",
+                        "type": "paragraph",
+                        "text": "where W h \u2208 R d\u00d7dim(hj ) , W s \u2208 R d\u00d7dim(si-1) , b \u2208 R d and v \u2208 R d are learnable parameters and d is the hidden dimensionality of the energy function. Second, these energy scalars are normalized across the memory using the softmax function to produce weighting values \u03b1 i,j :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e1433256",
+                        "type": "paragraph",
+                        "text": "Finally, the context vector is computed as a simple weighted average of h, weighted by \u03b1 i,: :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0be3fa5f",
+                        "type": "paragraph",
+                        "text": "We visualize this soft attention mechanism in fig. 1a .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9d51e001",
+                        "type": "paragraph",
+                        "text": "Note that in order to compute c i for any output timestep i, we need to have computed all of the encoder hidden states h j for j \u2208 {1, . . . , T }. This implies that this form of attention is not applicable to online/real-time sequence transduction problems, because it needs to have observed the entire input sequence before producing any output. Furthermore, producing each context vector c i involves computing T energy scalar terms and weighting values. While these operations can typically be parallelized, this nevertheless results in decoding having a O(T U ) cost in time and space.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_48412ad1",
+                "title": "MONOTONIC ATTENTION",
+                "blocks": [
+                    {
+                        "block_id": "b_b3d9ea44",
+                        "type": "paragraph",
+                        "text": "To address the aforementioned issues with soft attention, Raffel et al. (2017) proposed a hard monotonic attention mechanism whose attention process can be described as follows: At output timestep i, the attention mechanism begins inspecting memory entries starting at the memory index it attended to at the previous output timestep, referred to as t i-1 . It then computes an unnormalized energy scalar e i,j for j = t i-1 , t i-1 + 1, . . . and passes these energy values into a logistic sigmoid function \u03c3(\u2022) to produce \"selection probabilities\" p i,j . Then, a discrete attend/don't attend decision z i,j is sampled from a Bernoulli random variable parameterized by p i,j . In total, so far we have",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6b3b0f84",
+                        "type": "paragraph",
+                        "text": "As soon as z i,j = 1 for some j, the model stops and sets t i = j and c i = h ti . This process is visualized in fig. 1b . Note that because this attention mechanism only makes a single pass over the memory, it has a O(max(T, U )) (linear) cost. Further, in order to attend to memory entry h j , the encoder RNN only needs to have processed input sequence entries x 1 , . . . , x j , which allows it to be used for online sequence transduction. Finally, note that if p i,j \u2208 {0, 1} (a condition which is encouraged, as discussed below) then the greedy assignment of c i = h ti is equivalent to marginalizing over possible alignment paths.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4fd77d80",
+                        "type": "paragraph",
+                        "text": "Because this attention process involves sampling and hard assignment, models utilizing hard monotonic attention can't be trained with backpropagation. To remedy this, Raffel et al. (2017) propose training with respect to the expected value of c i by computing the probability distribution over the memory induced by the attention process. This distribution takes the following form:",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_475f20bc",
+                        "type": "paragraph",
+                        "text": "The context vector c i is then computed as a weighted sum of the memory as in eq. ( 7 ). Equation ( 11 ) can be explained by observing that (1 -p i,j-1 )\u03b1 i,j-1 /p i,j-1 is the probability of attending to memory entry j -1 at the current output timestep (\u03b1 i,j-1 ) corrected for the fact that the model did not attend to memory entry j (by multiplying by (1-p i,j-1 ) and dividing by p i,j-1 ). The addition of \u03b1 i-1,j represents the additional possibility that the model attended to entry j at the previous output timestep, and finally multiplying it all by p i,j reflects the probability that the model selected memory item j at the current output timestep i. Note that this recurrence relation is not parallelizable across memory indices j (unlike, say, softmax), but fortunately substituting q i,j = \u03b1 i,j /p i,j produces the first-order linear difference equation q i,j = (1 -p i,j-1 )q i,j-1 + \u03b1 i-1,j which has the following solution (Kelley & Peterson, 2001) :",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_81bb9688",
+                        "type": "paragraph",
+                        "text": "Because the cumulative sum and product can be computed in parallel (Ladner & Fischer, 1980) , models can still be trained efficiently with this approach.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_022f3ac3",
+                        "type": "paragraph",
+                        "text": "Note that training is no longer online or linear-time, but the proposed solution is to use this \"soft\" monotonic attention for training and use the hard monotonic attention process at test time. To encourage discreteness, Raffel et al. (2017) used the common approach of adding zero-mean, unitvariance Gaussian noise to the logistic sigmoid function's activations, which causes the model to learn to produce effectively binary p i,j . If p i,j are binary, z i,j = 1(p i,j > .5), so in practice sampling is eschewed at test-time in favor of simple thresholding. Separately, it was observed that switching from the softmax nonlinearity to the logistic sigmoid resulted in optimization issues due to saturating and sensitivity to offset. To mitigate this, a slightly modified energy function was used:",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1cd88cbb",
+                        "type": "paragraph",
+                        "text": "where g, r are learnable scalars and v, W s , W h , b are as in eq. ( 5 ). Further discussion of these modifications is provided in (Raffel et al., 2017) appendix G.",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_bfa36542",
+                "title": "MONOTONIC CHUNKWISE ATTENTION",
+                "blocks": [
+                    {
+                        "block_id": "b_7d142bd3",
+                        "type": "paragraph",
+                        "text": "While hard monotonic attention provides online and linear-time decoding, it nevertheless imposes two significant constraints on the model: First, that the decoder can only attend to a single entry in memory at each output timestep, and second, that the input-output alignment must be strictly monotonic. These constraints are in contrast to standard soft attention, which allows a potentially Algorithm 1 MoChA decoding process (test time). During training, lines 4-19 are replaced with eqs. ( 20 ) to ( 26 ) and y i-1 is replaced with the ground-truth output at timestep i -1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_028b039f",
+                        "type": "paragraph",
+                        "text": "1: Input: memory h of length T , chunk size w 2: State: s0 = 0, t0 = 1, i = 1, y0 = StartOfSequence 3: while yi-1 = EndOfSequence do // Produce output tokens until end-of-sequence token is produced 4: for j = ti-1 to T do // Start inspecting memory entries hj left-to-right from where we left off 5:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_44085ea8",
+                        "type": "paragraph",
+                        "text": "ei,j = MonotonicEnergy(si-1, hj) // Compute attention energy for hj 6:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e2d95128",
+                        "type": "paragraph",
+                        "text": "pi,j = \u03c3(ei,j) // Compute probability of choosing hj 7:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_edca2036",
+                        "type": "paragraph",
+                        "text": "if pi,j \u2265 0.5 then // If pi,j is larger than 0.5, we stop scanning the memory 8: v = j -w + 1 // Set chunk start location 9:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a878332c",
+                        "type": "paragraph",
+                        "text": "for k = v to j do // Compute chunkwise softmax energies over a size-w chunk before j 10: i = i + 1 23: end while arbitrary and smooth input-output alignment. Experimentally, it was shown that performance degrades somewhat on all tasks tested in (Raffel et al., 2017) . Our hypothesis is that this degradation stems from the aforementioned constraints imposed by hard monotonic attention.",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1f7577f3",
+                        "type": "paragraph",
+                        "text": "To remedy these issues, we propose a novel attention mechanism which we call MoChA, for Monotonic Chunkwise Attention. The core of our idea is to allow the attention mechanism to perform soft attention over small \"chunks\" of memory preceding where a hard monotonic attention mechanism decides to stop. This facilitates some degree of softness in the input-output alignment, while retaining the online decoding and linear-time complexity benefits.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6f2443e1",
+                        "type": "paragraph",
+                        "text": "At test time, we follow the hard monotonic attention process of section 2.3 in order to determine t i (the location where the hard monotonic attention mechanism decides to stop scanning the memory at output timestep i). However, instead of setting c i = h ti , we allow the model to perform soft attention over the length-w window of memory entries preceding and including t i :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_107c7a99",
+                        "type": "paragraph",
+                        "text": "where ChunkEnergy(\u2022) is an energy function analogous to eq. ( 5 ), which is distinct from the MonotonicEnergy(\u2022) function. MoChA's attention process is visualized in fig. 1c . Note that MoChA allows for nonmonotonic alignments; specifically, it allows for reordering of the memory entries h v , . . . , h ti . Including soft attention over chunks only increases the runtime complexity by the constant factor w, and decoding can still proceed in an online fashion. Furthermore, using MoChA only incurs a modest increase in the total number of parameters (corresponding to adding the second attention energy function ChunkEnergy(\u2022)). For example, in the speech recognition experiments described in section 3.1, the total number of model parameters only increased by about 1%. Finally, we point out that setting w = 1 recovers hard monotonic attention. For completeness, we show the decoding algorithm for MoChA in full in algorithm 1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c6d73b48",
+                        "type": "paragraph",
+                        "text": "During training, we proceed in a similar fashion as with monotonic attention, namely training the model using the expected value of c i based on MoChA's induced probability distribution (which we denote \u03b2 i,j ). This can be computed as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5773eeda",
+                        "type": "paragraph",
+                        "text": "The sum over k reflects the possible positions at which the monotonic attention could have stopped scanning the memory in order to contribute probability to \u03b2 i,j and the term inside the summation represents the softmax probability distribution over the chunk, scaled by the monotonic attention probability \u03b1 i,k . Computing each \u03b2 i,j in this fashion is expensive due to the nested summation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bdab0809",
+                        "type": "paragraph",
+                        "text": "Fortunately, there is an efficient way to compute \u03b2 i,j for j \u2208 {1, . . . , T } in parallel: First, for a sequence x = {x 1 , . . . , x T } we define",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7e9a42a7",
+                        "type": "paragraph",
+                        "text": "This function can be computed efficiently, for example, by convolving x with a length-(f + b -1) sequence of 1s and truncating appropriately. Now, we can compute \u03b2 i,: efficiently as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aaddf5c2",
+                        "type": "paragraph",
+                        "text": "Putting it all together produces the following algorithm for computing c i during training:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2664c473",
+                        "type": "paragraph",
+                        "text": "\u03b2 i,: = exp(u i,: ) MovingSum \u03b1 i,: MovingSum(exp(u i,: ), w, 1)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8df24a82",
+                        "type": "paragraph",
+                        "text": "Equations ( 20 ) to (23) reflect the (unchanged) computation of the monotonic attention probability distribution, eqs. ( 24 ) and ( 25 ) compute MoChA's probability distribution, and finally eq. ( 26 ) computes the expected value of the context vector c i . In summary, we have developed a novel attention mechanism which allows computing soft attention over small chunks of the memory, whose locations are set adaptively. This mechanism has an efficient training-time algorithm and enjoys online and linear-time decoding at test time. We attempt to quantify the resulting speedup compared to soft attention with a synthetic benchmark in appendix B.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5137e50d",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_3fdc63b7",
+                        "type": "paragraph",
+                        "text": "To test out MoChA, we applied it to two exemplary sequence transduction tasks: Online speech recognition and document summarization. Speech recognition is a promising setting for MoChA because it induces a naturally monotonic input-output alignment, and because online decoding is often required in the real world. Document summarization, on the other hand, does not exhibit a monotonic alignment, and we mostly include it as a way of testing the limitations of our model. We emphasize that in all experiments, we took a strong baseline sequence-to-sequence model with standard soft attention and changed only the attention mechanism; all hyperparameters, model structure, training approach, etc. were kept exactly the same. This allows us to isolate the effective difference in performance caused by switching to MoChA. Of course, this may be an artificially low estimate of the best-case performance of MoChA, due to the fact that it may benefit from a somewhat different hyperparameter setting. We leave eking out the best-case performance for future work. Specifically, for MoChA we used eq. ( 13 ) for both the MonotonicEnergy and the ChunkEnergy functions. Following (Raffel et al., 2017) , we initialized g = 1/ \u221a d (d being the attention energy function hidden dimension) and tuned initial values for r based on validation set performance, using r = -4 for MoChA on speech recognition, r = 0 for MoChA on summarization, and r = -1 for our monotonic attention baseline on summarization. We similarly tuned the chunk size w: For speech recognition, we were surprised to find that all of w \u2208 {2, 3, 4, 6, 8} performed comparably and thus chose the smallest value of w = 2. For summarization, we found w = 8 to work best. We demonstrate empirically that even these small window sizes give a significant boost over hard monotonic attention (w = 1) while incurring only a minor computational penalty. In all experiments, we report metrics on the test set at the training step of best performance on a validation set.",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3542a9d0",
+                "title": "ONLINE SPEECH RECOGNITION",
+                "blocks": [
+                    {
+                        "block_id": "b_b945edda",
+                        "type": "paragraph",
+                        "text": "First, we apply MoChA in its natural setting, i.e. a domain where we expect roughly monotonic alignments: 1 Online speech recognition on the Wall Street Journal (WSJ) corpus (Paul & Baker, 1992) . The goal in this task is to produce the sequence of words spoken in a recorded speech utterance. In this setting, RNN-based models must be unidirectional in order to satisfy the online requirement. We use the model of (Raffel et al., 2017) , which is itself based on that of (Zhang et al., 2016) . Full model and training details are provided in appendix A.1, but as a broad overview, the network ingests the spoken utterance as a mel-filterbank spectrogram which is passed to an encoder consisting of convolution layers, convolutional LSTM layers, and unidirectional LSTM layers. The decoder is a single unidirectional LSTM, which attends to the encoder state sequence via either MoChA or a standard soft attention mechanism. The decoder produces a sequence of distributions over character and word-delimiter tokens. Performance is measured in terms of word error rate (WER) after segmenting characters output by the model into words based on the produced word delimiter tokens. None of the models we report integrated a separate language model. We show the results of our experiments, along with those obtained by prior work, in table 1. MoChA was able to beat the state-ofthe-art by a large margin (20% relative). Because the performance of MoChA and the soft attention baseline was so close, we ran 8 repeat trials for both attention mechanisms and report the best, average, and standard deviation of word error rates across these trials. We found MoChA-based models to have slightly higher variance across trials, which resulted in it having a lower best WER but a slightly higher mean WER compared to soft attention (though the difference in means was not statistically significant for N = 8 under an unpaired Student's t-test). This is the first time, to our knowledge, that an online attention mechanism matched the performance of standard (offline) soft attention. To get an idea of the behavior of the different attention mechanisms, we show attention alignments for an example from the WSJ validation set in fig. 2 . As expected, the alignment looks roughly the same for all attention mechanisms. We note especially that MoChA is indeed taking advantage of the opportunity to produce a soft attention distribution over each length-2 chunk.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b25",
+                            "Citation_b33"
+                        ]
+                    },
+                    {
+                        "block_id": "b_010dc1e3",
+                        "type": "paragraph",
+                        "text": "Since we empirically found the small value of w = 2 to be sufficient to realize these gains, we carried out a few additional experiments to confirm that they can indeed be attributed to MoChA. First, the (See et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a71c7b45",
+                        "type": "paragraph",
+                        "text": "use of a second independent attention energy function ChunkEnergy(\u2022) incurs a modest increase in parameter count -about 1% in our speech recognition model. To ensure the improved performance was not due to this parameter increase, we also re-trained the monotonic attention baseline with an energy function with a doubled hidden dimensionality (which produces a comparable increase in the number of parameters in a natural way). Across eight trials, the difference in performance (a decrease of 0.3% WER) was not significant compared to the baseline and was dwarfed by the gains achieved by MoChA. We also trained the w = 2 MoChA model with half the attention energy hidden dimensionality (which similarly reconciles the parameter difference) and found it did not significantly undercut our gains, increasing the WER by only 0.2% (not significant over eight trials).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f88325e1",
+                        "type": "paragraph",
+                        "text": "Separately, one possible benefit of MoChA is that the attention mechanism can access a larger window of the input when producing the context vectors. An alternative approach towards this end would be to increase the temporal receptive field of the convolutional front-end, so we also retrained the monotonic attention baseline with this change. Again, the difference in performance (an increase of 0.3% WER) was not significant over eight trials. These additional experiments reinforce the benefits of using MoChA for online speech recognition.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_12d3336e",
+                "title": "DOCUMENT SUMMARIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_2dd551b4",
+                        "type": "paragraph",
+                        "text": "Having proven the effectiveness of MoChA in the comfortable setting of speech recognition, we now test its limits in a task without a monotonic input/output alignment. Raffel et al. (2017) experimented with sentence summarization on the Gigaword dataset, which frequently exhibits monotonic alignments and involves short sequences (sentence-length sequences of words). They were able to achieve only slightly degraded performance with hard monotonic attention compared to a soft attention baseline. As a result, we turn to a more difficult task where hard monotonic attention struggles more substantially due to the lack of monotonic alignments: Document summarization on the CNN/Daily Mail corpus (Nallapati et al., 2016) . While we primarily study this problem because it has the potential to be challenging, online and linear-time attention could also be beneficial in real-world scenarios where very long bodies of text need to be summarized as they are being created (e.g. producing a summary of a speech as it is being given).",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4f797053",
+                        "type": "paragraph",
+                        "text": "The goal of this task is to produce a sequence of \"highlight\" sentences from a news article. As a baseline model, we chose the \"pointer-generator\" network (without the coverage penalty) of (See et al., 2017) . For full model architecture and training details, refer to appendix A.2. As a brief summary, input words are converted to a learned embedding and passed into the model's encoder, consisting of a single bidirectional LSTM layer. The decoder is a unidirectional LSTM with an attention mechanism whose state is passed to a softmax layer which produces a sequence of distributions over the vocabulary. The model is augmented with a copy mechanism, which interpolates linearly between using the softmax output layer's word distribution, or a distribution of word IDs weighted by the attention distribution at a given output timestep. We tested this model with standard soft attention (as used in (See et al., 2017) ), hard monotonic attention, and MoChA with w = 8.",
+                        "extracted_citations": [
+                            "Citation_b26",
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_12c38d93",
+                        "type": "paragraph",
+                        "text": "The results are shown in table 2. We found that using a hard monotonic attention mechanism degraded performance substantially (nearly 8 ROUGE-1 points), likely because of the strong reordering required by this task. However, MoChA was able to effectively halve the gap between monotonic and soft attention, despite using the modest chunk size of w = 8. We consider this an encouraging indication of the benefits of being able to deal with local reorderings.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4f2ac819",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_07906be7",
+                        "type": "paragraph",
+                        "text": "A similar model to MoChA is the \"Neural Transducer\" (Jaitly et al., 2015) , where the input sequence is pre-segmented into equally-sized non-overlapping chunks and attentive sequence-to-sequence transduction is performed over each chunk separately. The full output sequence is produced by marginalizing out over possible end-of-sequence locations for the sequences generated from each chunk. While our model also performs soft attention over chunks, the locations of our chunks are set adaptively by a hard monotonic attention mechanism rather than fixed, and it avoids the marginalization over chunkwise end-of-sequence tokens. Chorowski et al. (2015) proposes a similar idea, wherein the range over which soft attention is computed at each output timestep is limited to a fixed-sized window around the memory index of maximal attention probability at the previous output timestep. While this also produces soft attention over chunks, our approach differs in that the chunk boundary is set by an independent hard monotonic attention mechanism. This difference resulted in Chorowski et al. (2015) using a very large chunk size of 150, which effectively prevents its use in online settings and incurs a significantly higher computational cost than our approach which only required small values for w.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b7",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_86b9ef99",
+                        "type": "paragraph",
+                        "text": "A related class of non-attentive sequence transduction models which can be used in online settings are connectionist temporal classification (Graves et al., 2006) , the RNN transducer (Graves, 2012) , segment-to-segment neural transduction (Yu et al., 2016) , and the segmental RNN (Kong et al., 2015) . These models are distinguished from sequence-to-sequence models with attention mechanisms by the fact that the decoder does not condition directly on the input sequence, and that decoding is done via a dynamic program. A detailed comparison of this class of approaches and attention-based models is provided in (Prabhavalkar et al., 2017) , where it is shown that attentionbased models perform best in speech recognition experiments. Further, Hori et al. (2017) recently proposed jointly training a speech recognition model with both a CTC loss and an attention mechanism. This combination encouraged the model to learn monotonic alignments, but Hori et al. (2017) still used a standard soft attention mechanism which precludes the model's use in online settings.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b8",
+                            "Citation_b33",
+                            "Citation_b16",
+                            "Citation_b23",
+                            "Citation_b11",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_350f4c0e",
+                        "type": "paragraph",
+                        "text": "Finally, we note that there have been a few other works considering hard monotonic alignments, e.g. using reinforcement learning (Zaremba & Sutskever, 2015; Luo et al., 2016; Lawson et al., 2017) , by using separately-computed target alignments (Aharoni & Goldberg, 2016) or by assuming a strictly diagonal alignment (Luong et al., 2015) . We suspect that these approaches may confer similar benefits from adding chunkwise attention.",
+                        "extracted_citations": [
+                            "Citation_b32",
+                            "Citation_b19",
+                            "Citation_b18",
+                            "Citation_b1",
+                            "Citation_b20"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6904e692",
+                "title": "A EXPERIMENT DETAILS",
+                "blocks": [
+                    {
+                        "block_id": "b_23191393",
+                        "type": "paragraph",
+                        "text": "In this appendix, we provide specifics about the experiments carried out in section 3. All experiments were done using TensorFlow (Abadi et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_79fcdb94",
+                        "type": "paragraph",
+                        "text": "A.1 ONLINE SPEECH RECOGNITION Overall, our model follows that of (Raffel et al., 2017) , but we repeat the details here for posterity. We represented speech utterances as mel-scaled spectrograms with 80 coefficients, along with delta and delta-delta coefficients. Feature sequences were first fed into two convolutional layers, each with 3 \u00d7 3 filters and a 2 \u00d7 2 stride with 32 filters per layer. Each convolution was followed by batch normalization (Ioffe & Szegedy, 2015) prior to a ReLU nonlinearity. The output of the convolutional layers was fed into a convolutional LSTM layer, using 1 \u00d7 3 filters. This was followed by an additional 3 \u00d7 3 convolutional layer with 32 filters and a stride of 1 \u00d7 1. Finally, the encoder had three additional unidirectional LSTM layers with a hidden state size of 256, each followed by a dense layer with a 256-dimensional output with batch normalization and a ReLU nonlinearity.",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4ce41827",
+                        "type": "paragraph",
+                        "text": "The decoder was a single unidirectional LSTM layer with a hidden state size of 256. Its input consisted of a 64-dimensional learned embedding of the previously output symbol and the 256dimensional context vector produced by the attention mechanism. The attention energy function had a hidden dimensionality d of 128. The softmax output layer took as input the concatenation of the attention context vector and the decoder's state.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e6de4271",
+                        "type": "paragraph",
+                        "text": "The network was trained using the Adam optimizer (Kingma & Ba, 2014) with \u03b2 1 = 0.9, \u03b2 2 = 0.999, and = 10 -6 . The initial learning rate 0.001 was dropped by a factor of 10 after 600,000, 800,000, and 1,000,000 steps. Note that Raffel et al. (2017) used a slightly different learning rate schedule, but we found that the aforementioned schedule improved performance both for the soft attention baseline and for MoChA, but hurt performance for hard monotonic attention. For this reason, we report the hard monotonic attention performance from (Raffel et al., 2017) instead of re-running that baseline. Inputs were fed into the network in batches of 8 utterances, using standard teacher forcing. Localized label smoothing (Chorowski & Jaitly, 2017) was applied to the target outputs with weights [0.015, 0.035, 0.035, 0.015] for neighbors at [-2, -1, 1, 2]. We used gradient clipping, setting the norm of the global gradient vector to 1 whenever it exceeded that threshold. We added variational weight noise to LSTM layer parameters and embeddings with standard deviation of 0.075 starting after 20,000 training steps. We also applied L2 weight decay with a coefficient of 10 -6 . At test time, we used a beam search with rank pruning at 8 hypotheses and a pruning threshold of 3.",
+                        "extracted_citations": [
+                            "Citation_b15",
+                            "Citation_b25",
+                            "Citation_b25",
+                            "Citation_b6"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3768cce2",
+                "title": "A.2 DOCUMENT SUMMARIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_b9dab9b3",
+                        "type": "paragraph",
+                        "text": "For summarization, we reimplemented the pointer-generator of See et al. (2017) . Inputs were provided as one-hot vectors representing ID in a 50,000 word vocabulary, which were mapped to a 512-dimensional learned embedding. The encoder consisted of a single bidirectional LSTM layer with 512 hidden units, and the decoder was a single unidirectional LSTM layer with 1024 hidden units. Our attention mechanisms had a hidden dimensionality d of 1024. Output words were embedded into a learned 1024-dimensional embedding and concatenated with the context vector before being fed back in to the decoder.",
+                        "extracted_citations": [
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_008bfe1c",
+                        "type": "paragraph",
+                        "text": "For training, we used the Adam optimizer with \u03b2 1 = 0.9, \u03b2 2 = 0.999, and = 0.0000008. Our optimizer had an initial learning rate of 0.0005 which was continuously decayed starting at 50,000 steps such that the learning rate was halved every 10,000 steps until it reached 0.00005. Sequences were fed into the model with a batch size of 64. As in See et al. (2017) , we truncated all input sequence to a maximum length of 400 words. The global norm of the gradient was clipped to never exceed 5. Note that we did not include the \"coverage penalty\" discussed in See et al. (2017) in our models. During eval, we used an identical beam search as in the speech recognition experiments with rank pruning at 8 hypotheses and a pruning threshold of 3.",
+                        "extracted_citations": [
+                            "Citation_b26",
+                            "Citation_b26"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a6ea7531",
+                "title": "B SPEED BENCHMARK",
+                "blocks": [
+                    {
+                        "block_id": "b_024e1767",
+                        "type": "paragraph",
+                        "text": "To get an idea of the possible speedup incurred by using MoChA instead of standard soft attention, we carried out a simple synthetic benchmark analogous to the one in (Raffel et al., 2017) , appendix F. In this test, we implemented solely the attention mechanism and measured its speed for various input/output sequence lengths. This isolates the speed of the portion of the network we are studying; in practice, other portions of the network (e.g. encoder RNN, decoder RNN, etc.) may dominate the computational cost of running the full model. Any resulting speedup can therefore be considered an upper bound on what might be observed in the real-world. Further, we coded the benchmark in C++ using the Eigen library (Guennebaud et al., 2010) to remove any overhead incurred by a particular model framework.",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1bc2697f",
+                        "type": "paragraph",
+                        "text": "In this synthetic setting, attention was performed over a randomly generated encoder hidden state sequence, using random decoder states. The encoder and decoder state dimensionality was set to 256. We varied the input and output sequence lengths T and U simultaneously, in the range {10, 20, 30, . . . , 100}. We measured the speed for soft attention, monotonic attention (i.e. MoChA with w = 1), and MoChA with w = {2, 4, 8}. For all times, we report the mean of 100 trials.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_70e3931d",
+                        "type": "paragraph",
+                        "text": "The results are shown in fig. 3 . As expected, soft attention exhibits a roughly quadratic time complexity, where as MoChA's is linear. This results in a larger speedup factor as T and U increase. Further, the complexity of MoChA increases linearly with w. Finally, note that for T, U = 10 and w = 8, the speed of MoChA and soft attention are similar, because the chunk effectively spans the entire memory. This confirms the intuition that speedups from MoChA will be most dramatic for large T and U and relatively small w.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cf3b8a98",
+                "title": "C MONOTONIC ADAPTIVE CHUNKWISE ATTENTION (MATCHA)",
+                "blocks": [
+                    {
+                        "block_id": "b_cfdd527b",
+                        "type": "paragraph",
+                        "text": "Output y In this paper, we considered an attention mechanism which attends to small, fixed-length chunks preceding the location set by a monotonic attention mechanism. In parallel with this work, we also considered another online and linear-time attention mechanism which instead set the chunks to be the region of memory between t i and t i-1 . We called this approach MAtChA, for Monotonic Adaptive Chunkwise Attention. The motivation behind this alternative was that in some cases it may be suboptimal to use a fixed chunk size for all locations in all sequences. However, as we will discuss below, we found that it did not improve performance over MoChA on any of the tasks we tried despite the training-time algorithm having increased memory and computational requirements. We include a discussion and derivation of MAtChA here for posterity, in case other researchers are interested in pursuing similar ideas.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_189936ae",
+                        "type": "paragraph",
+                        "text": "Overall, the test-time decoding process of MAtChA (which is also online and linear-time) is extremely similar to algorithm 1 except that instead of setting the chunk start location v to v = j -w + 1, we set v = t i-1 so that",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c6c8c473",
+                        "type": "paragraph",
+                        "text": "This process is visualized in fig. 4 . Note that if t i = t i-1 , then MAtChA must assign all attention to memory entry t i because the sole entry of the chunk must be assigned a probability of 1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_90642a09",
+                        "type": "paragraph",
+                        "text": "The overall equation for MAtChA's attention for memory entry j at output timestep i can be expressed as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d88716b4",
+                        "type": "paragraph",
+                        "text": "This equation can be explained left to right as follows: First, we must sum over all possible positions that monotonic attention could have attended to at the previous timestep k \u2208 {1, . . . , j}. Second, we sum over all possible locations where we can attend at the current output timestep l \u2208 {j, . . . , T }. Third, for a given input/output timestep combination, we compute the softmax probability of memory entry j over the chunk spanning from k to l (as in the main text, we refer to attention energies produced by ChunkEnergy as u i,j ). Fourth, we multiply by \u03b1 i-1,k which represents the probability that the monotonic attention mechanism attended to memory entry k at the previous timestep. Fifth, we multiply by p i,l , the probability of the monotonic attention mechanism choosing memory entry l at the current output timestep. Finally, we multiply by the probability of not choosing any of the memory entries from k to l -1. Using eq. ( 28 ) to compute \u03b2 i,j to obtain the expected value of the context vector c i allows models utilizing MAtChA to be trained with backpropagation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_40f165f8",
+                        "type": "paragraph",
+                        "text": "Note that eq. ( 28 ) contains multiple nested summations and products for computing each i, j pair. Fortunately, as with monotonic attention and MoChA there is a dynamic program which allows \u03b2 i,: to be computed completely in parallel which can be derived as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b57d301e",
+                        "type": "paragraph",
+                        "text": "While we have demonstrated a parallelizable procedure for computing MAtChA's attention distribution, the marginalization over all possible chunk start and end locations necessitates a quadratic number of terms to be computed for each output timestep/memory entry combination. Even in the case of perfectly efficient parallelization, the result is an algorithm which requires O(U T 2 ) memory for decoding (as opposed to the O(U T ) memory required when training standard soft attention, monotonic attention, or MoChA). This puts it at a distinct disadvantage, especially for large values of T . Experimentally, we had hoped that these drawbacks would be outweighed by superior empirical performance of MAtChA, but we unfortunately found that it did not perform any better than MoChA for the tasks we tried. As a result, we decided not to include discussion of MAtChA in the main text and recommend against its use in its current form. Nevertheless, we are interested in mixing MoChA and MAtChA in future work in attempt to reap the benefits of their combined strength.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "TensorFlow: A system for largescale machine learning Martin Abadi Paul Barham Jianmin Chen Zhifeng Chen Andy Davis Jeffrey Dean Matthieu Devin Sanjay Ghemawat Geoffrey Irving Michael Isard Manjunath Kudlur Josh Levenberg Rajat Monga Sherry Moore Derek G Murray Benoit Steiner Paul Tucker Vijay Vasudevan Pete Warden Martin Wicke Yuan Yu Xiaoqiang Zheng Operating Systems Design and Implementation 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Sequence to sequence transduction with hard monotonic attention Roee Aharoni Yoav Goldberg arXiv:1611.01487 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Neural machine translation by jointly learning to align and translate Dzmitry Bahdanau Kyunghyun Cho Yoshua Bengio International Conference on Learning Representations 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Predicting success in machine translation Alexandra Birch Miles Osborne Philipp Koehn Proceedings of the Conference on Empirical Methods in Natural Language Processing the Conference on Empirical Methods in Natural Language Processing Association for Computational Linguistics 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Listen, attend and spell: A neural network for large vocabulary conversational speech recognition William Chan Navdeep Jaitly Quoc V Le Oriol Vinyals International Conference on Acoustics, Speech and Signal Processing 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Learning phrase representations using RNN encoder-decoder for statistical machine translation Kyunghyun Cho Bart Van Merri\u00ebnboer \u00c7aglar G\u00fcl\u00e7ehre Dzmitry Bahdanau Fethi Bougares Holger Schwenk Yoshua Bengio Conference on Empirical Methods in Natural Language Processing 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Towards better decoding and language model integration in sequence to sequence models Jan Chorowski Navdeep Jaitly arXiv:1612.02695 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Attention-based models for speech recognition Jan Chorowski Dzmitry Bahdanau Dmitriy Serdyuk Kyunghyun Cho Yoshua Bengio Conference on Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Sequence transduction with recurrent neural networks Alex Graves arXiv:1211.3711 2012 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Connectionist temporal classification: labelling unsegmented sequence data with recurrent neural networks Alex Graves Santiago Fern\u00e1ndez Faustino Gomez J\u00fcrgen Schmidhuber International Conference on Machine learning 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Ga\u00ebl Guennebaud Beno\u0131t Jacob Philip Avery Abraham Bachrach Sebastien Barthelemy 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Advances in joint CTC-attention based end-to-end speech recognition with a deep CNN encoder and RNN-LM Takaaki Hori Shinji Watanabe Yu Zhang William Chan 2017 Interspeech",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Batch normalization: Accelerating deep network training by reducing internal covariate shift Sergey Ioffe Christian Szegedy International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Navdeep Jaitly David Sussillo Quoc V Le Oriol Vinyals arXiv:1511.04868 Ilya Sutskever, and Samy Bengio. A neural transducer 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Difference equations: an introduction with applications Walter G Kelley Allan C Peterson 2001 Academic Press",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Diederik Kingma Jimmy Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Lingpeng Kong Chris Dyer Noah A Smith arXiv:1511.06018 Segmental recurrent neural networks 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Parallel prefix computation Richard E Ladner Michael J Fischer Journal of the ACM (JACM) 27 4 1980",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Dieterich Lawson George Tucker Chung-Cheng Chiu Colin Raffel Kevin Swersky Navdeep Jaitly arXiv:1705.05524 Learning hard alignments with variational inference 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Yuping Luo Chung-Cheng Chiu Navdeep Jaitly Ilya Sutskever arXiv:1608.01281 Learning online alignments with continuous rewards policy gradient 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Effective approaches to attentionbased neural machine translation Minh-Thang Luong Hieu Pham Christopher D Manning Conference on Empirical Methods in Natural Language Processing 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Abstractive text summarization using sequence-to-sequence RNNs and beyond Ramesh Nallapati Bowen Zhou Conference on Computational Natural Language Learning 2016 C\u00edcero Nogueira dos Santos, \u00c7aglar G\u00fcl\u00e7ehre, and Bing Xiang",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "The design for the Wall Street Journal-based CSR corpus Douglas B Paul Janet M Baker Workshop on Speech and Natural Language 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "A comparison of sequence-to-sequence models for speech recognition Rohit Prabhavalkar Kanishka Rao Tara Sainath Bo Li Leif Johnson Navdeep Jaitly 2017 Interspeech",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Feed-forward networks with attention can solve some long-term memory problems Colin Raffel P W Daniel Ellis arXiv:1512.08756 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Online and lineartime attention by enforcing monotonic alignments Colin Raffel Minh-Thang Luong Peter J Liu Ron J Weiss Douglas Eck International Conference on Machine Learning 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Get to the point: Summarization with pointer-generator networks Abigail See Peter J Liu Christopher D Manning arXiv:1704.04368 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Sequence to sequence learning with neural networks Ilya Sutskever Oriol Vinyals V Quoc Le Advances in neural information processing systems 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Lookahead convolution layer for unidirectional recurrent neural networks Chong Wang Dani Yogatama Adam Coates Tony Han Awni Hannun Bo Xiao Workshop Extended Abstracts of the 4th International Conference on Learning Representations 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Yuxuan Wang R J Skerry-Ryan Daisy Stanton Yonghui Wu Ron J Weiss Navdeep Jaitly Zongheng Yang Ying Xiao Zhifeng Chen Samy Bengio Quoc Le Yannis Agiomyrgiannakis Rob Clark Rif A Sauros arXiv:1703.10135 Tacotron: Towards end-to-end speech synthesis 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Rich Zemel, and Yoshua Bengio. Show, attend and tell: Neural image caption generation with visual attention Kelvin Xu Jimmy Ba Ryan Kiros Kyunghyun Cho Aaron Courville Ruslan Salakhudinov International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Online segment to segment neural transduction Lei Yu Jan Buys Phil Blunsom Conference on Empirical Methods in Natural Language Processing 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Wojciech Zaremba Ilya Sutskever arXiv:1505.00521 Reinforcement learning neural turing machines 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Very deep convolutional networks for end-to-end speech recognition Yu Zhang William Chan Navdeep Jaitly arXiv:1610.03022 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper extends a previously proposed monotonic alignment based attention mechanism by considering local soft alignment across features in a chunk (certain window).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "- the paper is clearly written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "- the proposed method is applied to several sequence-to-sequence benchmarks, and the paper show the effectiveness of the proposed method (comparable to full attention and better than previous hard monotonic assignments).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "- in terms of the originality, the methodology of this method is rather incremental from the prior study (Raffel et al), but it shows significant gains from it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "- in terms of considering a monotonic alignment, Hori et al, \"Advances in Joint CTC-Attention based End-to-End Speech Recognition with a Deep CNN Encoder and RNN-LM,\" in Interspeech'17, also tries to solve this issue by combining CTC and attention-based methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "The paper should also discuss this method in Section 4.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "Comments:\n- Eq.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "(16): $j$ in the denominator should be $t_j$.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.4226,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper proposes a small modification to the monotonic attention in [1] by adding a soft attention to the segment predicted by the monotonic attention.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The paper is very well written and easy to follow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The experiments are also convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "Here are a few suggestions and questions to make the paper stronger.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "The first set of questions is about the monotonic attention.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Training the monotonic attention with expected context vectors is intuitive, but can this be justified further?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "For example, how far does using the expected context vector deviate from marginalizing the monotonic attention?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "The greedy step, described in the first paragraph of page 4, also has an effect on the produced attention.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "How does the greedy step affect training and decoding?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "It is also unclear how tricks in the paragraph above section 2.4 affect training and decoding.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "These questions should really be answered in [1].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "Since the authors are extending their work and since these issues might cause training difficulties, it might be useful to look into these design choices.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "The second question is about the window size $w$.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "Instead of imposing a fixed window size, which might not make sense for tasks with varying length segments such as the two in the paper, why not attend to the entire segment, i.e., from the current boundary to the previous boundary?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "It is pretty clear that the model is discovering the boundaries in the utterance shown in Figure 2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "(The spectrogram can be made more visible by removing the delta and delta-delta in the last subplot.) How does the MoCha attention look like for words whose orthography is very nonphonemic, for example, AAA and WWW?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "For the experiments, it is intriguing to see that $w=2$ works best for speech recognition.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "If that's the case, would it be easier to double the hidden layer size and use the vanilla monotonic attention?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "The latter should be a special case of the former, and in general you can always increase the size of the hidden layer to incorporate the windowed information.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "Would the special cases lead to worse performance and if so why is there a difference?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "[1] C Raffel, M Luong, P Liu, R Weiss, D Eck, Online and linear-time attention by enforcing monotonic alignments, 2017",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_9365615a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_4ece6265",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9365615a"
+        },
+        {
+            "source": "b_8526ac4f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_8526ac4f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_4ece6265",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8526ac4f"
+        },
+        {
+            "source": "b_98bd46f0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_4ece6265",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_98bd46f0"
+        },
+        {
+            "source": "sec_4ece6265",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_204a4178"
+        },
+        {
+            "source": "sec_b9d20525",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d4fc259"
+        },
+        {
+            "source": "sec_cab3d6e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5b53c70d"
+        },
+        {
+            "source": "sec_cab3d6e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0bb1ee20"
+        },
+        {
+            "source": "sec_cab3d6e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1bd8a37b"
+        },
+        {
+            "source": "b_5d9e6f27",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_5d9e6f27",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_cab3d6e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5d9e6f27"
+        },
+        {
+            "source": "sec_cab3d6e8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9caa8b90"
+        },
+        {
+            "source": "b_cb469a8d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_f9107214",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cb469a8d"
+        },
+        {
+            "source": "sec_f9107214",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cb0b3b6a"
+        },
+        {
+            "source": "sec_f9107214",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2731acfd"
+        },
+        {
+            "source": "sec_f9107214",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e1433256"
+        },
+        {
+            "source": "sec_f9107214",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0be3fa5f"
+        },
+        {
+            "source": "sec_f9107214",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d51e001"
+        },
+        {
+            "source": "b_b3d9ea44",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_48412ad1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b3d9ea44"
+        },
+        {
+            "source": "sec_48412ad1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6b3b0f84"
+        },
+        {
+            "source": "b_4fd77d80",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_48412ad1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4fd77d80"
+        },
+        {
+            "source": "b_475f20bc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_48412ad1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_475f20bc"
+        },
+        {
+            "source": "b_81bb9688",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_48412ad1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_81bb9688"
+        },
+        {
+            "source": "b_022f3ac3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_48412ad1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_022f3ac3"
+        },
+        {
+            "source": "b_1cd88cbb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_48412ad1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1cd88cbb"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7d142bd3"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_028b039f"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_44085ea8"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e2d95128"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_edca2036"
+        },
+        {
+            "source": "b_a878332c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a878332c"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1f7577f3"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6f2443e1"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_107c7a99"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c6d73b48"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5773eeda"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bdab0809"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7e9a42a7"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aaddf5c2"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2664c473"
+        },
+        {
+            "source": "sec_bfa36542",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8df24a82"
+        },
+        {
+            "source": "b_3fdc63b7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_5137e50d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3fdc63b7"
+        },
+        {
+            "source": "b_b945edda",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_b945edda",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_b945edda",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "sec_3542a9d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b945edda"
+        },
+        {
+            "source": "b_010dc1e3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_3542a9d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_010dc1e3"
+        },
+        {
+            "source": "sec_3542a9d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a71c7b45"
+        },
+        {
+            "source": "sec_3542a9d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f88325e1"
+        },
+        {
+            "source": "b_2dd551b4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_2dd551b4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_12d3336e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2dd551b4"
+        },
+        {
+            "source": "b_4f797053",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_4f797053",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_12d3336e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4f797053"
+        },
+        {
+            "source": "sec_12d3336e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_12c38d93"
+        },
+        {
+            "source": "b_07906be7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_07906be7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_07906be7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_4f2ac819",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07906be7"
+        },
+        {
+            "source": "b_86b9ef99",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_86b9ef99",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_86b9ef99",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "b_86b9ef99",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_86b9ef99",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_86b9ef99",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_86b9ef99",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_4f2ac819",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_86b9ef99"
+        },
+        {
+            "source": "b_350f4c0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_350f4c0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_350f4c0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_350f4c0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_350f4c0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_4f2ac819",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_350f4c0e"
+        },
+        {
+            "source": "b_23191393",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_6904e692",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_23191393"
+        },
+        {
+            "source": "b_79fcdb94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_79fcdb94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_6904e692",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_79fcdb94"
+        },
+        {
+            "source": "sec_6904e692",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4ce41827"
+        },
+        {
+            "source": "b_e6de4271",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_e6de4271",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_e6de4271",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_e6de4271",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_6904e692",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6de4271"
+        },
+        {
+            "source": "b_b9dab9b3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_3768cce2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b9dab9b3"
+        },
+        {
+            "source": "b_008bfe1c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_008bfe1c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_3768cce2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_008bfe1c"
+        },
+        {
+            "source": "b_024e1767",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_024e1767",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_a6ea7531",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_024e1767"
+        },
+        {
+            "source": "sec_a6ea7531",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1bc2697f"
+        },
+        {
+            "source": "sec_a6ea7531",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_70e3931d"
+        },
+        {
+            "source": "sec_cf3b8a98",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cfdd527b"
+        },
+        {
+            "source": "sec_cf3b8a98",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_189936ae"
+        },
+        {
+            "source": "sec_cf3b8a98",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c6c8c473"
+        },
+        {
+            "source": "sec_cf3b8a98",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_90642a09"
+        },
+        {
+            "source": "sec_cf3b8a98",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d88716b4"
+        },
+        {
+            "source": "sec_cf3b8a98",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_40f165f8"
+        },
+        {
+            "source": "sec_cf3b8a98",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b57d301e"
+        }
+    ]
+}

@@ -1,0 +1,2010 @@
+{
+    "paper_metadata": {
+        "paper_id": "464",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Accepted",
+        "total_reviews_available": 14
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_12eba6f2",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_4e8fbe1c",
+                        "type": "paragraph",
+                        "text": "Languages encode meaning in terms of hierarchical, nested structures on sequences of words (Chomsky, 1957) . However, the degree to which neural network architectures that compute representations of the meaning of sentences for practical applications should explicitly reflect such structures is a matter for debate. In this work, we use reinforcement learning to learn to construct trees for computing sentence representations, guided by feedback from downstream tasks that depend on these representations. The space of structures that are considered by the learner includes both fully sequential structures (corresponding to traditional recurrent neural network \"encoders\"), as well as all projective binary trees. Thus, although we take seriously the notion that good compositional architectures might be tree-structured, we specify neither the form of the tree nor whether a tree is necessary at all, and instead leave those decisions up to the learner (and the data).",
+                        "extracted_citations": [
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0504c358",
+                        "type": "paragraph",
+                        "text": "To place this work in context, there are three predominant approaches for constructing vector representations of sentences from a sequence of words. The first composes words sequentially using a recurrent neural network, treating the RNN's final hidden state as the representation of the sentence (Cho et al., 2014; Sutskever et al., 2014; Kiros et al., 2015) . In such models, there is no explicit hierarchical organization imposed on the words, and the RNN's dynamics must learn to simulate it. The second approach uses tree-structured networks to recursively compose representations of words and phrases to form representations of larger phrases and, finally, the complete sentence. In contrast to sequential models, these models' architectures are organized according to each sentence's syntactic structure, that is, the hierarchical organization of words into nested phrases that characterizes human intuitions about how words combine to form grammatical sentences. Prior work on tree-structured models has assumed that trees are either provided together with the input sentences (Clark et al., 2008; Grefenstette & Sadrzadeh, 2011; Socher et al., 2012; 2013; Tai et al., 2015) or that they are predicted based on explicit treebank annotations jointly with the downstream task (Bowman et al., 2016; Dyer et al., 2016) . The last approach for constructing sentence representations uses convolutional neural networks to produce the representation in a bottom up manner, either with syntactic information (Ma et al., 2015) or without (Kim, 2014; Kalchbrenner et al., 2014) .",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b30",
+                            "Citation_b15",
+                            "Citation_b7",
+                            "Citation_b10",
+                            "Citation_b26",
+                            "Citation_b27",
+                            "Citation_b31",
+                            "Citation_b3",
+                            "Citation_b9",
+                            "Citation_b19",
+                            "Citation_b14",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_09f0f345",
+                        "type": "paragraph",
+                        "text": "Our work can be understood as a compromise between the first two approaches. Rather than using explicit supervision of tree structure, we use reinforcement learning to learn tree structures (and thus, sentence-specific compositional architectures), taking performance on a downstream task that uses the computed sentence representation as the reward signal. In contrast to sequential RNNs, which ignore tree structure, our model still generates a latent tree for each sentence and uses it to structure the composition. Our hypothesis is that encouraging the model to learn tree-structured compositions will bias the model toward better generalizations about how words compose to form sentence meanings, leading to better performance on downstream tasks. This work is related to unsupervised grammar induction (Klein & Manning, 2004; Blunsom & Cohn, 2010; Spitkovsky et al., 2011, inter alia) , which seeks to infer a generative grammar of an infinite language from a finite sample of strings from the language-but without any semantic feedback. Previous work on unsupervised grammar induction that incorporates semantic supervision involves designing complex models for Combinatory Categorial Grammars (Zettlemoyer & Collins, 2005) or marginalizing over latent syntactic structures (Naradowsky et al., 2012) . Since semantic feedback has been proposed as crucial for the acquisition of syntax (Pinker, 1984) , our model offers a simpler alternative. 1 However, our primary focus is on improving performance on the downstream model, so the learner may settle on a different solution than conventional English syntax. We thus also explore what kind of syntactic structures are derivable from shallow semantics. Experiments on various tasks (i.e., sentiment analysis, semantic relatedness, natural language inference, and sentence generation) show that reinforcement learning is a promising direction to discover hierarchical structures of sentences. Notably, representations learned this way outperformed both conventional left-to-right models and tree-structured models based on linguistic syntax in downstream applications. This is in line with prior work showing the value of learning tree structures in statistical machine translation models (Chiang, 2007) . Although the induced tree structures manifested a number of linguistically intuitive structures (e.g., noun phrases, simple verb phrases), there are a number of marked differences to conventional analyses of English sentences (e.g., an overall left-branching structure).",
+                        "extracted_citations": [
+                            "Citation_b17",
+                            "Citation_b1",
+                            "Citation_b34",
+                            "Citation_b23",
+                            "Citation_b25",
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ad11e2a5",
+                "title": "MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_8bde8d39",
+                        "type": "paragraph",
+                        "text": "Our model consists of two components: a sentence representation model and a reinforcement learning algorithm to learn the tree structure that is used by the sentence representation model.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7f3de8a4",
+                "title": "TREE LSTM",
+                "blocks": [
+                    {
+                        "block_id": "b_f7a96865",
+                        "type": "paragraph",
+                        "text": "Our sentence representation model follows the Stack-augmented Parser-Interpreter Neural Network (SPINN; Bowman et al., 2016) , SPINN is a shift-reduce parser that uses Long Short-Term Memory (LSTM; Hochreiter and Schmidhuber, 1997) as its composition function. Given an input sentence of N words x = {x 1 , x 2 , . . . , x N }, we represent each word by its embedding vector x i \u2208 R D . The parser maintains an index pointer p starting from the leftmost word (p = 1) and a stack. To parse the sentence, it performs a sequence of operations a = {a 1 , a 2 , . . . , a 2N -1 }, where a t \u2208 {SHIFT, REDUCE}. A SHIFT operation pushes x p to the stack and moves the pointer to the next word (p ++ ); while a REDUCE operation pops two elements from the stack, composes them to a single element, and pushes it back to the stack. SPINN uses Tree LSTM (Tai et al., 2015; Zhu et al., 2015) as the REDUCE composition function, which we follow. In Tree LSTM, each element of the stack is represented by two vectors, a hidden state representation h and a memory representation c. Two elements of the stack (h i , c i ) and (h j , c j ) are composed as:",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b11",
+                            "Citation_b31",
+                            "Citation_b35"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a5a400a2",
+                        "type": "paragraph",
+                        "text": "where [h i , h j ] denotes concatenation of h i and h j , and \u03c3 is the sigmoid activation function.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_23e61907",
+                        "type": "paragraph",
+                        "text": "A unique sequence of {SHIFT, REDUCE} operations corresponds to a unique binary parse tree of the sentence. A SHIFT operation introduces a new leaf node in the parse tree, while a REDUCE operation combines two nodes by merging them into a constituent. See Figure 1 for an example. We note that for a sentence of length N , there are exactly N SHIFT operations and N -1 REDUCE operations that are needed to produce a binary parse tree of the sentence. The final sentence representation produced by the Tree LSTM is the hidden state of the final element of the stack h N -1 (i.e., the topmost node of the tree).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5fac9c44",
+                        "type": "paragraph",
+                        "text": "Tracking LSTM. SPINN optionally augments Tree LSTM with another LSTM that incorporates contextual information in sequential order called tracking LSTM, which has been shown to improve performance for textual entailment. It is a standard recurrent LSTM network that takes as input the hidden states of the top two elements of the stack and the embedding vector of the word indexed by the pointer at timestep t. Every time a REDUCE operation is performed, the output of the tracking LSTM e is included as an additional input in Eq. 1 (i.e., the input to the REDUCE composition function is",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_914c82dd",
+                "title": "REINFORCEMENT LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_b7a0b446",
+                        "type": "paragraph",
+                        "text": "In previous work (Tai et al., 2015; Bowman et al., 2016) , the tree structures that guided composition orders of Tree LSTM models are given directly as input (i.e., a is observed and provided as an input). Formally, each training data is a triplet {x, a, y}. Tai et al. ( 2015 ) consider models where a is also given at test time, whereas Bowman et al. ( 2016 ) explore models where a can be either observed or not at test time. When it is only observed during training, a policy is trained to predict a at test time.",
+                        "extracted_citations": [
+                            "Citation_b31",
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2182b6e5",
+                        "type": "paragraph",
+                        "text": "Note that in this case the policy is trained to match explicit human annotations (i.e., Penn TreeBank annotations), so the model learns to optimize representations according to structures that follows human intuitions. They found that models that observe a at both training and test time are better than models that only observe a during training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_83f1de82",
+                        "type": "paragraph",
+                        "text": "Our main idea is to use reinforcement learning (policy gradient methods) to discover the best tree structures for the task that we are interested in. We do not place any kind of restrictions when learning these structures other than that they have to be valid binary parse trees, so it may result in tree structures that match human linguistic intuition, heavily right or left branching, or other solutions if they improve performance on the downstream task.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9ed65a36",
+                        "type": "paragraph",
+                        "text": "We parameterize each action a \u2208 {SHIFT, REDUCE} by a policy network \u03c0(a | s; W R ), where s is a representation of the current state and W R is the parameter of the network. Specifically, we use a two-layer feedforward network that takes the hidden states of the top two elements of the stack h i and h j and the embedding vector of the word indexed by the pointer x p as its input:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ec28f98d",
+                        "type": "paragraph",
+                        "text": "If a is given as part of the training data, the policy network can be trained-in a supervised training regime-to predict actions that result in trees that match human intuitions. Our training data, on the other hand, is a tuple {x, y}. We use REINFORCE (Williams, 1992) , which is an instance of a broader class of algorithms called policy gradient methods, to learn W R such that the sequence of actions a = {a 1 , . . . , a T } maximizes:",
+                        "extracted_citations": [
+                            "Citation_b33"
+                        ]
+                    },
+                    {
+                        "block_id": "b_11f81ec4",
+                        "type": "paragraph",
+                        "text": "where r t is the reward at timestep t. We use performance on a downstream task as the reward function. For example, if we are interested in using the learned sentence representations in a classification task, our reward function is the probability of predicting the correct label using a sentence representation composed in the order given by the sequence of actions sampled from the policy network, so R(W) = log p(y | T-LSTM(x); W), where we use W to denote all model parameters (Tree LSTM, policy network, and classifier parameters), y is the correct label for input sentence x, and x is represented by the Tree LSTM structure in \u00a72.1. For a natural language generation task where the goal is to predict the next sentence given the current sentence, we can use the probability of predicting words in the next sentence as the reward function, so R(W) = log p(x s+1 | T-LSTM(x s ); W).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9e8177af",
+                        "type": "paragraph",
+                        "text": "Note that in our setup, we do not immediately receive a reward after performing an action at timestep t. The reward is only observed at the end after we finish creating a representation for the current sentence with Tree LSTM and use the resulting representation for the downstream task. At each timestep t, we sample a valid action according to \u03c0(a | s; W R ). We add two simple constraints to make the sequence of actions result in a valid tree: REDUCE is forbidden if there are fewer than two elements on the stack, and SHIFT is forbidden if there are no more words to read from the sentence. After reaching timestep 2N -1, we construct the final representation and receive a reward that is used to update our model parameters.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3e0762ce",
+                        "type": "paragraph",
+                        "text": "We experiment with two learning methods: unsupervised structures and semi-supervised structures. Suppose that we are interested in a classification task. In the unsupervised case, the objective function that we maximize is log p(y | T-LSTM(x); W). In the semi-supervised case, the objective function for the first E epochs also includes a reward term for predicting the correct SHIFT or RE-DUCE actions obtained from an external parser-in addition to performance on the downstream task, so we maximize log p(y | T-LSTM(x); W) + log \u03c0(a | s; W R ). The motivation behind this model is to first guide the model to discover tree structures that match human intuitions, before letting it explore other structures close to these ones. After epoch E, we remove the second term from our objective function and continue maximizing the first term. Note that unsupervised and semi-supervised here refer to the tree structures, not the nature of the downstream task.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6652aa85",
+                "title": "BASELINES",
+                "blocks": [
+                    {
+                        "block_id": "b_653559dd",
+                        "type": "paragraph",
+                        "text": "The goal of our experiments is to evaluate our hypothesis that we can discover useful task-specific tree structures (composition orders) with reinforcement learning. We compare the following composition methods (the last two are unique to our work):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8a85bcfe",
+                        "type": "paragraph",
+                        "text": "\u2022 Right to left: words are composed from right to left. 2 \u2022 Left to right: words are composed from left to right. This is the standard recurrent neural network composition order. \u2022 Bidirectional: A bidirectional right to left and left to right models, where the final sentence embedding is an average of sentence embeddings produced by each of these models. \u2022 Balanced binary tree: words are composed according to a balanced binary parse tree of the sentence. \u2022 Supervised syntax: words are composed according to a predefined parse tree of the sentence. When parse tree information is not included in the dataset, we use Stanford parser (Klein & Manning, 2003) to parse the corpus. \u2022 Semi-supervised syntax: a variant of our reinforcement learning method, where for the first E epochs we include rewards for predicting predefined parse trees given in the supervised model, before letting the model explore other kind of tree structures at later epochs (i.e., semi-supervised structures in \u00a72.2). \u2022 Latent syntax: another variant of our reinforcement learning method where there is no predefined structures given to the model at all (i.e., unsupervised structures in \u00a72.2).",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b65ed637",
+                        "type": "paragraph",
+                        "text": "For learning, we use stochastic gradient descent with minibatches of size 1 and 2 regularization constant tune on development data from {10 -4 , 10 -5 , 10 -6 , 0}. We use performance on development data to choose the best model and decide when to stop training.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5cfd1bb5",
+                "title": "TASKS",
+                "blocks": [
+                    {
+                        "block_id": "b_967c643e",
+                        "type": "paragraph",
+                        "text": "We evaluate our method on four sentence representation tasks: sentiment classification, semantic relatedness, natural language inference (entailment), and sentence generation. We show statistics of the datasets in Table 1 and describe each task in detail in this subsection. (Socher et al., 2013) . We use the binary classification task where the goal is to predict whether a sentence is a positive or a negative movie review.",
+                        "extracted_citations": [
+                            "Citation_b27"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5123671e",
+                        "type": "paragraph",
+                        "text": "We set the word embedding size to 100 and initialize them with Glove vectors (Pennington et al., 2014) 3 . For each sentence, we create a 100-dimensional sentence representation s \u2208 R 100 with Tree LSTM, project it to a 200-dimensional vector and apply ReLU: q = ReLU(W p s + b p ), and compute p(\u0177 = c | q; w q ) \u221d exp(w q,c q + b q ).",
+                        "extracted_citations": [
+                            "Citation_b24"
+                        ]
+                    },
+                    {
+                        "block_id": "b_008ef73f",
+                        "type": "paragraph",
+                        "text": "We run each model 3 times (corresponding to 3 different initialization points) and use the development data to pick the best model. We show the results in Table 2 . Our results agree with prior work that have shown the benefits of using syntactic parse tree information on this dataset (i.e., supervised recursive model is generally better than sequential models). The best model is the latent syntax model, which is also competitive with results from other work on this dataset. Both the latent and semi-supervised syntax models outperform models with predefined structures, demonstrating the benefit of learning task-specific composition orders. 1.2m RNTN (Socher et al., 2013) 85.4 -DCNN (Kalchbrenner et al., 2014) 86.8 -CNN-random (Kim, 2014) 82.7 -CNN-word2vec (Kim, 2014) 87.2 -CNN-multichannel (Kim, 2014) 88.1 -NSE (Munkhdalai & Yu, 2016a) 89.7 5.4m NTI-SLSTM (Munkhdalai & Yu, 2016b) 87.8 4.4m NTI-SLSTM-LSTM (Munkhdalai & Yu, 2016b) Semantic relatedness. The second task is to predict the degree of relatedness of two sentences from the Sentences Involving Compositional Knowledge corpus (SICK; Marelli et al., 2014) . In this dataset, each pair of sentences are given a relatedness score on a 5-point rating scale. For each sentence, we use Tree LSTM to create its representations. We denote the final representations by {s 1 , s 2 } \u2208 R 100 . We construct our prediction by computing: and [u, v] denotes concatenation of vectors inside the brackets. We learn the model to minimize mean squared error.",
+                        "extracted_citations": [
+                            "Citation_b27",
+                            "Citation_b13",
+                            "Citation_b14",
+                            "Citation_b14",
+                            "Citation_b14",
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_01907061",
+                        "type": "paragraph",
+                        "text": "We run each model 5 times and use the development data to pick the best model. Our results are shown in Table 3 . Similarly to the previous task, they clearly demonstrate that learning the tree structures yields better performance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ab22871f",
+                        "type": "paragraph",
+                        "text": "We also provide results from other work on this dataset for comparisons. Some of these models (Lai & Hockenmaier, 2014; Jimenez et al., 2014; Bjerva et al., 2014) rely on feature engineering and are designed specifically for this task. Our Tree LSTM implementation performs competitively with most models in terms of mean squared error. Our best model-semi-supervised syntax-is better than most models except LSTM models of Tai et al. ( 2015 ) which were trained with a different objective function. 4 Nonetheless, we observe the same trends with their results that show the benefit of using syntactic information on this dataset. Stanford Natural Language Inference. We next evaluate our model for natural language inference (i.e., recognizing textual entailment) using the Stanford Natural Language Inference corpus (SNLI; Bowman et al., 2015) . Natural language inference aims to predict whether two sentences are entailment, contradiction, or neutral, which can be formulated as a three-way classification problem. Given a pair of sentences, similar to the previous task, we use Tree LSTM to create sentence representations {s 1 , s 2 } \u2208 R 100 for each of the sentences. Following Bowman et al. ( 2016 ), we construct our prediction by computing:",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b12",
+                            "Citation_b0",
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b62e4645",
+                        "type": "paragraph",
+                        "text": "and p(\u0177 = c | q; w q ) \u221d exp(w q,c q + b q ), where",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0d8d0a85",
+                        "type": "paragraph",
+                        "text": "The objective function that we maximize is the log likelihood of the correct label under the models.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2dae00c9",
+                        "type": "paragraph",
+                        "text": "We show the results in Table 4 . The latent syntax method performs the best. Interestingly, the sequential left to right model is better than the supervised recursive model in our experiments, which contradicts results from Bowman et al. ( 2016 ) that show 300D-LSTM is worse than 300D-SPINN. A possible explanation is that our left to right model has identical number of parameters with the supervised model due to the inclusion of the tracking LSTM even in the left to right model (the only difference is in the composition order), whereas the models in Bowman et al. ( 2016 ) have different number of parameters. Due to the poor performance of the supervised model relative to the unsupervised model, semi-supervised training can only mitigate the loss in accuracy, rather than improve over unsupervised learning. Our models underperform state-of-the-art models on this dataset that have almost four times the number of parameters. We only experiment with smaller models since tree-based models with dynamic structures (e.g., our semi-supervised and latent syntax models) take longer to train. See \u00a74 for details and discussions about training time. (Vendrov et al., 2016) 81.4 15.0m 300D-CNN (Mou et al., 2016) 82.1 9m 300D-NTI (Munkhdalai & Yu, 2016b) 83.4 9.5m 300D-NSE (Munkhdalai & Yu, 2016a) 84.6 8.5m",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1be965c4",
+                        "type": "paragraph",
+                        "text": "Sentence generation. The last task that we consider is natural language generation. Given a sentence, the goal is to maximize the probability of generating words in the following sentence. This is a similar setup to the Skip Thought objective (Kiros et al., 2015) , except that we do not generate the previous sentence as well. Given a sentence, we encode it with Tree LSTM to obtain s \u2208 R 100 . We use a bag-of-words model as our decoder, so p(w i | s; V) \u221d exp(v i s), where V \u2208 R 100\u00d729,209 and v i \u2208 R 100 is the i-th column of V. Using a bag-of-words decoder as opposed to a recurrent neural network decoder increases the importance of producing a better representation of the current sentence, since the model cannot rely on a sophisticated decoder with a language model component to predict better. This also greatly speeds up our training time.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b631297b",
+                        "type": "paragraph",
+                        "text": "We use IMDB movie review corpus (Diao et al., 2014)",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1c337107",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_57e19dd3",
+                        "type": "paragraph",
+                        "text": "Learned Structures. Our results in \u00a73 show that our proposed method outperforms competing methods with predefined composition order on all tasks. The right to left model tends to perform worse than the left to right model. This suggests that the left to right composition order, similar to how human reads in practice, is better for neural network models. Our latent syntax method is able to discover tree structures that work reasonably well on all tasks, regardless of whether the task is better suited for a left to right or supervised syntax composition order.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_08d584bb",
+                        "type": "paragraph",
+                        "text": "We inspect what kind of structures the latent syntax model learned and how closely they match human intuitions. We first compute unlabeled bracketing F 1 scores 5 for the learned structures and parses given by Stanford parser on SNLI and Stanford Sentiment Treebank. In the SNLI dataset, there are 10,000 pairs of test sentences (20,000 sentences in total), while the Stanford Sentiment Treebank test set contains 1,821 test sentences. The F 1 scores for the two datasets are 41.73 and 40.51 respectively. For comparisons, F 1 scores of a right (left) branching tree are 19.94 (41.37) for SNLI and 12.96 (38.56) for SST.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b170e076",
+                        "type": "paragraph",
+                        "text": "We also manually inspect the learned structures. We observe that in SNLI, the trees exhibit overall left-branching structure, which explains why the F 1 scores are closer to a left branching tree structure. Note that in our experiments on this corpus, the supervised syntax model does not perform as well as the left-to-right model, which suggests why the latent syntax model tends to converge towards the left-to-right model. We handpicked two examples of trees learned by our model and show them in Figure 2 . We can see that in some cases the model is able to discover concepts such as noun phrases (e.g., a boy, his sleds) and simple verb phrases (e.g., wearing sunglasses, is frowning).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_be3a8051",
+                        "type": "paragraph",
+                        "text": "Of course, the model sometimes settles on structures that make little sense to humans. We show two such examples in Figure 3 , where the model chooses to compose playing frisbee in and outside a as phrases.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a652770b",
+                        "type": "paragraph",
+                        "text": "Training Time. A major limitation of our proposed model is that it takes much longer to train compared to models with predefined structures. We observe that our models only outperforms models with fixed structures after several training epochs; and on some datasets such as SNLI or IMDB, an epoch could take a 5-7 hours (we use batch size 1 since the computation graph needs to be reconstructed for every example at every iteration depending on the samples from the policy network). This is also the main reason that we could only use smaller 100-dimensional Tree LSTM models in all our experiments. While for smaller datasets such as SICK the overall training time is approximately 6 hours, for SNLI or IMDB it takes 3-4 days for the model to reach convergence. In general, the latent syntax model and semi-supervised syntax models take about two or three times longer to converge compared to models with predefined structures.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Rob van der Goot, and Malvina Nissim. The meaning factory: Formal semantics for recognizing textual entailment and determining semantic similarity Johannes Bjerva Johan Bos Proc. of SemEval of SemEval 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Unsupervised induction of tree substitution grammars for dependency parsing Phil Blunsom Trevor Cohn Proc. of EMNLP of EMNLP 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "A large annotated corpus for learning natural language inference R Samuel Gabor Bowman Christopher Angeli Christopher D Potts Manning Proc. of EMNLP of EMNLP 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "A fast unified model for parsing and sentence understanding R Samuel Jon Bowman Abhinav Gauthier Raghav Rastogi Christopher D Gupta Christopher Manning Potts Proc. of ACL of ACL 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Hierarchical phrase-based translation David Chiang Computational Linguistics 33 2 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Learning phrase representations using RNN encoder-decoder for statistical machine translation Kyunghyun Cho Bart Van Merri\u00ebnboer C \u00b8aglar G\u00fclc \u00b8ehre Dzmitry Bahdanau Fethi Bougares Holger Schwenk Yoshua Bengio 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Syntactic Structures Noam Chomsky 1957 Mouton",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "A compositional distributional model of meaning Stephen Clark Bob Coecke Mehrnoosh Sadrzadeh Proc. of the Second Symposium on Quantum Interaction of the Second Symposium on Quantum Interaction 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Jointly modeling aspects, ratings and sentiments for movie recommendation (JMARS) Qiming Diao Minghui Qiu Chao-Yuan Alexander J Wu Jing Smola Chong Jiang Wang Proc. of KDD of KDD 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Recurrent neural network grammars Chris Dyer Adhiguna Kuncoro Miguel Ballesteros Noah A Smith Proc. of NAACL of NAACL 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Experimental support for a categorical compositional distributional model of meaning Edward Grefenstette Mehrnoosh Sadrzadeh Proc. of EMNLP of EMNLP 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Long short-term memory Sepp Hochreiter Jurgen Schmidhuber Neural Computation 9 8 1997",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "UNAL-NLP: Combining soft cardinality features for semantic textual similarity, relatedness and entailment Sergio Jimenez George Duenas Julia Baquero Alexander Gelbukh Av Juan Dios Av Batiz Mendizabal Proc. of SemEval of SemEval 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "A convolutional neural network for modelling sentences Nal Kalchbrenner Edward Grefenstette Phil Blunsom Prof. of ACL 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Convolutional neural networks for sentence classification Yoon Kim Proc. EMNLP EMNLP 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Raquel Urtasun, and Sanja Fidler. Skip-thought vectors Ryan Kiros Yukun Zhu Ruslan Salakhutdinov Richard S Zemel Antonio Torralba Proc. of NIPS of NIPS 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Accurate unlexicalized parsing Dan Klein Christopher D Manning Proc. of ACL of ACL 2003",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Corpus-based induction of syntactic structure: Models of dependency and constituency Dan Klein Christopher D Manning Proc. of ACL of ACL 2004",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Illinois-lh: A denotational and distributional approach to semantics Alice Lai Julia Hockenmaier Proc. of SemEval of SemEval 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Dependency-based convolutional neural networks for sentence embedding Mingbo Ma Liang Huang Bing Xiang Bowen Zhou Proc. ACL ACL 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Evaluation of compositional distributional semantic models on full sentences through semantic relatedness and textual entailment Marco Marelli Luisa Bentivogli Marco Baroni Raffaella Bernardi Stefano Menini Roberto Zamparelli Proc. of SemEval of SemEval 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Natural language inference by tree-based convolution and heuristic matching Lili Mou Rui Men Ge Li Yan Xu Lu Zhang Rui Yan Zhi Jin Proc. of ACL of ACL 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Neural semantic encoders Tsendsuren Munkhdalai Hong Yu Neural tree indexers for text understanding Tsendsuren Munkhdalai Hong Yu 2016. 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Improving nlp through marginalization of hidden syntactic structure Jason Naradowsky Sebastian Riedel David A Smith Proc. of EMNLP of EMNLP 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Glove: Global vectors for word representation Jeffrey Pennington Richard Socher Christopher D Manning Proc. of EMNLP of EMNLP 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Language Learnability and Language Development Steven Pinker 1984 Harvard",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Semantic compositionality through recursive matrix-vector spaces Richard Socher Brody Huval Christopher D Manning Andrew Y Ng Proc. of EMNLP of EMNLP 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Recursive deep models for semantic compositionality over a sentiment treebank Richard Socher Alex Perelygin Jean Wu Jason Chuang Christopher Manning Andrew Ng Christopher Potts Proc. of EMNLP of EMNLP 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Grounded compositional semantics for finding and describing images with sentences. Transactions of the Richard Socher Andrej Karpathy V Quoc Christopher D Le Andrew Y Manning Ng 2014 Association for Computational Linguistics 2",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Unsupervised dependency parsing without gold part-of-speech tags I Valentin Hiyan Spitkovsky Angel X Alshawi Daniel Chang Jurafsky Proc. of EMNLP of EMNLP 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Sequence to sequence learning with neural networks Ilya Sutskever Oriol Vinyals V Quoc Le Proc. NIPS NIPS 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Improved semantic representations from tree-structured long short-term memory networks Kai Sheng Tai Richard Socher Christopher D Manning Proc. of ACL of ACL 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Order-embeddings of images and language Ivan Vendrov Ryan Kiros Sanja Fidler, and Raquel Urtasun 2016 Proc. of ICLR",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Simple statistical gradient-following algorithms for connectionist reinforcement learning Ronald J Williams Machine Learning 8 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "Learning to map sentences to logical form: Structured classification with probabilistic categorial grammars Luke S Zettlemoyer Michael Collins Proc. of UAI of UAI 2005",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Long short-term memory over recursive structures Xiaodan Zhu Parinaz Sobhani Hongyu Guo Proc. of ICML of ICML 2015",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "In this paper, the authors propose a new method to learn hierarchical representations of sentences, based on reinforcement learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "They propose to learn a neural shift-reduce parser, such that the induced tree structures lead to good performance on a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "They use reinforcement learning (more specifically, the policy gradient method REINFORCE) to learn their model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The reward of the algorithm is the evaluation metric of the downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "The authors compare two settings, (1) no structure information is given (hence, the only supervision comes from the downstream task) and (2) actions from an external parser is used as supervision to train the policy network, in addition to the supervision from the downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "The proposed approach is evaluated on four tasks: sentiment analysis, semantic relatedness, textual entailment and sentence generation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "I like the idea of learning tree representations of text which are useful for a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "The paper is clear and well written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "However, I am not convinced by the experimental results presented in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Indeed, on most tasks, the proposed model is far from state-of-the-art models:\n - sentiment analysis, 86.5 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "89.7 (accuracy);\n - semantic relatedness, 0.32 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "0.25 (MSE);\n - textual entailment, 80.5 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "84.6 (accuracy).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "From the results presented in the paper, it is hard to know if these results are due to the model, or because of the reinforcement learning algorithm.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "PROS:\n - interesting idea: learning structures of sentences adapted for a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "- well written paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "CONS:\n - weak experimental results (do not really support the claim of the authors).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "Minor comments:\nIn the second paragraph of the introduction, one might argue that bag-of-words is also a predominant approach to represent sentences.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "Paragraph titles (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "in section 3.2) should have a period at the end.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "----------------------------------------------------------------------------------------------------------------------\nUPDATE\n\nI am still not convinced by the results presented in the paper, and in particular by the fact that one must combine the words in a different way than left-to-right to obtain state of the art results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "However, I do agree that this is an interesting research direction, and that the results presented in the paper are promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "I am thus updating my score from 5 to 6.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.6168,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "All the reviewers agreed that the research direction is very interesting, and generally find the results promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "We could quibble a bit about the results not being really state-of-the-art and the choice of baselines, but I think the main claims are well supported by the experiments (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "the induce grammar appears to be useful for the problem in question, within the specific class of models).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "There are still clearly many issues unresolved, and we are yet to see if this class of methods (RL / implicit structure-based) can lead to state-of-the-art results on any important NLP problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "But it is too much to ask from a submission.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "I see the paper as a strong contribution to the conference.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.5034,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "I have not much to add to my pre-review comments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "It's a very well written paper with an interesting idea.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "Lots of people currently want to combine RL with NLP.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "It is very en vogue.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Nobody has gotten that to work yet in any really groundbreaking or influential way that results in actually superior performance on any highly relevant or competitive NLP task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Most people struggle with the fact that NLP requires very efficient methods on very large datasets and RL is super slow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Hence, I believe this direction hasn't shown much promise yet and it's not yet clear it ever will due to the slowness of RL.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "But many directions need to be explored and maybe eventually they will reach a point where they become relevant.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "It is interesting to learn the obviously inherent grammatical structure in language though sadly again, the trees here do not yet capture much of what our intuitions are.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Regardless, it's an interesting exploration, worthy of being discussed at the conference.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.1778,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "The paper proposes to use reinforcement learning to learn how to compose the words in a sentence, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "parse tree, that can be helpful for the downstream tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "To do that, the shift-reduce framework is employed and RL is used to learn the policy of the two actions SHIFT and REDUCE.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "The experiments on four datasets (SST, SICK, IMDB, and SNLI) show that the proposed approach outperformed the approach using predefined tree structures (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "left-to-right, right-to-left).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "The paper is well written and has two good points.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "Firstly, the idea of using RL to learn parse trees using downstream tasks is very interesting and novel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "And employing the shift-reduce framework is a very smart choice because the set of actions is minimal (shift and reduce).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "Secondly, what shown in the paper somewhat confirms the need of parse trees.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "This is indeed interesting because of the current debate on whether syntax is helpful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "I have the following comments:\n- it seems that the authors weren't aware of some recent work using RL to learn structures for composition, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_11",
+                    "text": "Andreas et al (2016).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_12",
+                    "text": "- because different composition functions (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_13",
+                    "text": "LSTM, GRU, or classical recursive neural net) have different inductive biases, I was wondering if the tree structures found by the model would be independent from the composition function choice.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_14",
+                    "text": "- because RNNs in theory are equivalent to Turing machines, I was wondering if restricting the expressiveness of the model (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_15",
+                    "text": "reducing the dimension) can help the model focus on discovering more helpful tree structures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_16",
+                    "text": "Ref:\nAndreas et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_17",
+                    "text": "Learning to Compose Neural Networks for Question Answering.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "In this paper, the authors propose a new method to learn hierarchical representations of sentences, based on reinforcement learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "They propose to learn a neural shift-reduce parser, such that the induced tree structures lead to good performance on a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "They use reinforcement learning (more specifically, the policy gradient method REINFORCE) to learn their model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "The reward of the algorithm is the evaluation metric of the downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "The authors compare two settings, (1) no structure information is given (hence, the only supervision comes from the downstream task) and (2) actions from an external parser is used as supervision to train the policy network, in addition to the supervision from the downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_5",
+                    "text": "The proposed approach is evaluated on four tasks: sentiment analysis, semantic relatedness, textual entailment and sentence generation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_6",
+                    "text": "I like the idea of learning tree representations of text which are useful for a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_7",
+                    "text": "The paper is clear and well written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_8",
+                    "text": "However, I am not convinced by the experimental results presented in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_9",
+                    "text": "Indeed, on most tasks, the proposed model is far from state-of-the-art models:\n - sentiment analysis, 86.5 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_10",
+                    "text": "89.7 (accuracy);\n - semantic relatedness, 0.32 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_11",
+                    "text": "0.25 (MSE);\n - textual entailment, 80.5 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_12",
+                    "text": "84.6 (accuracy).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_13",
+                    "text": "From the results presented in the paper, it is hard to know if these results are due to the model, or because of the reinforcement learning algorithm.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_14",
+                    "text": "PROS:\n - interesting idea: learning structures of sentences adapted for a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_15",
+                    "text": "- well written paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_16",
+                    "text": "CONS:\n - weak experimental results (do not really support the claim of the authors).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_17",
+                    "text": "Minor comments:\nIn the second paragraph of the introduction, one might argue that bag-of-words is also a predominant approach to represent sentences.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_18",
+                    "text": "Paragraph titles (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_19",
+                    "text": "in section 3.2) should have a period at the end.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_20",
+                    "text": "----------------------------------------------------------------------------------------------------------------------\nUPDATE\n\nI am still not convinced by the results presented in the paper, and in particular by the fact that one must combine the words in a different way than left-to-right to obtain state of the art results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_21",
+                    "text": "However, I do agree that this is an interesting research direction, and that the results presented in the paper are promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_22",
+                    "text": "I am thus updating my score from 5 to 6.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_7",
+            "type": "Human",
+            "liang_alpha_score": 0.1108,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_7_s_0",
+                    "text": "Dear authors,\n\nI've read the interesting paper and learned nice ideas.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_1",
+                    "text": "Now I've found somewhat incorrect mention in your paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_2",
+                    "text": "In Introduction, it is said that trees are provided with sentences in Socher et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_3",
+                    "text": "(2011), but they jointly learn the binary tree structures according to the target task (sentiment classification) although the approach is different (reinforcement learning or autoencoder).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_7_s_4",
+                    "text": "Best,\n  Kazuma",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_12",
+            "type": "Human",
+            "liang_alpha_score": 0.5355,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_12_s_0",
+                    "text": "Table 2 is missing some recent results on this task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_1",
+                    "text": "Please see the NTI and NSE results on the same task [1,2].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_2",
+                    "text": "NTI is particularly relevant to this work because it encodes a sentence with an n-ary tree (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_3",
+                    "text": "binary tree) instead of using a parser output or learning to compose.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_4",
+                    "text": "Thanks,\n\n\n\nRef:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_5",
+                    "text": "Munkhdalai, Tsendsuren, and Hong Yu.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_6",
+                    "text": "\"Neural Tree Indexers for Text Understanding.\" arXiv preprint arXiv:1607.04492 (2016).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_7",
+                    "text": "Munkhdalai, Tsendsuren, and Hong Yu.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_8",
+                    "text": "\"Neural Semantic Encoders.\" arXiv preprint arXiv:1607.04315 (2016).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_13",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_13_s_0",
+                    "text": "In this paper, the authors propose a new method to learn hierarchical representations of sentences, based on reinforcement learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_1",
+                    "text": "They propose to learn a neural shift-reduce parser, such that the induced tree structures lead to good performance on a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_2",
+                    "text": "They use reinforcement learning (more specifically, the policy gradient method REINFORCE) to learn their model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_3",
+                    "text": "The reward of the algorithm is the evaluation metric of the downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_4",
+                    "text": "The authors compare two settings, (1) no structure information is given (hence, the only supervision comes from the downstream task) and (2) actions from an external parser is used as supervision to train the policy network, in addition to the supervision from the downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_5",
+                    "text": "The proposed approach is evaluated on four tasks: sentiment analysis, semantic relatedness, textual entailment and sentence generation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_6",
+                    "text": "I like the idea of learning tree representations of text which are useful for a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_7",
+                    "text": "The paper is clear and well written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_8",
+                    "text": "However, I am not convinced by the experimental results presented in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_9",
+                    "text": "Indeed, on most tasks, the proposed model is far from state-of-the-art models:\n - sentiment analysis, 86.5 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_10",
+                    "text": "89.7 (accuracy);\n - semantic relatedness, 0.32 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_11",
+                    "text": "0.25 (MSE);\n - textual entailment, 80.5 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_12",
+                    "text": "84.6 (accuracy).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_13",
+                    "text": "From the results presented in the paper, it is hard to know if these results are due to the model, or because of the reinforcement learning algorithm.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_14",
+                    "text": "PROS:\n - interesting idea: learning structures of sentences adapted for a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_15",
+                    "text": "- well written paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_16",
+                    "text": "CONS:\n - weak experimental results (do not really support the claim of the authors).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_17",
+                    "text": "Minor comments:\nIn the second paragraph of the introduction, one might argue that bag-of-words is also a predominant approach to represent sentences.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_18",
+                    "text": "Paragraph titles (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_19",
+                    "text": "in section 3.2) should have a period at the end.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_20",
+                    "text": "----------------------------------------------------------------------------------------------------------------------\nUPDATE\n\nI am still not convinced by the results presented in the paper, and in particular by the fact that one must combine the words in a different way than left-to-right to obtain state of the art results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_21",
+                    "text": "However, I do agree that this is an interesting research direction, and that the results presented in the paper are promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_22",
+                    "text": "I am thus updating my score from 5 to 6.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.6168,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "All the reviewers agreed that the research direction is very interesting, and generally find the results promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "We could quibble a bit about the results not being really state-of-the-art and the choice of baselines, but I think the main claims are well supported by the experiments (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "the induce grammar appears to be useful for the problem in question, within the specific class of models).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "There are still clearly many issues unresolved, and we are yet to see if this class of methods (RL / implicit structure-based) can lead to state-of-the-art results on any important NLP problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "But it is too much to ask from a submission.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_5",
+                    "text": "I see the paper as a strong contribution to the conference.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_15",
+            "type": "Human",
+            "liang_alpha_score": 0.5034,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_15_s_0",
+                    "text": "I have not much to add to my pre-review comments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_1",
+                    "text": "It's a very well written paper with an interesting idea.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_2",
+                    "text": "Lots of people currently want to combine RL with NLP.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_3",
+                    "text": "It is very en vogue.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_4",
+                    "text": "Nobody has gotten that to work yet in any really groundbreaking or influential way that results in actually superior performance on any highly relevant or competitive NLP task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_5",
+                    "text": "Most people struggle with the fact that NLP requires very efficient methods on very large datasets and RL is super slow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_6",
+                    "text": "Hence, I believe this direction hasn't shown much promise yet and it's not yet clear it ever will due to the slowness of RL.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_7",
+                    "text": "But many directions need to be explored and maybe eventually they will reach a point where they become relevant.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_8",
+                    "text": "It is interesting to learn the obviously inherent grammatical structure in language though sadly again, the trees here do not yet capture much of what our intuitions are.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_9",
+                    "text": "Regardless, it's an interesting exploration, worthy of being discussed at the conference.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_16",
+            "type": "Human",
+            "liang_alpha_score": 0.1778,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_16_s_0",
+                    "text": "The paper proposes to use reinforcement learning to learn how to compose the words in a sentence, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_1",
+                    "text": "parse tree, that can be helpful for the downstream tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_2",
+                    "text": "To do that, the shift-reduce framework is employed and RL is used to learn the policy of the two actions SHIFT and REDUCE.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_3",
+                    "text": "The experiments on four datasets (SST, SICK, IMDB, and SNLI) show that the proposed approach outperformed the approach using predefined tree structures (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_4",
+                    "text": "left-to-right, right-to-left).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_5",
+                    "text": "The paper is well written and has two good points.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_6",
+                    "text": "Firstly, the idea of using RL to learn parse trees using downstream tasks is very interesting and novel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_7",
+                    "text": "And employing the shift-reduce framework is a very smart choice because the set of actions is minimal (shift and reduce).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_8",
+                    "text": "Secondly, what shown in the paper somewhat confirms the need of parse trees.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_9",
+                    "text": "This is indeed interesting because of the current debate on whether syntax is helpful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_10",
+                    "text": "I have the following comments:\n- it seems that the authors weren't aware of some recent work using RL to learn structures for composition, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_11",
+                    "text": "Andreas et al (2016).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_12",
+                    "text": "- because different composition functions (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_13",
+                    "text": "LSTM, GRU, or classical recursive neural net) have different inductive biases, I was wondering if the tree structures found by the model would be independent from the composition function choice.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_14",
+                    "text": "- because RNNs in theory are equivalent to Turing machines, I was wondering if restricting the expressiveness of the model (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_15",
+                    "text": "reducing the dimension) can help the model focus on discovering more helpful tree structures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_16",
+                    "text": "Ref:\nAndreas et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_17",
+                    "text": "Learning to Compose Neural Networks for Question Answering.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_17",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_17_s_0",
+                    "text": "In this paper, the authors propose a new method to learn hierarchical representations of sentences, based on reinforcement learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_1",
+                    "text": "They propose to learn a neural shift-reduce parser, such that the induced tree structures lead to good performance on a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_2",
+                    "text": "They use reinforcement learning (more specifically, the policy gradient method REINFORCE) to learn their model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_3",
+                    "text": "The reward of the algorithm is the evaluation metric of the downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_4",
+                    "text": "The authors compare two settings, (1) no structure information is given (hence, the only supervision comes from the downstream task) and (2) actions from an external parser is used as supervision to train the policy network, in addition to the supervision from the downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_5",
+                    "text": "The proposed approach is evaluated on four tasks: sentiment analysis, semantic relatedness, textual entailment and sentence generation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_6",
+                    "text": "I like the idea of learning tree representations of text which are useful for a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_7",
+                    "text": "The paper is clear and well written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_8",
+                    "text": "However, I am not convinced by the experimental results presented in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_9",
+                    "text": "Indeed, on most tasks, the proposed model is far from state-of-the-art models:\n - sentiment analysis, 86.5 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_10",
+                    "text": "89.7 (accuracy);\n - semantic relatedness, 0.32 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_11",
+                    "text": "0.25 (MSE);\n - textual entailment, 80.5 v.s.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_12",
+                    "text": "84.6 (accuracy).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_13",
+                    "text": "From the results presented in the paper, it is hard to know if these results are due to the model, or because of the reinforcement learning algorithm.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_14",
+                    "text": "PROS:\n - interesting idea: learning structures of sentences adapted for a downstream task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_15",
+                    "text": "- well written paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_16",
+                    "text": "CONS:\n - weak experimental results (do not really support the claim of the authors).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_17",
+                    "text": "Minor comments:\nIn the second paragraph of the introduction, one might argue that bag-of-words is also a predominant approach to represent sentences.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_18",
+                    "text": "Paragraph titles (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_19",
+                    "text": "in section 3.2) should have a period at the end.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_20",
+                    "text": "----------------------------------------------------------------------------------------------------------------------\nUPDATE\n\nI am still not convinced by the results presented in the paper, and in particular by the fact that one must combine the words in a different way than left-to-right to obtain state of the art results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_21",
+                    "text": "However, I do agree that this is an interesting research direction, and that the results presented in the paper are promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_17_s_22",
+                    "text": "I am thus updating my score from 5 to 6.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_20",
+            "type": "Human",
+            "liang_alpha_score": 0.1108,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_20_s_0",
+                    "text": "Dear authors,\n\nI've read the interesting paper and learned nice ideas.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_20_s_1",
+                    "text": "Now I've found somewhat incorrect mention in your paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_20_s_2",
+                    "text": "In Introduction, it is said that trees are provided with sentences in Socher et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_20_s_3",
+                    "text": "(2011), but they jointly learn the binary tree structures according to the target task (sentiment classification) although the approach is different (reinforcement learning or autoencoder).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_20_s_4",
+                    "text": "Best,\n  Kazuma",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_25",
+            "type": "Human",
+            "liang_alpha_score": 0.5355,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_25_s_0",
+                    "text": "Table 2 is missing some recent results on this task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_1",
+                    "text": "Please see the NTI and NSE results on the same task [1,2].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_2",
+                    "text": "NTI is particularly relevant to this work because it encodes a sentence with an n-ary tree (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_3",
+                    "text": "binary tree) instead of using a parser output or learning to compose.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_4",
+                    "text": "Thanks,\n\n\n\nRef:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_5",
+                    "text": "Munkhdalai, Tsendsuren, and Hong Yu.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_6",
+                    "text": "\"Neural Tree Indexers for Text Understanding.\" arXiv preprint arXiv:1607.04492 (2016).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_7",
+                    "text": "Munkhdalai, Tsendsuren, and Hong Yu.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_25_s_8",
+                    "text": "\"Neural Semantic Encoders.\" arXiv preprint arXiv:1607.04315 (2016).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_4e8fbe1c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_12eba6f2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4e8fbe1c"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_0504c358",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_12eba6f2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0504c358"
+        },
+        {
+            "source": "b_09f0f345",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_09f0f345",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_09f0f345",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "b_09f0f345",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_09f0f345",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_09f0f345",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_12eba6f2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09f0f345"
+        },
+        {
+            "source": "sec_ad11e2a5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8bde8d39"
+        },
+        {
+            "source": "b_f7a96865",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_f7a96865",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_f7a96865",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_f7a96865",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "sec_7f3de8a4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f7a96865"
+        },
+        {
+            "source": "sec_7f3de8a4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a5a400a2"
+        },
+        {
+            "source": "sec_7f3de8a4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_23e61907"
+        },
+        {
+            "source": "sec_7f3de8a4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5fac9c44"
+        },
+        {
+            "source": "b_b7a0b446",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_b7a0b446",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_914c82dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b7a0b446"
+        },
+        {
+            "source": "sec_914c82dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2182b6e5"
+        },
+        {
+            "source": "sec_914c82dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_83f1de82"
+        },
+        {
+            "source": "sec_914c82dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9ed65a36"
+        },
+        {
+            "source": "b_ec28f98d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "sec_914c82dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ec28f98d"
+        },
+        {
+            "source": "sec_914c82dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_11f81ec4"
+        },
+        {
+            "source": "sec_914c82dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9e8177af"
+        },
+        {
+            "source": "sec_914c82dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3e0762ce"
+        },
+        {
+            "source": "sec_6652aa85",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_653559dd"
+        },
+        {
+            "source": "b_8a85bcfe",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_6652aa85",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8a85bcfe"
+        },
+        {
+            "source": "sec_6652aa85",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b65ed637"
+        },
+        {
+            "source": "b_967c643e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_967c643e"
+        },
+        {
+            "source": "b_5123671e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5123671e"
+        },
+        {
+            "source": "b_008ef73f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_008ef73f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_008ef73f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_008ef73f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_008ef73f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_008ef73f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_008ef73f"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_01907061"
+        },
+        {
+            "source": "b_ab22871f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_ab22871f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_ab22871f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_ab22871f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ab22871f"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b62e4645"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0d8d0a85"
+        },
+        {
+            "source": "b_2dae00c9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2dae00c9"
+        },
+        {
+            "source": "b_1be965c4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1be965c4"
+        },
+        {
+            "source": "b_b631297b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_5cfd1bb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b631297b"
+        },
+        {
+            "source": "sec_1c337107",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_57e19dd3"
+        },
+        {
+            "source": "sec_1c337107",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08d584bb"
+        },
+        {
+            "source": "sec_1c337107",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b170e076"
+        },
+        {
+            "source": "sec_1c337107",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_be3a8051"
+        },
+        {
+            "source": "sec_1c337107",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a652770b"
+        }
+    ]
+}

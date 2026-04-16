@@ -1,0 +1,1803 @@
+{
+    "paper_metadata": {
+        "paper_id": "HyunpgbR-",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_8d357baf",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_09d44538",
+                        "type": "paragraph",
+                        "text": "Reinforcement learning in environments with large state-action spaces is challenging, as exploration can be highly inefficient in high-dimensional spaces. Hence, even if the environment dynamics are simple, the optimal policy can be combinatorially hard to discover. However, for many large-scale environments, the high-dimensional state-action space has (often hidden or implicit) low-dimensional structure which can be exploited.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f32118d5",
+                        "type": "paragraph",
+                        "text": "Figure 1 : Equivalent solutions in a 2-hunter 2prey game.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a6322590",
+                        "type": "paragraph",
+                        "text": "Many natural examples are in collaborative multi-agent problems, whose state-action space is exponentially large in the number of agents, but have a low-dimensional coordination structure. Consider a simple variant of the Hare-Hunters problem (see Figure 1 ). In this game, N = 2 identical hunters need to capture M = 2 identical static prey within T time-steps, and exactly H = 1 hunter is needed to capture each prey. T is set such that no hunter can capture both preys. There are two equivalent solutions: hunter 1 captures prey 1 and hunter 2 captures prey 2, or vice versa. There are also two suboptimal choices: both hunters choose the same prey. Hence, the hunters must coordinate over a (large) number of time-steps to maximize their reward. This implies the solution space has low-dimensional structure that can be used to accelerate training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2f2f6b1f",
+                        "type": "paragraph",
+                        "text": "In this work, we propose a principled approach to structured exploration to improve sample complexity in large state-action spaces, by learning deep hierarchical policies with a latent structure. As a highlevel intuition, consider a tabular multi-agent policy, which maps discrete (joint) states to action probabilities. For N agents with S states and A actions each, this policy has O((S \u2022 A) N ) weights. However, the low-dimensional coordination structure can be captured by a factorized, low-rank matrix, where the factorization can be learned and, for instance, only has O(N K(S + A)) weights. Similarly, our approach both 1) learns a low-dimensional factorization of the policy distribution and 2) defines exploration by also sampling from the low-dimensional latent space. For instance, in the multi-agent setting, we can learn a centralized multi-agent policy with a latent structure that encodes coordination between agents and biases exploration towards policies that encode \"good\" coordination.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2c7ede63",
+                        "type": "paragraph",
+                        "text": "The key ideas of our approach are: 1) to utilize a shared stochastic latent variable model that defines the structured exploration policy, and 2) to employ a principled variational method to learn the posterior distribution over the latents jointly with the optimal policy. Our approach has several desirable properties. First we do not incorporate any form of prior domain knowledge, but rather discover the coordination structure purely from empirical experience during learning. Second, our variational learning method enables fully differentiable end-to-end training of the entire policy class. Finally, by utilizing a hierarchical policy class, our approach can easily scale to large action spaces (e.g. a large number of coordinating agents). Our approach can also be seen as a deep hierarchical generalization of Thompson sampling, which is a historically popular way to capture correlations between actions (e.g. in the bandit setting (Agrawal & Goyal, 2012) ).",
+                        "extracted_citations": [
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fabe1e0d",
+                        "type": "paragraph",
+                        "text": "To summarize, our contributions in this work are as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0e818102",
+                        "type": "paragraph",
+                        "text": "\u2022 We introduce a structured probabilistic policy class that uses a hierarchy of stochastic latent variables. \u2022 We propose an efficient and principled algorithm using variational methods to train the policy end-to-end. \u2022 To validate our learning framework, we introduce several synthetic multi-agent environments that explicitly require team coordination, and feature competitive pressures that are characteristic of many coordinated decision problems. \u2022 We empirically verify that our approach improves sample complexity on coordination games with a large number (N \u223c 20) of agents. \u2022 We show that learned latent structures correlate with meaningful coordination patterns.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_29ee2af0",
+                "title": "COOPERATIVE MULTI-AGENT REINFORCEMENT LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_df2c73af",
+                        "type": "paragraph",
+                        "text": "We use multi-agent environments to show the efficacy of our approach to structured exploration, as they naturally exhibit exponentially large state-action spaces. In this work we focus on efficiently learning a centralized policy: a joint policy model for all agents, in the full-information setting. More generally, multi-agent problems can be generalized along many dimensions, e.g. one can learn decentralized policies in partial-information settings. For an overview, see Busoniu et al. (2008) .",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_80466c65",
+                        "type": "paragraph",
+                        "text": "In multi-agent RL, agents sequentially interact within an environment defined by the tuple: E \u2261 (S, A, r, f P ). Each agent i starts in an initial state s i 0 , and at each time t observes a state s t \u2208 S and executes an action a i t chosen by a (stochastic) policy a i t \u223c P a i t |s t . Each agent then receives a reward r i (s t , a t ), and the environment transitions to a new state s t+1 with probability f P (s t+1 |s t , a t ). We define the joint state and actions as s t = {s i t \u2208 S} and a t = {a i t \u2208 A}, where i \u2208 I indexes the agents. Note that the rewards for each agent r i can depend on the full joint state and actions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_63790c9b",
+                        "type": "paragraph",
+                        "text": "In this work, we restrict to fully cooperative MDPs that are fully observable, deterministic and episodic. Each agent can see the full state s, f P is deterministic and each episode \u03c4 = (s t , a t ) 0\u2264t\u2264T ends when the agent encounters a terminal state and the MDP resets.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3a4e75bf",
+                        "type": "paragraph",
+                        "text": "In the fully cooperative case, the goal for each agent is to learn its optimal policy P * a i t |s t , \u03b8 that maximizes the total reward R(\u03c4",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6ecaf96e",
+                        "type": "paragraph",
+                        "text": "To optimize, we can apply gradient descent with policy gradient estimators \u011d\u03b8 (Williams (1992))",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4aa8195b",
+                        "type": "paragraph",
+                        "text": "Figure 2 : Structured latent variable model of the multi-agent policy (actor, left) and instance of the multi-agent actor-critic interacting in the environment E (right). The joint policy contains two stacked layers of stochastic latent variables (red), and deterministically receives states and computes actions (green). Global variables \u03bb are shared across agents. On the right, a neural network instance of the actor-critic uses the reparametrization trick and receives the environment state, samples actions from the policy for all agents and computes value functions V \u2022 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6b3a35f1",
+                        "type": "paragraph",
+                        "text": "where we sample M rollouts \u03c4 k by sampling actions from the policy that is being learned.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3f433292",
+                        "type": "paragraph",
+                        "text": "A central issue in reinforcement learning is the exploration-exploitation trade-off: how can agents sample rollouts and learn efficiently? In particular, when the state-action space is exponentially large, discovering good (coordinated) policies when each agent samples independently becomes combinatorially intractable as N grows. Hence, exploration in large state-action spaces poses a significant challenge.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_962947ea",
+                "title": "MACE: JOINT COORDINATION AND EXPLORATION",
+                "blocks": [
+                    {
+                        "block_id": "b_9cb9574d",
+                        "type": "paragraph",
+                        "text": "We now formulate our multi-agent objective (1) using a hierarchical policy class that enables structured exploration. Our approach, MACE (\"Multi-Agent Coordinated Exploration\"), builds upon two complementary approaches:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3738b808",
+                        "type": "paragraph",
+                        "text": "\u2022 Encode structured exploration by sampling actions that are correlated between agents. The correlation between actions encodes coordination. \u2022 Use a variational approach to derive and optimize a lower bound on the objective (1).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b51a10a3",
+                        "type": "paragraph",
+                        "text": "Hierarchical Latent Model. To encode coordination between agents, we assume the individual policies have shared structure, encoded by a latent variable \u03bb t \u2208 R n for all t, where n is the dimension of the latent space. This leads to a hierarchical policy model P (a t , \u03bb t |s t ), as shown in Figure 2 . We first write the joint policy for a single time-step as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_18ca81c6",
+                        "type": "paragraph",
+                        "text": "where we introduced the conditional priors P (\u03bb t |s t ). The latent variables \u03bb t introduce dependencies among the a t , hence this policy is more flexible compared to standard fully factorized policies (Ranganath et al. (2015) ). Note that this approach supports centralized learning and decentralized execution, by sharing a random seed amongst agents to sample \u03bb t and actions a t during execution.",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1145a635",
+                        "type": "paragraph",
+                        "text": "Computing the integral in the optimal policy (3) is hard, because the unknown distribution P (a i t |\u03bb t , s t ) can be highly complex. Hence, to make learning (3) tractable, we will use a variational approach.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_729916c8",
+                        "type": "paragraph",
+                        "text": "Hierarchical Variational Lower Bound. We next derive a tractable learning algorithm using variational methods. Instead of directly optimizing (1), we cast it as a probabilistic inference problem, as in Levine & Koltun (2013); Vlassis et al. (2009) , and instead optimize a lower bound. To do so, we assume that the total reward R i for each i to be non-negative and bounded. Hence, we can view the total reward R(\u03c4 ) as a random variable, whose unnormalized distribution is defined as P (R|\u03c4 ) = R. We can then rewrite (1) as a maximum likelihood problem:",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4eb12c6e",
+                        "type": "paragraph",
+                        "text": "Hence, the RL objective is equivalent to a maximal likelihood problem:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1dd5d32a",
+                        "type": "paragraph",
+                        "text": "In MACE we introduce a latent variable \u03bb t in the probability of a rollout \u03c4 , using (3):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0f9700c7",
+                        "type": "paragraph",
+                        "text": "where computing the policy distribution P (a t , \u03bb t |s t ; \u03b8) is intractable, which makes the maximization in Equation ( 5 ) hard. Hence, we derive a lower bound on the log-likelihood log P (R|\u03c4 )P (\u03c4 ; \u03b8) in Equation ( 5 ), using a variational approach. Specifically, we use an approximate factorized variational distribution Q R that is weighted by the total reward R:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ca598ca5",
+                        "type": "paragraph",
+                        "text": "where \u03c6 are the parameters for the variational distribution Q R . Using Jensen's inequality (Hoffman et al., 2013) and ( 3 ) to factorize P (a t , \u03bb t |s t ; \u03b8), we can derive:",
+                        "extracted_citations": [
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8e8d9b6b",
+                        "type": "paragraph",
+                        "text": "where the right-hand side is called the evidence lower bound (ELBO), which we can maximize as a proxy for (4). For more details on the derivation, see the Appendix.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7daa9201",
+                        "type": "paragraph",
+                        "text": "The standard choice for the prior P (\u03bb t |s t ) is to use maximum-entropy standard-normal priors: P (\u03bb t |s t ) = N (0, 1). We can then optimize (8) using e.g. stochastic gradient ascent. Formally, the MACE policy gradient is:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_694f83e5",
+                        "type": "paragraph",
+                        "text": "which is an approximation of the true policy gradient (2). This gradient can be estimated using sampled roll-outs \u03c4 k of the policy P \u03c0 :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_36f85e83",
+                        "type": "paragraph",
+                        "text": "During a rollout \u03c4 k , we sample \u03bb \u223c Q, observe rewards R \u223c P (R|\u03c4 ) and transitions s t+1 \u223c P (s t+1 |.), and use these to compute (10). We can similarly compute",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_061d30c8",
+                        "type": "paragraph",
+                        "text": "the gradient for the variational posterior Q R .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2b960d41",
+                        "type": "paragraph",
+                        "text": "Actor-Critic and Bias-Variance. Estimating policy gradients g \u03b8 using empirical rewards can suffer from high variance and instabilities. It is thus useful to consider more general objectives F i :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_21fc83a5",
+                        "type": "paragraph",
+                        "text": "such that the variance in \u011d is reduced. 1 In practice, we find that using (10) with more general F , such as generalized advantages (Schulman et al. (2015) ), performs quite well.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_bcb2c390",
+                "title": "MULTI-AGENT ENVIRONMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_c5f60e93",
+                        "type": "paragraph",
+                        "text": "To validate our approach, we created two grid-world games, depicted in Figure 2 , inspired by the classic Predator-Prey and Stag-Hunt games (Shoham & Leyton-Brown (2008) ). In both games, the world is periodic and the initial positions of the hunters and prey are randomized. Also, we consider two instances for both games: either the prey are moving or fixed.",
+                        "extracted_citations": [
+                            "Citation_b23"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e8a340ea",
+                        "type": "paragraph",
+                        "text": "Hare-Hunters. Predator-Prey is a classic test environment for multi-agent learning, where 4 predators try to capture a prey by boxing it in. We consider a variation defined by the settings (N, M, H, T ): N hunters and M prey. Each prey can be captured by exactly H hunters: to capture the prey, a hunter gets next to it, after which the hunter is frozen. Once a prey has had H hunters next to it, it is frozen and cannot be captured by another hunter. The terminal rewards used are:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_830c9178",
+                        "type": "paragraph",
+                        "text": "R i = 1, if all prey are captured H times before the time limit T 0, otherwise",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fe4fe56c",
+                        "type": "paragraph",
+                        "text": "The challenge of the game is for the agents to inactivate all prey within a finite time T . Due to the time limit, the optimal strategy is for the agents to distribute targets efficiently, which can be challenging due to the combinatorially large number of possible hunter-to-prey assignments.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_99e0bdce",
+                        "type": "paragraph",
+                        "text": "Stag-Hunters. The Stag-Hunt is another classic multi-agent game designed to study coordination. In this game, hunters have a choice: either they capture a hare for low reward, or, together with another hunter, capture a stag for a high reward. We extend this to the multi-agent (N, M, H, T )-setting:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6c8a29c0",
+                        "type": "paragraph",
+                        "text": "N hunters hunt M prey (M/2 stags and M/2 hares). Each stag has H hit-points, while hares and hunters have 1 hit-point. Capturing is as in Hare-Hunters. The spatial domain is similar to the Hare-Hunters game and we also use a time limit T . The terminal reward is now defined as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_202a5f7a",
+                        "type": "paragraph",
+                        "text": "if i captured a live stag that became inactive before the time limit T 0.1, if i captured a live hare before the time limit T 0, otherwise",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_741db6d0",
+                        "type": "paragraph",
+                        "text": "The challenge for the agents here is to discover that choosing to capture the same prey can yield substantially higher reward, but this requires coordinating with another hunter.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0f3ae6d3",
+                "title": "NEURAL COORDINATION MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_db6f14ed",
+                        "type": "paragraph",
+                        "text": "For experiments, we instantiated our multi-agent policy class (as in Figure 2 ) with deep neural networks. For simplicity, we only used reactive policies without memory, although it is straightforward to apply MACE to policies with memory (e.g. LSTMs). The model takes a joint state s t as input and computes features \u03c6(s) using a 2-layer convolutional neural network. To compute the latent variable \u03bb \u2208 R d , we use the reparametrization trick (Kingma & Welling, 2013) to learn the variational distribution (e.g. Q(\u03bb|s)), sampling \u03bb via \u223c N (0, 1) and distribution parameters \u00b5, \u03c3 (omitting t):",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f80b0c3d",
+                        "type": "paragraph",
+                        "text": "Given \u03bb, the model then computes the policies P (a i |\u03bb, s) and value functions V i (s) as (omitting t):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3f21cf98",
+                        "type": "paragraph",
+                        "text": "where softmax(x) = exp x/ j exp x j . In this way, the model can be trained end-to-end.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1ad083c3",
+                        "type": "paragraph",
+                        "text": "Training. We used A3C (Mnih et al. (2016) ) with KL-controlled policy gradients (10), generalized advantage as F (Schulman et al. (2015) ). and policy-entropy regularization. For all experiments, we performed a hyper-parameter search and report the best 5 runs seen (see the Appendix for details).",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_bfc6fa9a",
+                        "type": "paragraph",
+                        "text": "Baselines. We compared MACE against two natural baselines:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7ef328cc",
+                        "type": "paragraph",
+                        "text": "\u2022 Shared (shared actor-critic): agents share a deterministic hidden layer, but maintain individual weights \u03b8 i for their (stochastic) policy P (a|\u03bb, s; \u03b8 i ) and value function V i (s; \u03b8).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_35a38565",
+                        "type": "paragraph",
+                        "text": "The key difference is that this model does not sample from the shared hidden layer.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ae8e21d5",
+                        "type": "paragraph",
+                        "text": "\u2022 Cloned (actor-critic): a model where each agent uses an identical policy and value function with shared weights. There is shared information between the agents, and actions are sampled according to the agents' own policies. or 20-vs-20 agents; randomly moving or fixed preys. Average, minimal and maximal rewards for the best 5 runs for each model are shown. MACE accumulates increasingly higher rewards compared to the baselines, by 1) achieving higher terminal reward per episode and 2) finishing episodes faster (see Figure 4 ). For 10-10 Stag-Hunters with frozen prey, average reward per-episode is 4.64 (Cloned), 6.22 (Shared), 6.61 (MACE) after 1 million samples. For more, see the Appendix.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6954a7bc",
+                        "type": "paragraph",
+                        "text": "w Figure 4 : Train-time episode lengths during 1 million steps for 10-vs-10 Hare-Hunters (left) and Stag-Hunters (right), with fixed preys. MACE (orange) finishes an episode successfully before the time limit more often than the baselines (Cloned (blue) and Shared (yellow)).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5c749ef7",
+                "title": "QUANTITATIVE ANALYSIS",
+                "blocks": [
+                    {
+                        "block_id": "b_a3e1591e",
+                        "type": "paragraph",
+                        "text": "Above, we defined a variational approach to train hierarchical multi-agent policies using structured exploration. We now validate the efficacy of our approach by showing our method scales to environments with a large number of agents. We ran experiments for both Hare-Hunters and Stag-Hunters for N = M = 10, 20 in a spatial domain of 50 \u00d7 50 grid cells.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_330d16b1",
+                "title": "Sample complexity.",
+                "blocks": [
+                    {
+                        "block_id": "b_8871a80f",
+                        "type": "paragraph",
+                        "text": "In Table 1 we show the achieved rewards after a fixed number of training samples, and Figure 3 showcases the corresponding learning curves. We see that MACE achieves up to 10\u00d7 reward compared to the baselines. Figure 4 shows the corresponding distribution of training episode lengths. We see that MACE solves game instances more than 20% faster than baselines in 50% (10%) of Hare-Hunters (Stag-Hunters) episodes. In particular, MACE learns to coordinate for higher reward more often: it achieves the highest average reward per-episode (e.g. for 10-10 Stag-Hunters with frozen prey, average rewards are 4.64 (Cloned), 6.22 (Shared), 6.61 (MACE)). Hence, MACE coordinates successfully more often to capture the stags. Together, these results show MACE enables more efficient learning.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6f3d150b",
+                        "type": "paragraph",
+                        "text": "Using the ELBO. A salient difference between (10) and ( 2 ) is the KL-regularization, which stems from the derivation of the ELBO. Since we use a more general objective F , c.f. ( 11 ), we also investigated the impact of using the KL-regularized policy gradient (10) versus the standard (2). To  Arrows show where agents move to in the next frame. Top: at the start, predators explore via \u03bb, but do not succeed before the time limit T (red dot). Bottom: after convergence agents succeed consistently (green dot) before the time limit (purple dot) and \u03bb encodes the two strategies from Figure 1 . Highlighted \u03bb-components correlate with rollout under a 2-sided t-test at \u03b1 = 0.1 significance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f50fdefb",
+                        "type": "paragraph",
+                        "text": "this end, we ran several instances of the above experiments both with and without KL-regularization. We found that without KL-regularization, training is unstable and prone to mode collapse: the variance \u03c3 of the variational distribution can go to 0. This reflects in essentially 0 achieved reward: the model does not solve the game for any reasonable hyperparameter settings.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_90af2a2f",
+                        "type": "paragraph",
+                        "text": "Impact of dynamics and T . Inspecting training performance, we see the relative difficulty of capturing moving or randomly moving prey. Capturing moving prey is easier to learn than capturing fixed preys, as comparing rewards in Table 1 shows. This shows a feature of the game dynamics: the expected distance between a hunter and an uncaptured prey are lower when the preys are randomly moving, resulting in an easier game. Comparing Hare-Hunters and Stag-Hunters, we also see the impact of the time limit T . Since we use terminal rewards only, as T gets larger, the reward becomes very sparse and models need more samples to discover good policies.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fbc592df",
+                "title": "MODEL INSPECTION",
+                "blocks": [
+                    {
+                        "block_id": "b_ae74dd1b",
+                        "type": "paragraph",
+                        "text": "Beyond training benefits, we now demonstrate empirical evidence that suggest efficacy and meaningfulness of our approach to structured exploration. We start by inspecting the behavior of the latent variable \u03bb for a simple N = M = 2 Hare-Hunters game, which enables semantic inspection of the learned policies, as in Figure 5 . We make a number of observations. First, \u03bb is relevant: many components are statistically significantly correlated with the agents' actions. This suggests the model Left: components of the latent code \u03bb that significantly correlate with sampled actions (computed as in Figure 5 ). Right: Three episode snapshots: at the start, middle and end. Red: predators; green: prey. Arrows indicate where agents move to in the next snapshot. The hunters solve the game (green dot) before the time limit T = 1000 (purple dot), by distributing targets amongst themselves.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2718008c",
+                        "type": "paragraph",
+                        "text": "does indeed use the latent \u03bb: it (partly) controls the coordination between agents. 2 Second, the latent \u03bb shows strong correlation during all phases of training. This suggests that the model indeed is performing a form of structured exploration. Third, the components of \u03bb are correlated with semantic meaningful behavior. We show a salient example in the bottom 2 rows in Figure 5 : the correlated components of \u03bb are disjoint and each component correlates with both agents. The executed policies are exactly the two equivalent ways to assign 2 hunters to 2 preys, as illustrated in Figure 1 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1d33efe4",
+                        "type": "paragraph",
+                        "text": "Coordination with a large N . In the large N = M = 10 case, the dynamics of the agent collective are a generalization of the N = M = 2 case. There are now redundancies in multi-agent hunter-prey assignments that are analogous to the N = M = 2 case that are prohibitively complex to analyze due to combinatorial complexity. However our experiments strongly suggest (see e.g. Figure 6 ) the latent code is again correlated with the agents' behavior during all phases of training, showing that \u03bb induces meaningful multi-agent coordination.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8fb27277",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_0a40b352",
+                        "type": "paragraph",
+                        "text": "Deep Structured Inference. Recent works have focused on learning structured representations using expressive distributions, which enable more powerful probabilistic inference. For instance, Johnson et al. (2016) has proposed combining neural networks with graphical models, while Ranganath et al. (2015) learn hierarchical latent distributions. Our work builds upon these approaches to learn structured policies in the reinforcement learning setting. In the multi-agent setting, the RL problem has also been considered as an inference problem in e.g. (Liu et al., 2015; Wu et al., 2013; Liu et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b12",
+                            "Citation_b21",
+                            "Citation_b16",
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_cabf6fc0",
+                        "type": "paragraph",
+                        "text": "Variational methods in RL. Neumann (2011); Furmston & Barber (2010) discuss variational approaches for RL problems, but did not consider end-to-end trainable models. Levine & Koltun (2013) used variational methods for guided policy search. Houthooft et al. (2016) learned exploration policies via information gain using variational methods. However, these only consider 1 agent.",
+                        "extracted_citations": [
+                            "Citation_b15",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_dc56bf84",
+                        "type": "paragraph",
+                        "text": "Coordination in RL. Multi-agent coordination has been studied in the RL community (e.g. Guestrin et al. (2002) ; Kapetanakis & Kudenko (2002) ; Chalkiadakis & Boutilier (2003) ), for instance, as a method to reduce the instability of multiple agents learning simultaneously using RL. The benefit of coordination was already demonstrated in simple multi-agent settings in e.g. Tan (1993) . The shared latent variable \u03bb of our structured policy can also be interpreted as a learned correlation device (see Bernstein (2005) for an example in the decentralized setting), which can be used to e.g. break ties between alternatives or induce coordination between agents. More generally, they can be used to achieve correlated equilibria (Greenwald & Hall, 2003) , a more general solution concept than Nash equilibria. However, previous methods learned hand-crafted models and do not scale well to complex state spaces and many agents. In contrast, our method learns coordination end-to-end via on-policy methods, learns the multi-agent exploration policy and scales well to many agents via its simple hierarchical structure.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b13",
+                            "Citation_b3",
+                            "Citation_b25",
+                            "Citation_b1",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d0de7559",
+                        "type": "paragraph",
+                        "text": "Communication Models. Recently, end-to-end learning of communication models has been studied for shared broadcast channels (Sukhbaatar et al. (2016) ), sequential communication (Peng et al. (2017) ), heuristic multi-agent exploration Usunier et al. (2016) and bit-channels (Foerster et al. (2016) ). These works show that non-trivial communication protocols can be learned through backpropagation or heuristic stabilization methods, but often do not scale well to a large number of agents. Our hierarchical approach is complementary, learns via variational methods, and can scale to large N .",
+                        "extracted_citations": [
+                            "Citation_b24",
+                            "Citation_b20",
+                            "Citation_b26",
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5b6cbedc",
+                        "type": "paragraph",
+                        "text": "Multi-task learning. Hierarchical models have been studied for multi-task learning, e.g. Daume III (2014) learns latent hierarchies via EM in a supervised learning setting. Instead, we study flexible end-to-end trainable latent hierarchies in the reinforcement learning setting.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1845604d",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_9a367604",
+                        "type": "paragraph",
+                        "text": "In a sense, we studied the simplest setting that can benefit from structured exploration, in order to isolate the contribution of our work. Our hierarchical model and variational approach are a simple way to implement multi-agent coordination, and easily combine with existing actor-critic methods. Moving forward, there are many ways to expand on our work. Firstly, for complex (partial-information) environments, instead of using reactive policies with simple priors P \u223c N (0, 1), memoryfull policies with flexible priors (Chen et al., 2016) We show details on how to derive a tractable learning method to the multi-agent reinforcement learning problem with a centralized controller:",
+                        "extracted_citations": [
+                            "Citation_b4"
+                        ]
+                    },
+                    {
+                        "block_id": "b_81e0f3ff",
+                        "type": "paragraph",
+                        "text": "Instead of directly optimizing ( 16 ), we cast it as a probabilistic inference problem, as in Levine & Koltun (2013) ; Vlassis et al. ( 2009 ), and optimize a lower bound.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_42e957c4",
+                        "type": "paragraph",
+                        "text": "To do so, we assume that the total reward R i for each i to be non-negative and bounded. Hence, we can view the total reward R(\u03c4 ) as a random variable, whose unnormalized distribution is defined as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8ffa8745",
+                        "type": "paragraph",
+                        "text": "We can then rewrite ( 16 ) as a maximum likelihood problem:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_45d68706",
+                        "type": "paragraph",
+                        "text": "Hence, the RL objective is equivalent to a maximal likelihood problem:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_122946a0",
+                        "type": "paragraph",
+                        "text": "This policy distribution is intractable to learn exactly, as it involves margalization over \u03bb t and an unknown flexible distribution P (a i t |\u03bb t , s t ). Hence the maximization in Equation ( 19 ) is hard. Hence, we follow the variational approach and get a lower bound on the log-likelihood log P (R, \u03c4 ; \u03b8) in Equation ( 19 ). For this, we use an approximate variational distribution Q R (\u03bb 0:T |\u03c4 ; \u03c6) and Jensen's inequality (Hoffman et al., 2013) :",
+                        "extracted_citations": [
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_eeecae4f",
+                        "type": "paragraph",
+                        "text": "where in the last line we used (20). By inspecting the quotient in (26), we see that the optimal Q R is a factorized distribution weighted by the total reward R:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_28b0fab7",
+                        "type": "paragraph",
+                        "text": "Q R (\u03bb 0:T |\u03c4 ; \u03c6) = P (R|\u03c4 )P (s 0 ) .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3738a86c",
+                        "type": "paragraph",
+                        "text": "The right-hand side in Equation ( 32 ) is called the evidence lower bound (ELBO), which we can maximize as a proxy for ( 16 ). The standard choice is to use maximum-entropy standard-normal priors: P (\u03bb t |s t ) = N (0, 1). We can then optimize (32) using e.g. stochastic gradient ascent.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_62f47b0d",
+                "title": "TRAINING",
+                "blocks": [
+                    {
+                        "block_id": "b_ec2b28ca",
+                        "type": "paragraph",
+                        "text": "Training method. We used the A3C method with 5-20 threads for all our experiments. Each thread performed SGD with (??). The loss for the value function at each state s t is the standard L 2 -loss between the observed total rewards for each agent i and its value estimate:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_999863ba",
+                        "type": "paragraph",
+                        "text": "In addition, in line with other work using actor-critic methods, we found that adding a small entropy regularization on the policy can sometimes positively influence performance, but this does not seem to be always required for our testbeds. The entropy regularization is:",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Analysis of thompson sampling for the multi-armed bandit problem Shipra Agrawal Navin Goyal Conference on Learning Theory 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Bounded policy iteration for decentralized pomdps Daniel S Bernstein Proceedings of the Nineteenth International Joint Conference on Artificial Intelligence the Nineteenth International Joint Conference on Artificial Intelligence Citeseer 2005",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "A comprehensive survey of multiagent reinforcement learning Lucian Busoniu Robert Babuska Bart De Schutter IEEE Transactions on Systems, Man, And Cybernetics-Part C: Applications and Reviews 38 2 2008. 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Coordination in Multiagent Reinforcement Learning: A Bayesian Approach Georgios Chalkiadakis Craig Boutilier International Joint Conference on Autonomous Agents and Multiagent Systems, AAMAS '03 New York, NY, USA 2003",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Xi Chen Diederik P Kingma Tim Salimans Yan Duan arXiv:1611.02731 arXiv: 1611.02731 Prafulla Dhariwal, John Schulman, Ilya Sutskever, and Pieter Abbeel. Variational Lossy Autoencoder November 2016 cs, stat",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Hal Daume Iii arXiv:1408.2032 arXiv: 1408.2032 Bayesian Multitask Learning with Latent Hierarchies August 2014 cs, stat",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Learning to Communicate with Deep Multi-Agent Reinforcement Learning Jakob N Foerster M Yannis Nando Assael Shimon De Freitas Whiteson arXiv:1605.06676 arXiv: 1605.06676 May 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Variational methods for reinforcement learning T Furmston D Barber Journal of Machine Learning Research 1533-7928 9 December 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Correlated q-learning Amy Greenwald Keith Hall Proceedings of the 20th International Conference on Machine Learning (ICML-03) the 20th International Conference on Machine Learning (ICML-03) 2003",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Coordinated reinforcement learning Carlos Guestrin Michail Lagoudakis Ronald Parr ICML 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Stochastic variational inference Matthew D Hoffman David M Blei Chong Wang John Paisley Journal of Machine Learning Research 14 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Rein Houthooft Xi Chen Yan Duan John Schulman arXiv:1605.09674 arXiv: 1605.09674 Filip De Turck, and Pieter Abbeel. VIME: Variational Information Maximizing Exploration May 2016 cs, stat",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Composing graphical models with neural networks for structured representations and fast inference M J Johnson D Duvenaud A B Wiltschko S R Datta R P Adams March 2016 ArXiv e-prints",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Reinforcement Learning of Coordination in Cooperative Multi-agent Systems Spiros Kapetanakis Daniel Kudenko Eighteenth National Conference on Artificial Intelligence Menlo Park, CA, USA American Association for Artificial Intelligence 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Auto-encoding variational bayes P Diederik Max Kingma Welling arXiv:1312.6114 2013 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Variational Policy Search via Trajectory Optimization Sergey Levine Vladlen Koltun Advances in Neural Information Processing Systems C J C Burges L Bottou M Welling Z Ghahramani K Q Weinberger Curran Associates, Inc 2013 26",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Stick-breaking policy learning in dec-pomdps Miao Liu Christopher Amato Xuejun Liao Lawrence Carin Jonathan P How IJCAI 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Learning for decentralized control of multiagent systems in large, partially-observable stochastic environments Miao Liu Christopher Amato Emily P Anesta John Daniel Griffith Jonathan P How 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Volodymyr Mnih Adri Puigdomnech Badia Mehdi Mirza Alex Graves Timothy P Lillicrap Tim Harley David Silver Koray Kavukcuoglu arXiv:1602.01783 arXiv: 1602.01783 Asynchronous Methods for Deep Reinforcement Learning February 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Variational inference for policy search in changing situations Gerhard Neumann International Conference on Machine Learning, ICML 2011 Bellevue, Washington, USA June 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Peng Peng Quan Yuan Ying Wen Yaodong Yang Zhenkun Tang Haitao Long Jun Wang arXiv:1703.10069 arXiv: 1703.10069 Multiagent Bidirectionally-Coordinated Nets for Learning to Play StarCraft Combat Games March 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Rajesh Ranganath Dustin Tran David M Blei arXiv:1511.02386 arXiv: 1511.02386 Hierarchical Variational Models November 2015 cs, stat",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "High-Dimensional Continuous Control Using Generalized Advantage Estimation John Schulman Philipp Moritz Sergey Levine Michael Jordan Pieter Abbeel arXiv:1506.02438 arXiv: 1506.02438 June 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Yoav Shoham Kevin Leyton-Brown Multiagent Systems: Algorithmic, Game-Theoretic, and Logical Foundations New York, NY, USA Cambridge University Press 2008 ISBN 9780521899437",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Sainbayar Sukhbaatar Arthur Szlam Rob Fergus arXiv:1605.07736 arXiv: 1605.07736 Learning Multiagent Communication with Backpropagation May 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Multi-Agent Reinforcement Learning: Independent vs. Cooperative Agents Ming Tan Proceedings of the Tenth International Conference on Machine Learning the Tenth International Conference on Machine Learning Morgan Kaufmann 1993",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Episodic Exploration for Deep Deterministic Policies: An Application to StarCraft Micromanagement Tasks Nicolas Usunier Gabriel Synnaeve Zeming Lin Soumith Chintala arXiv:1609.02993 arXiv: 1609.02993 September 2016",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper proposes an approach to improve exploration in multiagent reinforcement learning by allowing the policies of the individual agents to be conditioned on an external coordination signal \\lambda.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "In order to find such parametrized policies, the approach combines deep RL with a variational inference approach (ELBO optimization).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The paper presents an empirical evaluation, which seems encouraging, but that is also somewhat difficult to interpret given the lack of comparison to other state-of-the-art methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "Overall, the paper seems interesting, but (in addition to the not completely convincing empirical evaluation), it has two main weaknesses: lack of clarity and grounding in related literature.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "=Issues with clarity=\n\n-\"This problem has two equivalent solutions\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "This is not so clear; depending on the movement of the preys it might well be that the optimal solution will switch to the other prey in certain cases?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "-It is not clear what is really meant with the term \"structured exploration\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "It just seems to mean 'improved'?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "-It is not clear that the improvements are due to exploration; my feeling is that is is due to improved statistical strength on a more abstract state feature (which is learned), not unlike:\nGeramifard, Alborz, et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "\"Online discovery of feature dependencies.\" Proceedings of the 28th International Conference on Machine Learning (ICML-11).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "However, there is no clear indication that there is an improved exploration policy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "-The problem setting is not quite clear:\nThe paper first introduces \"multi-agent RL\", which seems to correspond to a \"stochastic game\" (also \"Markov game\"), but then moves on to restrict to the \"fully cooperative setting\" (which would make it a \"Multiagent MDP\", Boutilier '96).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "It subsequently says it deals only with deterministic problems (which would reduce the problem further to a learning version of a multiagent classical planning problem), but in the experiments do consider stochastically moving preys.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "-The paper says the problem is fully observable, but fails to make explicit if this is *individually* fully observable, or jointly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "I am assuming the former, but is it not clear how the agents observe this full state in the experimental evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "This is actually a crucial confusion, as it completely changes the interpretation of what the approach does: in the individually observable case, the approach is adding a redundant source of information which is more abstract and thus seems to facilitate faster learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "In the latter case, where agents would have individual observations, it is actually providing the agents with more information.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "As such, I would really encourage the authors to better define the task they are considering.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "E.g., by building on the taxonomies of problems that researchers have developed in the community focusing on decentralized POMDPs, such as:\nGoldman, Claudia V., and Shlomo Zilberstein.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "\"Decentralized control of cooperative systems: Categorization and complexity analysis.\" (2004).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "-\"Compared to the single-agent RL setting, multi-agent RL poses unique difficulties.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "A central issue\nis the exploration-exploitation trade-off\"\nThat now in particular happens to be a central issue in single agent RL too.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "-\"Finding the true posteriors P (\u03bb t |s t ) \u221d P (s t |\u03bb t )P (\u03bb t ) is intractable in general\"\nThe paper did not explain how this inference task is required to solve the RL problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "-In general, I found the technical description impossible to follow, even after carefully looking at the appending.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "For instance, (also) there the term P (\u03bb |s ) is suddenly introduced without explaining what the term exactly is?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "Why is the term P(a|\u03bb) not popping up here?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_26",
+                    "text": "That also needs to be optimized, right?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_27",
+                    "text": "I suppose \\phi is the parameter vector of the variational approximation, but it is never really stated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_28",
+                    "text": "The various shorthand notations introduced for clarity do not help at all, but only make the formulas very cryptic.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_29",
+                    "text": "-The main text is not readable since definitions, e.g., L(Q_r,\\tehta,\\phi), that are in the appendix are now missing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_30",
+                    "text": "-It is not clear to me how the second term of (10) is now estimated?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_31",
+                    "text": "-\"Shared (shared actor-critic): agents share a deterministic hidden layer,\"\nWhat kind of layer is this exactly?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_32",
+                    "text": "How does it relate to \\lambda ?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_33",
+                    "text": "-\"The key difference is that this model does not sample from the shared hidden layer\"\nWhy would sampling help?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_34",
+                    "text": "Given that we are dealing with a fully observable multiagent MDP, there is no inherent need to randomize at all?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_35",
+                    "text": "(there should be a optimal deterministic joint policy?)\n\n-\"There is shared information between the agents\"\nWhat information is referred to exactly?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_36",
+                    "text": "Also: It is not quite clear if for these domains cloned would be better than completely independent learners (without shared weights)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_37",
+                    "text": "-I can't seem to find anywhere what is the actual shape (or type?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_38",
+                    "text": "I am assuming a vector of reals) of the used \\lambda.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_39",
+                    "text": "-in figure 5, rhs, what is being shown exactly?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_40",
+                    "text": "What do the colors mean?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_41",
+                    "text": "Why does there seem to be a \\lambda *per* agent now?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_42",
+                    "text": "=Related work=\n\nI think the paper could/should be hugely improved in this respect.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_43",
+                    "text": "The idea of casting MARL as inference has also been considered by:\n\nLearning for Decentralized Control of Multiagent Systems in Large, Partially-Observable Stochastic Environments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_44",
+                    "text": "M Liu, C Amato, EP Anesta, JD Griffith, JP How - AAAI, 2016\n\nStick-breaking policy learning in Dec-POMDPs\nM Liu, C Amato, X Liao, L Carin, JP How\nInternational Joint Conference on Artificial Intelligence (IJCAI) 2015\n\nWu, F.; Zilberstein, S.; and Jennings, N.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_45",
+                    "text": "Monte-carlo\nexpectation maximization for decentralized POMDPs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_46",
+                    "text": "of the 23rd Int\u2019l Joint Conf.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_47",
+                    "text": "on Artificial Intelligence (IJCAI-\n13).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_48",
+                    "text": "I do not think that these explicitly make use of a mechanism to coordinate the policies, since they address to true Dec-POMDP setting where each agent only gets its own observations, but in the Dec-POMDP literature, there also is the notion of 'correlation device', which is an additional controller (say corresponding to a dummy agent), which of which the states can be observed by other agents and used to condition their actions on:\n\nBernstein DS, Hansen EA, Zilberstein S.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_49",
+                    "text": "Bounded policy iteration for decentralized POMDPs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_50",
+                    "text": "InProceedings of the nineteenth international joint conference on artificial intelligence (IJCAI) 2005 Jun 6 (pp.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_51",
+                    "text": "(and clearly this could be directly included in the aforementioned learning approaches).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_52",
+                    "text": "This notion of a correlation device also highlights to potential relation to methods to learn/compute correlated equilibria.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_53",
+                    "text": "E.g.,:\n\nGreenwald A, Hall K, Serrano R.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_54",
+                    "text": "Correlated Q-learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_55",
+                    "text": "In ICML 2003 Aug 21 (Vol.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_56",
+                    "text": "A different connection between MARL and inference can be found in:\n\nZhang, Xinhua and Aberdeen, Douglas and Vishwanathan, S.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_57",
+                    "text": "N., \"Conditional Random Fields for Multi-agent Reinforcement Learning\", in (New York, NY, USA: ACM, 2007), pp.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_58",
+                    "text": "1143--1150.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_59",
+                    "text": "The idea of doing something hierarchical of course makes sense, but also here there are a number of related papers:\n\n-putting \"hierarchical multiagent\" in google scholar finds works by Ghavamzadeh et al., Saira & Mahadevan, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_60",
+                    "text": "-Victor Lesser has pursued coordination for better exploration with a number of students.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_61",
+                    "text": "I suppose that Guestrin et al.'s classical paper:\nGuestrin, Carlos, Michail Lagoudakis, and Ronald Parr.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_62",
+                    "text": "\"Coordinated reinforcement learning.\" ICML.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_63",
+                    "text": "would deserve a citation, and the MARL field is moving ahead fast, an explanation of the differences with COMA:\nCounterfactual Multi-Agent Policy Gradients\nJ Foerster, G Farquhar, T Afouras, N Nardelli, S Whiteson\nAAAI 2018\nis probably also warranted.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.8258,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The paper proposes a method to coordinate agent behaviour  by using policies that have a shared latent structure.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The authors derive a variational policy optimisation method to optimise the coordinated policies.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The approach is investigated empirically on 2 predator prey type games.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "The method presented in the paper seems quite novel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "The authors present a derivation of their variational, hierarchical  update.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "Not all steps in this derivation are equally well explained, especially the introduction of the variational posterior could be more detailed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "The appendix also offers very little extra information compared to the main text, most paragraphs concerning the derivations are identical.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "The comparison to existing approaches using variational inference is quite brief.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "It would be nice to have a more detailed explanation of the novel steps in this approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "It also seems that by assuming a shared model, shared global state and a fully cooperative problem, the authors remove many of the complexities of a multi-agent system.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "This also brings the derivations closer to the single agent case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "A related potential criticism is the feasibility of using this approach in a multi-agent system.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "The authors are essentially creating a (partially) centralised learner.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "The cooperative rewards and shared structure assumptions structures mentioned above seem limiting in a multi-agent system.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "Even giving each agent local state observations is known to potentially create coordination problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "The predator prey games where agents with agents physically distributed over the environment are probably not the best motivational examples.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "Other remarks: \n\nEmpirical result show a clear advantage for this method over the baselines.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "The evaluation domains are relatively simple, but it was nice to see that the authors also make an attempt to investigate the qualitative behaviour of their method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "The overview of related work was relatively brief and focused mostly on recent deep MARL approaches.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "There is a very large body on coordination in multi-agent RL.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "It would be nice to situate the research somewhat better within this field (or at least refer to an overview such as Busoniu et al, 2010).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "It seems like a completely factorised approach (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_22",
+                    "text": "independent agents) would make a nice baseline for the experiments, in addition to the shared architecture approaches.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.0605,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper suggests an interesting algorithmic innovation, consisting of hierarchical latent variables for coordinated exploration in multi-agent settings.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Main concern: This work heavily relies on the multi-agent aspect for novelty : \n\"Houthooft et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "(2016) learned exploration policies via information gain using variational methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "However, these only consider 1 agent\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "However, in the current form of the paper this is a questionable claim.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "As the problems investigated combine fully observable states, purely cooperative payouts and global latent variables, they reduce to single agent problems with a large action space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "Effectively the 'different agents' are nothing but a parameterized action space of a central controller.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "Using hierarchical latent variables for large action spaces is like a good idea, but placing the work into multi-agent seems like a red herring.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Given that this is a centralized controller, it would be really helpful to compare quantitatively to other approaches for structured exploration, eg [3] and [4].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Detailed comments:\n-\"we restrict to fully cooperative MDPs that are fully observable, deterministic and episodic.\" Since the rewards are also positive, a very relevant baseline (from a MARL point of view) is distributed Q-learning [1].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "-Figure 3: Showing total cumulative terminal rewards is difficult to interpret.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "I would be interested in seeing standard 'training curves' which show the average return per episode after a given amount of training episodes.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "Currently it is difficult to judge whether training has converged on not.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "-Related work is missing a lot of relevant research.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Apart from references below, please see [2] for a relevant, if dated, overview.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "-\"Table 1: Total terminal reward (averaged over 5 best runs)\" - how does the mean and median compare across methods for all runs rather than just the top 5?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "References:\n[1] Lauer, M., Riedmiller, M.: An algorithm for distributed reinforcement learning in cooperative\nmulti-agent systems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "In: Proceedings 17th International Conference on Machine Learning\n(ICML-00), pp.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "Stanford University, US (2000)\n[2] L.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "Bus\u00b8oniu, R.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "Babuska, and B.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "De Schutter: Multi-Agent Reinforcement Learning: An Overview\n[3] Nicolas Usunier, Gabriel Synnaeve, Zeming Lin, Soumith Chintala: Episodic Exploration for Deep Deterministic Policies: An Application to StarCraft Micromanagement Tasks\n[4] Matthias Plappert, Rein Houthooft, Prafulla Dhariwal, Szymon Sidor, Richard Y.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "Chen, Xi Chen, Tamim Asfour, Pieter Abbeel, Marcin Andrychowicz: Parameter Space Noise for Exploration",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_8d357baf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09d44538"
+        },
+        {
+            "source": "sec_8d357baf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f32118d5"
+        },
+        {
+            "source": "sec_8d357baf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a6322590"
+        },
+        {
+            "source": "sec_8d357baf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2f2f6b1f"
+        },
+        {
+            "source": "b_2c7ede63",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_8d357baf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2c7ede63"
+        },
+        {
+            "source": "sec_8d357baf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fabe1e0d"
+        },
+        {
+            "source": "sec_8d357baf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0e818102"
+        },
+        {
+            "source": "b_df2c73af",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_29ee2af0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_df2c73af"
+        },
+        {
+            "source": "sec_29ee2af0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_80466c65"
+        },
+        {
+            "source": "sec_29ee2af0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_63790c9b"
+        },
+        {
+            "source": "sec_29ee2af0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3a4e75bf"
+        },
+        {
+            "source": "sec_29ee2af0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6ecaf96e"
+        },
+        {
+            "source": "sec_29ee2af0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4aa8195b"
+        },
+        {
+            "source": "sec_29ee2af0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6b3a35f1"
+        },
+        {
+            "source": "sec_29ee2af0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3f433292"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9cb9574d"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3738b808"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b51a10a3"
+        },
+        {
+            "source": "b_18ca81c6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18ca81c6"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1145a635"
+        },
+        {
+            "source": "b_729916c8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_729916c8"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4eb12c6e"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1dd5d32a"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0f9700c7"
+        },
+        {
+            "source": "b_ca598ca5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ca598ca5"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8e8d9b6b"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7daa9201"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_694f83e5"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36f85e83"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_061d30c8"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b960d41"
+        },
+        {
+            "source": "b_21fc83a5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_962947ea",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_21fc83a5"
+        },
+        {
+            "source": "b_c5f60e93",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "sec_bcb2c390",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c5f60e93"
+        },
+        {
+            "source": "sec_bcb2c390",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e8a340ea"
+        },
+        {
+            "source": "sec_bcb2c390",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_830c9178"
+        },
+        {
+            "source": "sec_bcb2c390",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fe4fe56c"
+        },
+        {
+            "source": "sec_bcb2c390",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_99e0bdce"
+        },
+        {
+            "source": "sec_bcb2c390",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6c8a29c0"
+        },
+        {
+            "source": "sec_bcb2c390",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_202a5f7a"
+        },
+        {
+            "source": "sec_bcb2c390",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_741db6d0"
+        },
+        {
+            "source": "b_db6f14ed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_db6f14ed"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f80b0c3d"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3f21cf98"
+        },
+        {
+            "source": "b_1ad083c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_1ad083c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1ad083c3"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bfc6fa9a"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ef328cc"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_35a38565"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ae8e21d5"
+        },
+        {
+            "source": "sec_0f3ae6d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6954a7bc"
+        },
+        {
+            "source": "sec_5c749ef7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a3e1591e"
+        },
+        {
+            "source": "sec_330d16b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8871a80f"
+        },
+        {
+            "source": "sec_330d16b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6f3d150b"
+        },
+        {
+            "source": "sec_330d16b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f50fdefb"
+        },
+        {
+            "source": "sec_330d16b1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_90af2a2f"
+        },
+        {
+            "source": "sec_fbc592df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ae74dd1b"
+        },
+        {
+            "source": "sec_fbc592df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2718008c"
+        },
+        {
+            "source": "sec_fbc592df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d33efe4"
+        },
+        {
+            "source": "b_0a40b352",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_0a40b352",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_0a40b352",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_0a40b352",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_8fb27277",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0a40b352"
+        },
+        {
+            "source": "b_cabf6fc0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_cabf6fc0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_8fb27277",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cabf6fc0"
+        },
+        {
+            "source": "b_dc56bf84",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_dc56bf84",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_dc56bf84",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_dc56bf84",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_dc56bf84",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_dc56bf84",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_8fb27277",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dc56bf84"
+        },
+        {
+            "source": "b_d0de7559",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_d0de7559",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_d0de7559",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_d0de7559",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_8fb27277",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d0de7559"
+        },
+        {
+            "source": "sec_8fb27277",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5b6cbedc"
+        },
+        {
+            "source": "b_9a367604",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9a367604"
+        },
+        {
+            "source": "b_81e0f3ff",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_81e0f3ff"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_42e957c4"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ffa8745"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_45d68706"
+        },
+        {
+            "source": "b_122946a0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_122946a0"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eeecae4f"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28b0fab7"
+        },
+        {
+            "source": "sec_1845604d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3738a86c"
+        },
+        {
+            "source": "sec_62f47b0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ec2b28ca"
+        },
+        {
+            "source": "sec_62f47b0d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_999863ba"
+        }
+    ]
+}

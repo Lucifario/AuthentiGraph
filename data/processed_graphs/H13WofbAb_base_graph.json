@@ -1,0 +1,1105 @@
+{
+    "paper_metadata": {
+        "paper_id": "H13WofbAb",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_2b60b419",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_30cc3b9b",
+                        "type": "paragraph",
+                        "text": "Speed is crucial for training deep neural networks. Deep learning is now widely used in computer vision (Zeiler & Fergus, 2014; Simonyan & Zisserman, 2014; Szegedy et al., 2015; He et al., 2016) , speech (Hinton et al., 2012a; Xiong et al., 2017) , and natural language processing (Collobert et al., 2011; Wu et al., 2016) . It benefits mainly from the complex representations, which require large neural networks and large datasets. While larger network architectures and larger datasets improve accuracy, they also require longer training times, which borders many researchers and developers. Hence, distributed training is a potential solution to improve the rate of updates. Currently, mini-batch Stochastic Gradient Descent (SGD) and its variants are popular choices for training deep neural networks. For distributed training, it is common to use the Parameter Server (PS) architecture. It is composed of the server nodes and the worker nodes. The server nodes maintain a global copy of the parameters, receive the updates from the workers, apply the updates to the model, and broadcast the latest parameters to the workers. The worker nodes pull the latest parameters from the server nodes, perform the computation of the updates according to the local portion of the training data, and push the updates to the server nodes. The entire set of parameters is distributed to multiple server nodes. The full dataset and the corresponding workload is distributed to multiple worker nodes.",
+                        "extracted_citations": [
+                            "Citation_b23",
+                            "Citation_b19",
+                            "Citation_b20",
+                            "Citation_b6",
+                            "Citation_b22",
+                            "Citation_b2",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_35425119",
+                        "type": "paragraph",
+                        "text": "As shown in Figure 1 , the updating mechanism of PS repeats the following 4 steps: (1). Workers pull the parameters from servers \u2192 (2). Workers compute the gradients \u2192 (3). Workers push the gradients to servers \u2192 (4). Servers aggregate the gradients and update the parameters. The updates can be synchronous or asynchronous. Synchronous training requires the aggregation of the gradients from all the workers before the updates are applied to the parameters in each iteration, while asynchronous training applies the updates whenever they are received by the server nodes. Note the Figure 1 also illustrates the architecture of communication between server nodes and worker nodes, which is a fully connected bipartite graph.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_65b68109",
+                        "type": "paragraph",
+                        "text": "Typically, asynchronous SGD is more popular among practitioners because of faster and immediate updates. Without waiting for all the updates pushed by the workers, delays can be reduced. However, the asynchrony also brings more noise and higher variance to the updates (Liu et al., 2015) , which can result in slow convergence or convergence to poor solutions.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_168c34c4",
+                        "type": "paragraph",
+                        "text": "Synchronous SGD can have faster and more stable convergence, but it suffers from waiting for synchronization. Servers must wait for all the workers to push their updates. Similarly, workers must wait for all the servers to send back the latest version of the parameters. To make things worse, the waiting time for synchronization increases when the number of nodes increases. However, most of the previous research focuses on the issue of slow workers, while the servers can also be the stragglers. The communication between servers and workers in Figure 1 is mutual. The workers need servers' responses to continue the gradient computation. The servers can be slow due to networking issues such as unpredictable message delay, heterogeneous computational ability or memory capacity. A typical scenario which causes slow servers is that sometimes the server nodes and the worker nodes can be placed on the same machine, where the workers occupy most of the computational resources. Approaches like Stale Synchronous Parallel (SSP) (Dai et al., 2013; Ho et al., 2013; Li et al., 2014a; b) can be used to accelerate synchronous training. By upper-bounding the staleness between any two workers, the synchronization is weakened. As long as the bounded staleness criterion is satisfied, the servers can apply the updates whenever they are received by the server nodes. Waiting only happens when the bounded staleness criterion is not satisfied. Using backup workers (Pan et al., 2017) can also accelerate synchronous training.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b9",
+                            "Citation_b9",
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_692c8533",
+                        "type": "paragraph",
+                        "text": "In this paper, we propose a new PS framework, which deals with not only slow workers, but also slow servers by weakening the synchronization criterion. Any agent, regardless server or worker, can continue its own task even if the global pushing / pulling (i.e. steps 1 and 3 in Figure 1 ) in the current global iteration are not yet complete.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5403900e",
+                        "type": "paragraph",
+                        "text": "The main contributions of this paper are listed as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aa3fd26f",
+                        "type": "paragraph",
+                        "text": "\u2022 New PS framework. From the systems view, we implement a new PS framework that is tolerant to both slow workers and slow servers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b398c12b",
+                        "type": "paragraph",
+                        "text": "\u2022 Partial synchronization in distributed training of deep neural networks. The empirical results show that the proposed PS framework can accelerate the distributed training of deep neural networks with low validation errors.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_80a63483",
+                        "type": "paragraph",
+                        "text": "\u2022 Communication-efficiency. The servers and workers can proactively choose not to send some of the messages to reduce communication overhead.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_38d1e77e",
+                        "type": "paragraph",
+                        "text": "\u2022 Illustration of the slow server effect. We illustrate how the slow servers could influence the training speed, which has received scant attention in previous research.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_09a76ad7",
+                "title": "SYNCHRONOUS SGD",
+                "blocks": [
+                    {
+                        "block_id": "b_36684538",
+                        "type": "paragraph",
+                        "text": "The learning problem in this paper is minimizing the the loss function L(w) defined as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fe195c9d",
+                        "type": "paragraph",
+                        "text": "where X is the dataset, x \u2208 X is a data sample, l(x, w) is the loss value computed by the data sample x and the parameter (model) w.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_662ef8e4",
+                        "type": "paragraph",
+                        "text": "In this paper, we use synchronous SGD as the basic algorithm to minimize the loss function ( 1 ), which can be formally described by the following update procedure:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3918406d",
+                        "type": "paragraph",
+                        "text": "where t is the index of iteration, B is the minibatch, \u2207 l(w t ) is the aggregated gradient, \u03b7 t is the learning rate, U pdater(\u2022) is the updater function which is used to compute the update of the parameters. The updater function can be any variant of gradient descent, such as momentum SGD (Qian, 1999), Nesterov accelerated SGD (Nesterov, 1983) , Adam (Kingma & Ba, 2014) , AdaGrad (Duchi et al., 2011) , or RMSProp (Hinton et al., 2012b) .",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b10",
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_642fbccd",
+                "title": "DISTRIBUTED SYNCHRONOUS SGD",
+                "blocks": [
+                    {
+                        "block_id": "b_c3a91832",
+                        "type": "paragraph",
+                        "text": "The computation of the gradients in (2) can be distributed to multiple workers and then aggregated by the servers. To be more specific, (2) can be rewritten as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4b83a63c",
+                        "type": "paragraph",
+                        "text": "where j is the index of worker, k is the total number of workers, B j is the minibatch on the jth worker, and j |B j | = |B|. We further assume that the minibatches of different workers all have the same size",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_463b4e9e",
+                        "type": "paragraph",
+                        "text": "Note that although from the point of view of each individual worker, the size of minibatch is n, for synchronous SGD, the actual size of the minibatch is kn.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_343ac4fc",
+                        "type": "paragraph",
+                        "text": "In the distributed scenario, there could be multiple server nodes. Each server is responsible for storing and updating a portion (several blocks) of the entire set of parameters. Formally, the blockwise aggregation and updating is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e910bcdc",
+                        "type": "paragraph",
+                        "text": "where li (w t ), l i (x, w t ), and w t i are the ith blocks of l(w t ), l(x, w t ), and w t . For the basic synchronous SGD, the update (3) must wait until the aggregation (2) is finished. Thus, with larger |B|, more gradients must be computed, which requires more time for each iteration. Although the distributed training can accelerate the computation of gradients, the communication and synchronization are often a bottleneck in practice. In some cases, distributed training can even be slower than single-node SGD. To deal with such issue, following two techniques are utilized. Goyal et al. (2017) empirically shows that distributed synchronous SGD can be accelerated by tuning the learning rate. To be more specific, fixing the original learning rate, when the size of minibatch is multiplied by k, the learning rate is also multiplied by k. Bottou et al. (2017) also theoretically discuss such linear scaling rule.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b0"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fd5c12c7",
+                "title": "PARTIAL PUSHING",
+                "blocks": [
+                    {
+                        "block_id": "b_cd0f6836",
+                        "type": "paragraph",
+                        "text": "To deal with the issue of slow workers, Pan et al. (2017) introduced \"backup workers\" to the PS framework. In this paper, we call it \"partial pushing\" or \"partial aggregation\" because the server only waits for the first m \u2264 k workers' before updating. All other delayed workers are simply ignored.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_df1c0d91",
+                        "type": "paragraph",
+                        "text": "Integrated with blockwise aggregation on multiple servers, the partial pushing can be defined as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_850bfa62",
+                        "type": "paragraph",
+                        "text": "where A t is the set of the indexes of the first m responding workers in the tth iteration.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e430846b",
+                "title": "PROPOSED METHOD",
+                "blocks": [
+                    {
+                        "block_id": "b_f2c5e3fc",
+                        "type": "paragraph",
+                        "text": "As shown in Figure 1 , before computing the gradient, each worker must finish the pulling, which requires receiving parameters from all the servers. When there are stragglers in the server group, all the other servers and workers will have to wait for the stragglers before starting the next iteration.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_066972fb",
+                        "type": "paragraph",
+                        "text": "Algorithm 1 Partially Synchronous Parallelism SGD (PSP-SGD)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eb50fed8",
+                        "type": "paragraph",
+                        "text": "Server i = 1, 2, . . .:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0dbff294",
+                        "type": "paragraph",
+                        "text": "1: Initialize w 0 i , set t \u2190 0 2: for t = 0, 1, 2, . . . do",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_628d692f",
+                "title": "3:",
+                "blocks": [
+                    {
+                        "block_id": "b_650d897e",
+                        "type": "paragraph",
+                        "text": "Broadcast parameters with timestamp w t i , t to all the workers 4:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ca3b1ca4",
+                        "type": "paragraph",
+                        "text": "Receive gradient block with timestamp g i , t",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_36075b4f",
+                        "type": "paragraph",
+                        "text": "until Timeout \u03c4 1 after c gradients have been received or all workers have responded 13: until Timeout \u03c4 2 after b% blocks have been received or all servers have responded 16:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ac46fcf0",
+                        "type": "paragraph",
+                        "text": "Compute the gradient g with w t",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_38218023",
+                        "type": "paragraph",
+                        "text": "Push each block with timestamp g j , t to its corresponding server 18:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_59502811",
+                        "type": "paragraph",
+                        "text": "t \u2190 t + 1 19: end for To deal with the issue of slow servers, we introduce partial pulling: in each iteration, a worker only waits for the first b blocks rather than all the blocks of the parameters to arrive before computing the gradients. Similar to partial pushing, partial pulling also weakens the synchronization, which helps alleviate straggler effects. This is integrated with the partial pulling and learning rate tuning techniques introduced in Section 2. Furthermore, to make the algorithm more practical, we add a timeout mechanism to both partial pushing and partial pulling. Combining all of these ideas results in a new algorithm which we call Partially Synchronous Parallelism SGD (PSP-SGD). The details are shown in Algorithm 1, where c is the minimum number of aggregated pushes, b is the minimum number of successful pulls, w i is the ith block of the parameter w, g i is the ith block of the gradient, t is the timestamp, d is the number of aggregated gradients, \u03c4 1 is the timeout threshold of partial pushing, and \u03c4 2 is the timeout threshold of partial pulling.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e74b54c9",
+                        "type": "paragraph",
+                        "text": "We summarize the techniques we use to accelerate synchronous SGD here:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_77dbab0a",
+                        "type": "paragraph",
+                        "text": "\u2022 Linear scaling rule. In the server part of Algorithm 1, Line 13 uses the linear scaling rule introduced in Section 2.2 to tune the learning rate according to the number of aggregated gradients d.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9d98144e",
+                        "type": "paragraph",
+                        "text": "\u2022 Partial pushing. In the server part of Algorithm 1, Line 7-12 uses the partial pushing introduced in Section 2.3. For each block of parameters, for the workers, at least c gradients are guaranteed to be aggregated. After the minimum synchronization criterion are satisfied, the servers will wait up to \u03c4 1 of time before continuing to the next step. \u2022 Partial pulling. In the worker part of Algorithm 1, Line 10-15 uses the partial pulling. For the workers, at least b% of the blocks are guaranteed to be pulled. After the minimum synchronization criterion are satisfied, the agents will wait up to \u03c4 1 or \u03c4 2 of time before continuing to the next step.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5025e3dd",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_11a65df2",
+                        "type": "paragraph",
+                        "text": "Figure 2 : The PDF of message delay.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d63b2bad",
+                "title": "CLUSTER CONFIGURATION",
+                "blocks": [
+                    {
+                        "block_id": "b_4a7b0ed9",
+                        "type": "paragraph",
+                        "text": "In the distributed experiments, we use a cluster of 32 machines. Each machine has 4 \u00d7 68-core Intel Xeon Phi CPUs and 192GB RAM. The machines are connected with 1 Gbps Ethernet. All of the machines are used for placing both the server nodes and the worker nodes. We evenly distribute the servers and the workers to the other 32 machines. & Hinton, 2009) dataset. Our implementation is based on MXNET (Chen et al., 2015) . We run 90 epochs for each experiment. The learning rate is set as 0.02 \u00d7 dn 128 , where d is the number of responding workers, n is the minibatch size of a single worker. The learning rate will decrease by a With appropriate hyperparameters, using partial pushing and partial pulling, the algorithms can still have low validation error and converge faster at the same time factor of 0.1 at the 30th and 60th epochs. We also use a weight decay of 0.0001 and momentum of 0.9. We use top-1 validation error to measure the performance.",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b314ac9d",
+                        "type": "paragraph",
+                        "text": "We use the naive synchronous SGD and partial pushing as the baselines. For each experiment, we launch 32 servers and 32 workers. The size of minibatch for each worker is n = 160. Thus, the actual size of minibatch for each iteration is 160 \u00d7 32 = 5120. The naive synchronous SGD is denoted as Sync. For synchronous SGD with partial pushing, the threshold c is set as 28, which means the servers only need to wait 28 instead of 32 workers to respond. This setting is denoted as Sync+push:28. For the proposed method, which is synchronous SGD with partial pushing and partial pulling, we test 2 different settings: (i). the servers wait for the first c = 28 pushing and the workers wait for the first b = 90% pulling, which is denoted as Sync+push:28+pull:0.9; (ii). the servers wait for the first c = 20 pushing and the workers wait for the first b = 75% pulling, which is denoted as Sync+push:20+pull:0.75. We run each experiment 3 times and take the average. Note that in these experiments, we do not use the timeout mechanism, which means we set \u03c4 1 = 0 and \u03c4 2 = 0 in Algorithm 1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9a347ab6",
+                        "type": "paragraph",
+                        "text": "Besides the normal scenario, we also test the proposed algorithm with simulated message delay to show the efficiency. The general idea of the simulation is that the delays are rare but large. We randomly pick 0.16% of the responses of pulling to have extra delays of 4 seconds, which makes some servers stragglers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5d0c8ca4",
+                        "type": "paragraph",
+                        "text": "In Figure 2 , we plot the probability density function (PDF) of the the delays of pulling in the normal scenario and the scenario with simulated extra delays. The delay is measured by the duration between the times when the pulling request is sent and the time when the response arrives.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_005197a2",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_235e5ec8",
+                        "type": "paragraph",
+                        "text": "The experiments show the efficiency of the proposed algorithm. The partial pulling can deal with slow servers, accelerate the training , while leaving the validation accuracy unharmed. It is shown that the synchronous SGD can be be very slow when a very small portion of messages are delayed. In our simulation, the naive synchronous SGD is prolonged by nearly 30%. Actually, with appropriate value of c and b, the training time can be almost the same as the case with is no delayed messages at all, while also leaving the validation accuracy unharmed. However, users should be careful when using small c and b, which will incur additional noise to the updates and may result in poor solutions. Note that we do not use the timeout mechanism in the experiments to make the illustrations clearer. Using timeout, with larger \u03c4 1 and \u03c4 2 , the performance will be closer to naive synchronous SGD.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_999d5072",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_ec8c7f38",
+                        "type": "paragraph",
+                        "text": "Stale Synchronous Parallelism The PS frameworks with SSP such as Parameter Server Li et al. (2014b; a) and Petuum Dai et al. (2013) ; Ho et al. (2013) focus on solving the issues of slow workers. Such idea is orthogonal to this paper. As SSP can be view as another way to weaken the synchronization for the pushing, it can be potentially combined into our algorithm by replacing the partial pushing with SSP. The efficiency of such combination requires future research.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6cabc66c",
+                        "type": "paragraph",
+                        "text": "Asynchronous SGD Asynchronous SGD is an widely-used alternative to synchronous SGD, whose synchronization criterion is fully relaxed. There are many variants of asynchronous SGD, such as Nesterov accelerated asynchronous SGD with variance reduction (Meng et al., 2016) , and asynchronous SGD with delay compensation (Zheng et al., 2017) . Although SSP and synchronous SGD have better theoretical results compared to asynchronous SGD, it is still unclear that which one is better in practice.",
+                        "extracted_citations": [
+                            "Citation_b15",
+                            "Citation_b24"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Optimization methods for large-scale machine learning L\u00e9on Bottou Frank E Curtis Jorge Nocedal stat 1050 2 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Mxnet: A flexible and efficient machine learning library for heterogeneous distributed systems Tianqi Chen Mu Li Yutian Li Min Lin Naiyan Wang Minjie Wang Tianjun Xiao Bing Xu Chiyuan Zhang Zheng Zhang arXiv:1512.01274 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Natural language processing (almost) from scratch Ronan Collobert Jason Weston L\u00e9on Bottou Michael Karlen Koray Kavukcuoglu Pavel Kuksa Journal of Machine Learning Research 12 Aug. 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Petuum: A framework for iterative-convergent distributed ml Wei Dai Jinliang Wei Jin Kyu Kim Seunghak Lee Junming Yin Qirong Ho Eric P Xing 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Adaptive subgradient methods for online learning and stochastic optimization John Duchi Elad Hazan Yoram Singer Journal of Machine Learning Research 12 Jul. 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Priya Goyal Piotr Doll\u00e1r Ross Girshick Pieter Noordhuis Lukasz Wesolowski Aapo Kyrola Andrew Tulloch arXiv:1706.02677 Yangqing Jia, and Kaiming He. Accurate, large minibatch sgd: Training imagenet in 1 hour 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Deep residual learning for image recognition Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun Proceedings of the IEEE conference on computer vision and pattern recognition the IEEE conference on computer vision and pattern recognition 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Deep neural networks for acoustic modeling in speech recognition: The shared views of four research groups Geoffrey Hinton Li Deng Dong Yu George E Dahl Abdel-Rahman Mohamed Navdeep Jaitly Andrew Senior Vincent Vanhoucke Patrick Nguyen Tara N Sainath IEEE Signal Processing Magazine 29 6 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Lecture 6a overview of mini-batch gradient descent Geoffrey Hinton Nitish Srivastava Kevin Swersky Coursera Lecture slides 2012 Online",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "More effective distributed ml via a stale synchronous parallel parameter server Qirong Ho James Cipar Henggang Cui Seunghak Lee Jin Kyu Kim Phillip B Gibbons Garth A Gibson Greg Ganger Eric P Xing Advances in neural information processing systems 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Diederik Kingma Jimmy Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Learning multiple layers of features from tiny images Alex Krizhevsky Geoffrey Hinton 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Scaling distributed machine learning with the parameter server Mu Li Jun Woo David G Andersen Alexander J Park Amr Smola Vanja Ahmed James Josifovski Eugene J Long Bor-Yiing Shekita Su OSDI 2014 1 3",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Communication efficient distributed machine learning with the parameter server Mu Li David G Andersen Alexander J Smola Kai Yu Advances in Neural Information Processing Systems 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "An asynchronous parallel stochastic coordinate descent algorithm Ji Liu Stephen J Wright Christopher R\u00e9 Victor Bittorf Srikrishna Sridhar The Journal of Machine Learning Research 16 1 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Asynchronous accelerated stochastic gradient descent Qi Meng Wei Chen Jingcheng Yu Taifeng Wang Zhiming Ma Tie-Yan Liu IJCAI 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "A method for unconstrained convex minimization problem with the rate of convergence o (1/k\u02c62) Yurii Nesterov Doklady AN USSR 1983 269",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Xinghao Pan Jianmin Chen arXiv:1702.05800 Rajat Monga, Samy Bengio, and Rafal Jozefowicz. Revisiting distributed synchronous sgd 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "On the momentum term in gradient descent learning algorithms Ning Qian Neural networks 12 1 1999",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Very deep convolutional networks for large-scale image recognition Karen Simonyan Andrew Zisserman arXiv:1409.1556 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Going deeper with convolutions Christian Szegedy Wei Liu Yangqing Jia Pierre Sermanet Scott Reed Dragomir Anguelov Dumitru Erhan Vincent Vanhoucke Andrew Rabinovich Proceedings of the IEEE conference on computer vision and pattern recognition the IEEE conference on computer vision and pattern recognition 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Google's neural machine translation system: Bridging the gap between human and machine translation Yonghui Wu Mike Schuster Zhifeng Chen V Quoc Mohammad Le Wolfgang Norouzi Maxim Macherey Yuan Krikun Qin Cao Klaus Gao Macherey arXiv:1609.08144 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "The microsoft 2016 conversational speech recognition system Wayne Xiong Jasha Droppo Xuedong Huang Frank Seide Mike Seltzer Andreas Stolcke Dong Yu Geoffrey Zweig Acoustics, Speech and Signal Processing IEEE 2017 2017 IEEE International Conference on",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Visualizing and understanding convolutional networks D Matthew Rob Zeiler Fergus European conference on computer vision Springer 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Asynchronous stochastic gradient descent with delay compensation Shuxin Zheng Qi Meng Taifeng Wang Wei Chen Nenghai Yu Zhi-Ming Ma Tie-Yan Liu International Conference on Machine Learning 2017",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.6957,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper introduces a parameter server architecture to improve distributed training of CNNs in the presence of stragglers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Specifically, the paper proposes partial pulling where a worker only waits for first b blocks rather than all the blocks of the parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "This technique is combined with existing methods such as partial pushing (Pan et.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "2017) for a partial synchronous SGD method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "The method is evaluated with Resnet -50 using synthetic delays.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Comments for the author:\n\nThe paper is well-written and easy to follow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "The problem of synchronization costs being addressed is important but it is unclear how much of this is arising due to large blocks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "1) The partial pushing method (Pan et.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "2017, section 3.1) shows a clear evidence for the problem using a real workload with a large number of workers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Unfortunately, in your Figure 2, this is not as obvious and not real since it is using simulated delays.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "More specifically, it is not clear how the workers behave in a real environment and whether you get a clear benefit from using a partial number of blocks as opposed to sending all of them.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "2) Did you modify your code to support block-wise sending of gradients (some description of how the framework was modified will be helpful)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "The idea is to send partial parameter blocks and when 'b' blocks are received, compute the gradients.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "I feel that, with such a design, you may actually end up hurting the performance by sending a large number of small packets in the no failure case.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "For real, large data centers, this may cause a packet storm and subsequent throughput collapse (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "the incast problem).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "You need to show the evidence that you do not hurt the failure-free case for a large number of workers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "3) The evaluation is on fairly small workloads (CIFAR-10).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "Again, evaluating over Imagenet and demonstrating a clear speedup over existing sync methods will be helpful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "Furthermore, a clear description of your \u201cpull\u201d configuration (such as in Figure 1) i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "how many actual bytes or blocks are sent and what is the threshold will be helpful (beyond a vague 90%).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "4) Another concern with partial synchronization methods that I have is that how do you pick these configurations (pull 0.75 etc).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "These appear to be dataset specific and finding the optimal configuration here requires significant experimentation that takes significantly more time than just running the baseline.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "Overall, I feel there is not enough evidence for the problem specifically generating large blocks of gradients and this needs to be clearly shown.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "To propose a solution for stragglers, evaluation should be done in a datacenter environment with the presence of stragglers (and not small workloads with synthetic delays).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "Furthermore, the proposed technique despite the simplicity appears as a rather incremental contribution.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.6016,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper considers distributed synchronous SGD, and proposes to use \"partial pulling\" to alleviate the problem with slow servers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The motivation is that the server may be a straggler.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The authors suggested one possibility, namely that the server and some workers are located on the same machine and the workers take most of the computational resource.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "However, if this is the case, a simple solution would be to move the server to a different node.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "A more convincing argument for a slow server should be provided.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "Though the authors claimed that they used 3 techniques to accelerate synchronous SGD, only partial pulling is proposed by them (the other 2 are borrowed straightforwardly from existing papers).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "The mechanism of partial pulling is very simple (just let SGD proceed after pulling a partial parameter block instead of the whole block).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "As mentioned by the authors in section 1, any relaxation in synchrony brings more noise and higher variance to the updates, and also may cause slow convergence or convergence to a poor solution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "However, the authors provided no theoretical study on any of these aspects.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "Experimental results are not convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Only one relatively small dataset (cifar10) is used Moreover, the slow server problem is only simulated by artificially adding delays to the server.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.6211,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "Paper proposes a weak synchronization approach to synchronous SGD with the goal of improving even with slow parameter servers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "This is an improvement on earlier proposals (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "Revisiting Synchronous SGD) that allow for slow workers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "Empirical results on ResNet50 on CIFAR show promising results for simulations with slow workers and servers, with the proposed approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Issues with the paper:\n- Since the paper is focused on empirical results, having results only for ResNet50 on CIFAR is very limiting\n- Empirical results are based on simulations and not real workloads.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "The choice of simulation constants (% delayed, and delay time) seems somewhat arbitrary as well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "- For the simulated results, the comparisons seem unfair since the validation error is different.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "It will be useful to also provide time to a certain accuracy that all of them get to e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "the validation error of 0.1609 (reached by the 3 important cases).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Overall, the paper proposes an interesting improvement to this area of synchronous training, however it is unable to validate the impact of this proposal.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_30cc3b9b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_30cc3b9b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_30cc3b9b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_30cc3b9b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_30cc3b9b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_30cc3b9b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_30cc3b9b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_30cc3b9b"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_35425119"
+        },
+        {
+            "source": "b_65b68109",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_65b68109"
+        },
+        {
+            "source": "b_168c34c4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_168c34c4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_168c34c4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_168c34c4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_168c34c4"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_692c8533"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5403900e"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aa3fd26f"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b398c12b"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_80a63483"
+        },
+        {
+            "source": "sec_2b60b419",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_38d1e77e"
+        },
+        {
+            "source": "sec_09a76ad7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36684538"
+        },
+        {
+            "source": "sec_09a76ad7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fe195c9d"
+        },
+        {
+            "source": "sec_09a76ad7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_662ef8e4"
+        },
+        {
+            "source": "b_3918406d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_3918406d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_3918406d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_09a76ad7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3918406d"
+        },
+        {
+            "source": "sec_642fbccd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c3a91832"
+        },
+        {
+            "source": "sec_642fbccd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4b83a63c"
+        },
+        {
+            "source": "sec_642fbccd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_463b4e9e"
+        },
+        {
+            "source": "sec_642fbccd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_343ac4fc"
+        },
+        {
+            "source": "b_e910bcdc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_e910bcdc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_642fbccd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e910bcdc"
+        },
+        {
+            "source": "b_cd0f6836",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_fd5c12c7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cd0f6836"
+        },
+        {
+            "source": "sec_fd5c12c7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_df1c0d91"
+        },
+        {
+            "source": "sec_fd5c12c7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_850bfa62"
+        },
+        {
+            "source": "sec_e430846b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f2c5e3fc"
+        },
+        {
+            "source": "sec_e430846b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_066972fb"
+        },
+        {
+            "source": "sec_e430846b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb50fed8"
+        },
+        {
+            "source": "sec_e430846b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0dbff294"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_650d897e"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ca3b1ca4"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36075b4f"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ac46fcf0"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_38218023"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_59502811"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e74b54c9"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_77dbab0a"
+        },
+        {
+            "source": "sec_628d692f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d98144e"
+        },
+        {
+            "source": "sec_5025e3dd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_11a65df2"
+        },
+        {
+            "source": "b_4a7b0ed9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_4a7b0ed9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_d63b2bad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4a7b0ed9"
+        },
+        {
+            "source": "sec_d63b2bad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b314ac9d"
+        },
+        {
+            "source": "sec_d63b2bad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9a347ab6"
+        },
+        {
+            "source": "sec_d63b2bad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5d0c8ca4"
+        },
+        {
+            "source": "sec_005197a2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_235e5ec8"
+        },
+        {
+            "source": "b_ec8c7f38",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_ec8c7f38",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_999d5072",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ec8c7f38"
+        },
+        {
+            "source": "b_6cabc66c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_6cabc66c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_999d5072",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6cabc66c"
+        }
+    ]
+}

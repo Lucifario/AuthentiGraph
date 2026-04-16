@@ -1,0 +1,1663 @@
+{
+    "paper_metadata": {
+        "paper_id": "HkfXMz-Ab",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Accepted",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_6e318f54",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_578518d2",
+                        "type": "paragraph",
+                        "text": "Neural networks have been successfully applied to many generative modeling tasks in the recent past (Oord et al., 2016; Ha & Eck, 2017; Vinyals et al., 2015) . However, the use of these models in generating highly structured text remains relatively understudied. In this paper, we present a method, combining neural and combinatorial techniques, for the condition generation of an important category of such text: the source code of programs in Java-like programming languages.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b12",
+                            "Citation_b33"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b70836f3",
+                        "type": "paragraph",
+                        "text": "The specific problem we consider is one of supervised learning. During training, we are given a set of programs, each program annotated with a label, which may contain information such as the set of API calls or the types used in the code. Our goal is to learn a function g such that for a test case of the form (X, Prog) (where Prog is a program and X is a label), g(X) is a compilable, type-safe program that is equivalent to Prog.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a8a2c409",
+                        "type": "paragraph",
+                        "text": "This problem has immediate applications in helping humans solve programming tasks (Hindle et al., 2012; Raychev et al., 2014) . In the usage scenario that we envision, a human programmer uses a label to specify a small amount of information about a program that they have in mind. Based on this information, our generator seeks to produce a program equivalent to the \"target\" program, thus performing a particularly powerful form of code completion.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b26"
+                        ]
+                    },
+                    {
+                        "block_id": "b_78b0ccb7",
+                        "type": "paragraph",
+                        "text": "Conditional program generation is a special case of program synthesis (Manna & Waldinger, 1971; Summers, 1977) , the classic problem of generating a program given a constraint on its behavior. This problem has received significant interest in recent years (Alur et al., 2013; Gulwani et al., 2017) . In particular, several neural approaches to program synthesis driven by input-output examples have emerged (Balog et al., 2017; Parisotto et al., 2016; Devlin et al., 2017) . Fundamentally, these approaches are tasked with associating a program's syntax with its semantics. As doing so in general is extremely hard, these methods choose to only generate programs in highly controlled domainspecific languages. For example, Balog et al. (2017) consider a functional language in which the only data types permitted are integers and integer arrays, control flow is linear, and there is a sum total of 15 library functions. Given a set of input-output examples, their method predicts a vector of binary attributes indicating the presence or absence of various tokens (library functions) in the target program, and uses this prediction to guide a combinatorial search for programs.",
+                        "extracted_citations": [
+                            "Citation_b32",
+                            "Citation_b3",
+                            "Citation_b11",
+                            "Citation_b4",
+                            "Citation_b23",
+                            "Citation_b6",
+                            "Citation_b4"
+                        ]
+                    },
+                    {
+                        "block_id": "b_67afb494",
+                        "type": "paragraph",
+                        "text": "In contrast, in conditional program generation, we are already given a set of tokens (for example library functions or types) that appear in a program or its metadata. Thus, we sidestep the problem of learning the semantics of the programming language from data. We ask: does this simpler setting permit the generation of programs from a much richer, Java-like language, with one has thousands of data types and API methods, rich control flow and exception handling, and a strong type system? While simpler than general program synthesis, this problem is still highly nontrivial. Perhaps the central issue is that to be acceptable to a compiler, a generated program must satisfy a rich set of structural and semantic constraints such as \"do not use undeclared variables as arguments to a procedure call\" or \"only use API calls and variables in a type-safe way\". Learning such constraints automatically from data is hard. Moreover, as this is also a supervised learning problem, the generated programs also have to follow the patterns in the data while satisfying these constraints.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8bea58b6",
+                        "type": "paragraph",
+                        "text": "We approach this problem with a combination of neural learning and type-guided combinatorial search (Feser et al., 2015) . Our central idea is to learn not over source code, but over tree-structured syntactic models, or sketches, of programs. A sketch abstracts out low-level names and operations from a program, but retains information about the program's control structure, the orders in which it invokes API methods, and the types of arguments and return values of these methods. We propose a particular kind of probabilistic encoder-decoder, called a Gaussian Encoder-Decoder or GED, to learn a distribution over sketches conditioned on labels. During synthesis, we sample sketches from this distribution, then flesh out these samples into type-safe programs using a combinatorial method for program synthesis. Doing so effectively is possible because our sketches are designed to contain rich information about control flow and types.",
+                        "extracted_citations": [
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_65e66b21",
+                        "type": "paragraph",
+                        "text": "We have implemented our approach in a system called BAYOU. 1 We evaluate BAYOU in the generation of API-manipulating Android methods, using a corpus of about 150,000 methods drawn from an online repository. Our experiments show that BAYOU can often generate complex method bodies, including methods implementing tasks not encountered during training, given a few tokens as input.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_086551da",
+                "title": "PROBLEM STATEMENT",
+                "blocks": [
+                    {
+                        "block_id": "b_4fa6fc22",
+                        "type": "paragraph",
+                        "text": "Now we define conditional program generation. Assume a universe P of programs and a universe X of labels. Also assume a set of training examples of the form {(X 1 , Prog 1 ), (X 2 , Prog 2 ), ...}, where each X i is a label and each Prog i is a program. These examples are sampled from an unknown distribution Q(X, Prog), where X and Prog range over labels and programs, respectively. 2 We assume an equivalence relation Eqv \u2286 P \u00d7 P over programs. If (Prog 1 , Prog 2 ) \u2208 Eqv , then Prog 1 and Prog 2 are functionally equivalent. The definition of functional equivalence differs across applications, but in general it asserts that two programs are \"just as good as\" one another.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3fc5c5e2",
+                        "type": "paragraph",
+                        "text": "The goal of conditional program generation is to use the training set to learn a function g : X \u2192 P such that the expected value E[I((g(X), Prog) \u2208 Eqv )] is maximized. Here, I is the indicator function, returning 1 if its boolean argument is true, and 0 otherwise. Informally, we are attempting to learn a function g such that if we sample (X, Prog) \u223c Q(X, P rog), g should be able to reconstitute a program that is functionally equivalent to Prog, using only the label X.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6c826ced",
+                "title": "INSTANTIATION",
+                "blocks": [
+                    {
+                        "block_id": "b_8a21044a",
+                        "type": "paragraph",
+                        "text": "In this paper, we consider a particular form of conditional program generation. We take the domain P to be the set of possible programs in a programming language called AML that captures the essence of API-heavy Java programs (see Appendix A for more details). AML includes complex control flow such as loops, if-then statements, and exceptions; access to Java API data types; and calls to Java API methods. AML is a strongly typed language, and by definition, P only includes programs that are type-safe. 3 To define labels, we assume three finite sets: a set Calls of possible API calls in AML, a set Types of possible object types, and a set Keys of keywords, defined as words, such as \"read\" and \"file\", that often appear in textual descriptions of what programs do. The space of possible labels is X = 2 Calls \u00d7 2 T ypes \u00d7 2 Keys (here 2 S is the power set of S).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b8d7b728",
+                        "type": "paragraph",
+                        "text": "Defining Eqv in practice is tricky. For example, a reasonable definition of Eqv is that (Prog 1 , Prog 2 ) \u2208 Eqv iff Prog 1 and Prog 2 produce the same outputs on all inputs. But given the richness of AML, the problem of determining whether two AML programs always produce the same output is undecidable. As such, in practice we can only measure success indirectly, by checking whether the programs use the same control structures, and whether they can produce the same API call sequences. We will discuss this issue more in Section 6.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_35bcc4e2",
+                "title": "EXAMPLE",
+                "blocks": [
+                    {
+                        "block_id": "b_b93a7fc8",
+                        "type": "paragraph",
+                        "text": "Consider the label X = (X Calls , X Types , X Keys ) where X Calls = {readLine} and X Types and X Keys are empty. Figure 1 (a) shows a program that our best learner stochastically returns given this input. As we see, this program indeed reads lines from a file, whose name is given by a special variable $String that the code takes as input. It also handles exceptions and closes the reader, even though these actions were not directly specified.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bfee4beb",
+                        "type": "paragraph",
+                        "text": "Although the program in Figure 1 -(a) matches the label well, failures do occur. Sometimes, the system generates a program as in Figure 1 -(b), which uses an InputStreamReader rather than a FileReader. It is possible to rule out this program by adding to the label. Suppose we amend X T ypes so that X T ypes = {FileReader}. BAYOU now tends to only generate programs that use FileReader. The variations then arise from different ways of handling exceptions and constructing FileReader objects (some programs use a String argument, while others use a File object). Figure 7 in the appendix shows two other top-five programs returned on this input.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_82771240",
+                "title": "TECHNICAL APPROACH",
+                "blocks": [
+                    {
+                        "block_id": "b_14a55b11",
+                        "type": "paragraph",
+                        "text": "Our approach is to learn g via maximum conditional likelihood estimation (CLE). That is, given a distribution family P (P rog|X, \u03b8) for a parameter set \u03b8, we choose \u03b8 * = arg max \u03b8 i log P (Prog i | X i , \u03b8). Then, g(X) = arg max Prog P (Prog|X, \u03b8 * ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_860cdda7",
+                        "type": "paragraph",
+                        "text": "The key innovation of our approach is that here, learning happens at a higher level of abstraction than (X i , Prog i ) pairs. In practice, Java-like programs contain many low-level details (for example, variable names and intermediate results) that can obscure patterns in code. Further, they contain complicated semantic rules (for example, for type safety) that are difficult to learn from data. In contrast, these are relatively easy for a combinatorial, syntax-guided program synthesizer (Alur et al., 2013) to deal with. However, synthesizers have a notoriously difficult time figuring out the correct \"shape\" of a program (such as the placement of loops and conditionals), which we hypothesize should be relatively easy for a statistical learner. Specifically, our approach learns over sketches: tree-structured data that capture key facets of program syntax. A sketch Y does not contain low-level variable names and operations, but carries information about broadly shared facets of programs such as the types and API calls. During generation, a program synthesizer is used to generate programs from sketches produced by the learner.",
+                        "extracted_citations": [
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_00b031eb",
+                        "type": "paragraph",
+                        "text": "Let the universe of all sketches be denoted by Y. The sketch for a given program is computed by applying an abstraction function \u03b1 : P \u2192 Y. We call a sketch Y satisfiable, and write sat(Y), if \u03b1 -1 (Y) = \u2205. The process of generating (type-safe) programs given a satisfiable sketch Y is probabilistic, and captured by a concretization distribution P (Prog | Y, sat(Y)). We require that for all programs Prog and sketches Y such that sat(Y), we have",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_366a4ed3",
+                        "type": "paragraph",
+                        "text": "Importantly, the concretization distribution is fixed and chosen heuristically. The alternative of learning this distribution from source code poses difficulties: a single sketch can correspond to many programs that only differ in superficial details, and deciding which differences between programs are superficial and which are not requires knowledge about program semantics. In contrast, our heuristic approach utilizes known semantic properties of programming languages like oursfor example, that local variable names do not matter, and that some algebraic expressions are semantically equivalent. This knowledge allows us to limit the set of programs that we generate. Let us define a random variable Y = \u03b1(Prog). We assume that the variables X, Y and Prog are related as in the Bayes net in Figure 2 . Specifically, given Y , Prog is conditionally independent of X. Further, let us assume a distribution family P (Y |X, \u03b8) parameterized on \u03b8.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_349c2422",
+                        "type": "paragraph",
+                        "text": "Our problem now simplifies to learning over sketches, i.e., finding",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0735596c",
+                "title": "INSTANTIATION",
+                "blocks": [
+                    {
+                        "block_id": "b_5a9e8dc1",
+                        "type": "paragraph",
+                        "text": "Figure 3 shows the full grammar for sketches in our implementation. Here, \u03c4 0 , \u03c4 1 , . . . range over a finite set of API data types that AML programs can use. A data type, akin to a Java class, is identified with a finite set of API method names (including constructors), and a ranges over these names. Note that sketches do not contain constants or variable names.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ce8e05cf",
+                        "type": "paragraph",
+                        "text": "A full definition of the abstraction function for AML appears in Appendix B. As an example, API calls in AML have the syntax \"call e.a(e 1 , . . . , e k )\", where a is an API method, the expression e evaluates to the object on which the method is called, and the expressions e 1 , . . . , e k evaluate to the arguments of the method call. We abstract this call into an abstract method call \"call \u03c4.a(\u03c4 1 , . . . , \u03c4 k )\", where \u03c4 is the type of e and \u03c4 i is the type of e i . The keywords skip, while, if-then-else, and trycatch preserve information about control flow and exception handling. Boolean conditions Cseq are replaced by abstract expressions: lists whose elements abstract the API calls in Cseq.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a54f4b05",
+                "title": "LEARNING",
+                "blocks": [
+                    {
+                        "block_id": "b_3ac6d9d0",
+                        "type": "paragraph",
+                        "text": "Now we describe our learning approach. Equation 1 leaves us with the problem of computing arg max \u03b8 i log P (Y i |X i , \u03b8), when each X i is a label and Y i is a sketch. Our answer is to utilize an encoder-decoder and introduce a real vector-valued latent variable Z to stochastically link labels and sketches: P (Y|X, \u03b8) = Z\u2208R m P (Z|X, \u03b8)P (Y|Z, \u03b8)dZ.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_27ba40bf",
+                        "type": "paragraph",
+                        "text": "P (Y |Z, \u03b8) is realized as a probabilistic decoder mapping a vector-valued variable to a distribution over trees. We describe this decoder in Appendix C. As for P (Z|X, \u03b8), this distribution can, in principle, be picked in any way we like. In practice, because both P (Y |Z, \u03b8) and P (Z|X, \u03b8) have neural components with numerous parameters, we wish this distribution to regularize the learner. To provide this regularization, we assume a Normal ( 0, I) prior on Z.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0aa4897e",
+                        "type": "paragraph",
+                        "text": "Recall that our labels are of the form X = (X Calls , X T ypes , X Keys ), where X Calls , X Types , and X Keys are sets. Assuming that the j-th elements X Calls,j , X Types,j , and X Keys,j of these sets are generated independently, and assuming a function f for encoding these elements, let:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fb23843e",
+                        "type": "paragraph",
+                        "text": "That is, the encoded value of each X Types,j , X Calls,j or X Keys,j is sampled from a high-dimensional Normal distribution centered at Z. If f is 1-1 and onto with the set R m then from Normal-Normal conjugacy, we have:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5c92b8fc",
+                        "type": "paragraph",
+                        "text": "Here, n Types is the number of types supplied, and n Calls and n Keys are defined similarly.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_490c32b3",
+                        "type": "paragraph",
+                        "text": "Note that this particular P (Z|X, \u03b8) only follows directly from the Normal ( 0, I) prior on Z and Normal likelihood P (X|Z, \u03b8) if the encoding function f is 1-1 and onto. However, even if f is not 1-1 and onto (as will be the case if f is implemented with a standard feed-forward neural network) we can still use this probabilistic encoder, and in practice we still tend to see the benefits of the regularizing prior on Z, with P (Z) distributed approximately according to a unit Normal. We call this type of encoder-decoder, with a single, Normally-distributed latent variable Z linking the input and output, a Gaussian encoder-decoder, or GED for short. Now that we have chosen P (X|Z, \u03b8) and P (Y |Z, \u03b8), we must choose \u03b8 to perform CLE. Note that:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_63046fed",
+                        "type": "paragraph",
+                        "text": "where the \u2265 holds due to Jensen's inequality. Hence, L(\u03b8) serves as a lower bound on the loglikelihood, and so we can compute \u03b8 * = arg max \u03b8 L(\u03b8) as a proxy for the CLE. We maximize this lower bound using stochastic gradient ascent; as P (Z|X i , \u03b8) is Normal, we can use the reparameterization trick common in variational auto-encoders (Kingma & Welling, 2014 ) while doing so. The parameter set \u03b8 contains all of the parameters of the encoding function f as well as \u03c3 Types , \u03c3 Calls , and \u03c3 Keys , and the parameters used in the decoding distribution funciton P (Y |Z, \u03b8).",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_602e7462",
+                "title": "COMBINATORIAL CONCRETIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_b0dc7fe0",
+                        "type": "paragraph",
+                        "text": "The final step in our algorithm is to \"concretize\" sketches into programs, following the distribution P (Prog|Y). Our method of doing so is a type-directed, stochastic search procedure that builds on combinatorial methods for program synthesis (Schkufza et al., 2016; Feser et al., 2015) .",
+                        "extracted_citations": [
+                            "Citation_b28",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_3887e194",
+                        "type": "paragraph",
+                        "text": "Given a sketch Y, our procedure performs a random walk in a space of partially concretized sketches (PCSs). A PCS is a term obtained by replacing some of the abstract method calls and expressions in a sketch by AML method calls and AML expressions. For example, the term \"x 1 .a(x 2 ); \u03c4 1 .b(\u03c4 2 )\", which sequential composes an abstract method call to b and a \"concrete\" method call to a, is a PCS. The state of the procedure at the i-th point of the walk is a PCS H i . The initial state is Y.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_69f9d822",
+                        "type": "paragraph",
+                        "text": "Each state H has a set of neighbors Next(H). This set consists of all PCS-s H that are obtained by concretizing a single abstract method call or expression in H, using variable names in a way that is consistent with the types of all API methods and declared variables in H.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_899f2f9f",
+                        "type": "paragraph",
+                        "text": "The (i + 1)-th state in a walk is a sample from a predefined, heuristically chosen distribution P (H i+1 | H i , ). The only requirement on this distribution is that it assigns nonzero probability to a state iff it belongs to Next(H i ). In practice, our implementation of this distribution prioritizes programs that are simpler. The random walk ends when it reaches a state H * that has no neighbors. If H * is fully concrete (that is, an AML program), then the walk is successful and H * is returned as a sample. If not, the current walk is rejected, and a fresh walk is started from the initial state.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_09d701b4",
+                        "type": "paragraph",
+                        "text": "Recall that the concretization distribution P (Prog|Y) is only defined for sketches Y that are satisfiable. Our concretization procedure does not assume that its input Y is satisfiable. However, if Y is not satisfiable, all random walks that it performs end with rejection, causing it to never terminate.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7441cf16",
+                        "type": "paragraph",
+                        "text": "While the worst-case complexity of this procedure is exponential in the generated programs, it performs well in practice because of our chosen language of sketches. For instance, our search does not need to discover the high-level structure of programs. Also, sketches specify the types of method arguments and return values, and this significantly limits the search space.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8984a6f2",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_ee347b94",
+                        "type": "paragraph",
+                        "text": "Now we present an empirical evaluation of the effectiveness of our method. The experiments we describe utilize data from an online repository of about 1500 Android apps (and, 2017) . We decompiled the APKs using JADX (Skylot, 2017) to generate their source code. Analyzing about 100 million lines of code that were generated, we extracted 150,000 methods that used Android APIs or the Java library. We then pre-processed all method bodies to translate the code from Java to AML, preserving names of relevant API calls and data types as well as the high-level control flow. Hereafter, when we say \"program\" we refer to an AML program. From each program, we extracted the sets X Calls , X Types , and X Keys as well as a sketch Y. Lacking separate natural language dscriptions for programs, we defined keywords to be words obtained by splitting the names of the API types and calls that the program uses, based on camel case. For instance, the keywords obtained from the API call readLine are \"read\" and \"line\". As API method and types in Java tend to be carefully named, these words often contain rich information about what programs do. Figure 4 gives some statistics on the sizes of the labels in the data. From the extracted data, we randomly selected 10,000 programs to be in the testing and validation data each.",
+                        "extracted_citations": [
+                            "Citation_b29"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a165032f",
+                "title": "IMPLEMENTATION AND TRAINING",
+                "blocks": [
+                    {
+                        "block_id": "b_4d4b47d5",
+                        "type": "paragraph",
+                        "text": "We implemented our approach in our tool called BAYOU, using TensorFlow (Abadi et al., 2015) to implement the GED neural model, and the Eclipse IDE for the abstraction from Java to the language of sketches and the combinatorial concretization.",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f3976fcc",
+                        "type": "paragraph",
+                        "text": "In all our experiments we performed cross-validation through grid search and picked the best performing model. Our hyper-parameters for training the model are as follows. We used 64, 32 and 64 units in the encoder for API calls, types and keywords, respectively, and 128 units in the decoder. The latent space was 32-dimensional. We used a mini-batch size of 50, a learning rate of 0.0006 for the Adam gradient-descent optimizer (Kingma & Ba, 2014) , and ran the training for 50 epochs.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fcec3ecc",
+                        "type": "paragraph",
+                        "text": "The training was performed on an AWS \"p2.xlarge\" machine with an NVIDIA K80 GPU with 12GB GPU memory. As each sketch was broken down into a set of production paths, the total number of data points fed to the model was around 700,000 per epoch. Training took 10 hours to complete.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4346395f",
+                "title": "CLUSTERING Figure 5: 2-dimensional projection of latent space",
+                "blocks": [
+                    {
+                        "block_id": "b_4f53ae4e",
+                        "type": "paragraph",
+                        "text": "To visualize clustering in the 32-dimensional latent space, we provided labels X from the testing data and sampled Z from P (Z|X), and then used it to sample a sketch from P (Y |Z). We then used t-SNE (Maaten & Hinton, 2008) to reduce the dimensionality of Z to 2-dimensions, and labeled each point with the API used in the sketch Y. Figure 5 shows this 2-dimensional space, where each label has been coded with a different color. It is immediately apparent from the plot that the model has learned to cluster the latent space neatly according to different APIs. Some APIs such as java.io have several modes, and we noticed separately that each mode corresponds to different usage scenarios of the API, such as reading versus writing in this case.",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d15a8cfc",
+                "title": "ACCURACY",
+                "blocks": [
+                    {
+                        "block_id": "b_b82f1f43",
+                        "type": "paragraph",
+                        "text": "To evaluate prediction accuracy, we provided labels from the testing data to our model, sampled sketches from the distribution P (Y |X) and concretized each sketch into an AML program using our combinatorial search. We then measured the number of test programs for which a program that is equivalent to the expected one appeared in the top-10 results from the model.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eef21b17",
+                        "type": "paragraph",
+                        "text": "As there is no universal metric to measure program equivalence (in fact, it is an undecidable problem in general), we used several metrics to approximate the notion of equivalence. We defined the following metrics on the top-10 programs predicted by the model: M1. This binary metric measures whether the expected program appeared in a syntactically equivalent form in the results. Of course, an impediment to measuring this is that the names of variables used in the expected and predicted programs may not match. It is neither reasonable nor useful for any model of code to learn the exact variable names in the training data. Therefore, in performing this equivalence check, we abstract away the variable names and compare the rest of the program's Abstract Syntax Tree (AST) instead.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6bbcd41e",
+                        "type": "paragraph",
+                        "text": "M2. This metric measures the minimum Jaccard distance between the sets of sequences of API calls made by the expected and predicted programs. It is a measure of how close to the original program were we able to get in terms of sequences of API calls.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f069064b",
+                        "type": "paragraph",
+                        "text": "M3. Similar to metric M2, this metric measures the minimum Jaccard distance between the sets of API calls in the expected and predicted programs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ce3b329a",
+                        "type": "paragraph",
+                        "text": "M4. This metric computes the minimum absolute difference between the number of statements in the expected and sampled programs, as a ratio of that in the former.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2a1e565e",
+                        "type": "paragraph",
+                        "text": "M5. Similar to metric M4, this metric computes the minumum absolute difference between the number of control structures in the expected and sampled programs, as a ratio of that in the former. Examples of control structures are branches, loops, and try-catch statements.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_538abc18",
+                "title": "PARTIAL OBSERVABILITY",
+                "blocks": [
+                    {
+                        "block_id": "b_2cdcc2b2",
+                        "type": "paragraph",
+                        "text": "To evaluate our model's ability to predict programs given a small amount of information about its code, we varied the fraction of the set of API calls, types, and keywords provided as input from the testing data. We experimented with 75%, 50% and 25% observability in the testing data; the median number of items in a label in these cases were 9, 6, and 2, respectively.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8c8894a0",
+                "title": "COMPETING MODELS",
+                "blocks": [
+                    {
+                        "block_id": "b_2a36ca5a",
+                        "type": "paragraph",
+                        "text": "In order to compare our model with state-of-the-art conditional generative models, we implemented the Gaussian Stochastic Neural Network (GSNN) presented by (Sohn et al., 2015) , using the same tree-structured decoder as the GED. There are two main differences: (i) the GSNN's decoder is also conditioned directly on the input label X in addition to Z, which we accomplish by concatenating its initial state with the encoding of X, (ii) the GSNN loss function has an additional KL-divergence term weighted by a hyper-parameter \u03b2. We subjected the GSNN to the same training and crossvalidation process as our model. In the end, we selected a model that happened to have very similar hyper-parameters as ours, with \u03b2 = 0.001.",
+                        "extracted_citations": [
+                            "Citation_b30"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c6ea7be6",
+                "title": "EVALUATING SKETCHES",
+                "blocks": [
+                    {
+                        "block_id": "b_89614b92",
+                        "type": "paragraph",
+                        "text": "In order to evaluate the effect of sketch learning for program generation, we implemented and compared with a model that learns directly over programs. Specifically, the neural network structure is exactly the same as ours, except that instead of being trained on production paths in the sketches, the model is trained on production paths in the ASTs of the AML programs. We selected a model that had more units in the decoder ( 256 ) compared to our model ( 128 ), as the AML grammar is more complex than the grammar of sketches. We also implemented a similar GSNN model to train over AML ASTs directly.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_43c7a202",
+                        "type": "paragraph",
+                        "text": "Figure 6 shows the collated results of this evaluation, where each entry computes the average of the corresponding metric over the 10000 test programs. It takes our model about 8 seconds, on average, to generate and rank 10 programs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b3e590fd",
+                        "type": "paragraph",
+                        "text": "When testing models that were trained on AML ASTs, namely the GED-AML and GSNN-AML models, we observed that out of a total of 87,486 AML ASTs sampled from the two models, 2525 (or 3%) ASTs were not even well-formed, i.e., they would not pass a parser, and hence had to be discarded from the metrics. This number is 0 for the GED-Sk and GSNN-Sk models, meaning that all AML ASTs that were obtained by concretizing sketches were well-formed.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fd585aa4",
+                        "type": "paragraph",
+                        "text": "In general, one can observe that the GED-Sk model performs best overall, with GSNN-Sk a reasonable alternative. We hypothesize that the reason GED-Sk performs slightly better is the regularizing prior on Z; since the GSNN has a direct link from X to Y , it can choose to ignore this regularization. We would classify both these models as suitable for conditional program generation. However, the other two models GED-AML and GSNN-AML perform quite worse, showing that sketch learning is key in addressing the problem of conditional program generation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_993553b8",
+                "title": "GENERALIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_352ac18e",
+                        "type": "paragraph",
+                        "text": "To evaluate how well our model generalizes to unseen data, we gather a subset of the testing data whose data points, consisting of label-sketch pairs (X, Y), never occurred in the training data. We then evaluate the same metrics in Figure 6 (a)-(e), but due to space reasons we focus on the 50% observability column. Figure 6 (f) shows the results of this evaluation on the subset of 5126 (out of 10000) unseen test data points. The metrics exhibit a similar trend, showing that the models based on sketch learning are able to generalize much better than the baseline models, and that the GED-Sk model performs the best.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2b18c129",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_ae3503d4",
+                        "type": "paragraph",
+                        "text": "Unconditional, corpus-driven generation of programs has been studied before (Maddison & Tarlow, 2014; Allamanis & Sutton, 2014; Bielik et al., 2016) , as has the generation of code snippets conditioned on a context into which the snippet is merged (Nguyen et al., 2013; Raychev et al., 2014; Nguyen & Nguyen, 2015) . These prior efforts often use models like n-grams (Nguyen et al., 2013) and recurrent neural networks (Raychev et al., 2014) that are primarily suited to the generation of straight-line programs; almost universally, they cannot guarantee semantic properties of generated programs. Among prominent exceptions, Maddison & Tarlow (2014) use log-bilinear tree-traversal models, a class of probabilistic pushdown automata, for program generation. Bielik et al. (2016) study a generalization of probabilistic grammars known as probabilistic higher-order grammars.",
+                        "extracted_citations": [
+                            "Citation_b19",
+                            "Citation_b2",
+                            "Citation_b5",
+                            "Citation_b21",
+                            "Citation_b26",
+                            "Citation_b20",
+                            "Citation_b21",
+                            "Citation_b26",
+                            "Citation_b19",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a131389b",
+                        "type": "paragraph",
+                        "text": "Like our work, these papers address the generation of programs that satisfy rich constraints such as the type-safe use of names. In principle, one could replace our decoder and the combinatorial concretizer, which together form an unconditional program generator, with one of these models. However, given our experiments, doing so is unlikely to lead to good performance in the end-to-end problem of conditional program generation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3bffb459",
+                        "type": "paragraph",
+                        "text": "There is a line of existing work considering the generation of programs from text (Yin & Neubig, 2017; Ling et al., 2016; Rabinovich et al., 2017) . These papers use decoders similar to the one used in BAYOU, and since they are solving the text-to-code problem, they utilize attention mechanisms not found in BAYOU. Those attention mechanisms could be particularly useful were BAYOU extended to handle natural language evidence. The fundamental difference between these works and BAYOU, however, is the level of abstraction at which learning takes place. These papers attempt to translate text directly into code, whereas BAYOU uses neural methods to produce higher-level sketches that are translated into program code using symbolic methods. This two-step code generation process is central to BAYOU. It ensures key semantic properties of the generated code (such as type safety) and by abstracting away from the learner many lower-level details, it may make learning easier. We have given experimental evidence that this approach can give better results than translating directly into code. Kusner et al. (2017) propose a variational autoencoder for context-free grammars. As an autoencoder, this model is generative, but it is not a conditional model such as ours. In their application of synthesizing molecular structures, given a particular molecular structure, their model can be used to search the latent space for similar valid structures. In our setting, however, we are not given a sketch but only a label for the sketch, and our task is learn a conditional model that can predict a whole sketch given a label.",
+                        "extracted_citations": [
+                            "Citation_b34",
+                            "Citation_b17",
+                            "Citation_b25",
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_edcb792a",
+                        "type": "paragraph",
+                        "text": "Conditional program generation is closely related to program synthesis (Gulwani et al., 2017) , the problem of producing programs that satisfy a given semantic specification. The programming language community has studied this problem thoroughly using the tools of combinatorial search and symbolic reasoning (Alur et al., 2013; Solar-Lezama et al., 2006; Gulwani, 2011; Feser et al., 2015) . A common tactic in this literature is to put syntactic limitations on the space of feasible programs (Alur et al., 2013) . This is done either by adding a human-provided sketch to a problem instance (Solar-Lezama et al., 2006) , or by restricting synthesis to a narrow DSL (Gulwani, 2011; Polozov & Gulwani, 2015) .",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b3",
+                            "Citation_b31",
+                            "Citation_b9",
+                            "Citation_b7",
+                            "Citation_b3",
+                            "Citation_b31",
+                            "Citation_b9",
+                            "Citation_b24"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a33e5df4",
+                        "type": "paragraph",
+                        "text": "A recent body of work has developed neural approaches to program synthesis. Terpret (Gaunt et al., 2016) and Neural Forth (Riedel et al., 2016) use neural learning over a set of user-provided examples to complete a user-provided sketch. In neuro-symbolic synthesis (Parisotto et al., 2016) and Robust-Fill (Devlin et al., 2017) , a neural architecture is used to encode a set of input-output examples and decode the resulting representation into a Flashfill program. DeepCoder (Balog et al., 2017) uses neural techniques to speed up the synthesis of Flashfill (Gulwani et al., 2015) programs.",
+                        "extracted_citations": [
+                            "Citation_b27",
+                            "Citation_b23",
+                            "Citation_b6",
+                            "Citation_b4",
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8ff088b9",
+                        "type": "paragraph",
+                        "text": "These efforts differ from ours in goals as well as methods. Our problem is simpler, as it is conditioned on syntactic, rather than semantic, facets of programs. This allows us to generate programs in a complex programming language over a large number of data types and API methods, without needing a human-provided sketch. The key methodological difference between our work and symbolic program synthesis lies in our use of data, which allows us to generalize from a very small amount of specification. Unlike our approach, most neural approaches to program synthesis do not combine learning and combinatorial techniques. The prominent exception is Deepcoder (Balog et al., 2017) , whose relationship with our work was discussed in Section 1.",
+                        "extracted_citations": [
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_420c8e82",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_39a577f6",
+                        "type": "paragraph",
+                        "text": "We have given a method for generating type-safe programs in a Java-like language, given a label containing a small amount of information about a program's code or metadata. Our main idea is to learn a model that can predict sketches of programs relevant to a label. The predicted sketches are concretized into code using combinatorial techniques. We have implemented our ideas in BAYOU, a system for the generation of API-heavy code. Our experiments indicate that the system can often generate complex method bodies from just a few tokens, and that learning at the level of sketches is key to performing such generation effectively.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c58a35ba",
+                        "type": "paragraph",
+                        "text": "An important distinction between our work and classical program synthesis is that our generator is conditioned on uncertain, syntactic information about the target program, as opposed to hard constraints on the program's semantics. Of course, the programs that we generate are type-safe, and therefore guaranteed to satisfy certain semantic constraints. However, these constraints are invariant across generation tasks; in contrast, traditional program synthesis permits instance-specific semantic constraints. Future work will seek to condition program generation on syntactic labels as well as semantic constraints. As mentioned earlier, learning correlations between the syntax and semantics of programs written in complex languages is difficult. However, the approach of first generating and then concretizing a sketch could reduce this difficulty: sketches could be generated using a limited amount of semantic information, and the concretizer could use logic-based techniques (Alur et al., 2013; Gulwani et al., 2017) to ensure that the programs synthesized from these sketches match the semantic constraints exactly. A key challenge here would be to calibrate the amount of semantic information on which sketch generation is conditioned.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ee212284",
+                        "type": "paragraph",
+                        "text": "Figure 11 : Computing the hidden state and output of the decoder one level deeper in the tree (i.e., the LHS with a term in the RHS of a rule). We consider a sequence of API calls connected by sequential composition as siblings. The root of the entire tree is a special node named root, and so the first pair in all production paths is (root, child). The last edge in a production path is irrelevant (\u2022) as it does not connect the node to any subsequent nodes.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e9dbe7d3",
+                        "type": "paragraph",
+                        "text": "As an example, consider the sketch in Figure 7 (a), whose representation as a tree for the decoder is shown in Figure 10 . For brevity, we use s and c for sibling and child edges respectively, abbreviate some classnames with uppercase letters in their name, and omit the first pair (root, c) that occurs in all paths. There are four production paths in the tree of this sketch: Now, given a Z and a sequence of pairs Y i = (v 1 , e 1 ), . . . , (v i , e i ) along a production path, the next node in the path is assumed to be dependent solely on Z and Y i . Therefore, a single inference step of the decoder computes the probability P (v i+1 |Y i , Z). To do this, the decoder uses two RNNs, one for each type of edge c and s, that act on the production pairs in Y i . First, all nodes v i are converted into their one-hot vector encoding, denoted v i .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4b0d1b8d",
+                        "type": "paragraph",
+                        "text": "Let h be the number of hidden units in the decoder, and |G| be the size of the decoder's output vocabulary, i.e., the total number of terminals and non-terminals in the grammar of sketches. Let W e h \u2208 R h\u00d7h and b e h \u2208 R d be the decoder's hidden state weight and bias matrices, W e v \u2208 R |G|\u00d7h and b e v \u2208 R h be the input weight and bias matrices, and W e y \u2208 R h\u00d7|G| and b e y \u2208 R |G| be the output weight and bias matrices, where e is the type of edge: either c (child) or s (sibling). We also use \"lifting\" matrices W l \u2208 R d\u00d7h and b l \u2208 R h , to lift the d-dimensional vector Z onto the (typically) higher-dimensional hidden state space h of the decoder. Let h i and y i be the hidden state and output of the network at time point i. We compute these quantities as given in Figure 11 , where tanh is a non-linear activation function that converts any given value to a value between -1 and 1, and softmax converts a given K-sized vector of arbitrary values to another K-sized vector of values in the range [0, 1] that sum to 1-essentially a probability distribution.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e51983ff",
+                        "type": "paragraph",
+                        "text": "The type of edge at time i decides which RNN to choose to update the (shared) hidden state h i and the output y i . Training consists of learning values for the entries in all the W and b matrices.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5bf11754",
+                        "type": "paragraph",
+                        "text": "During training, v i , e i and the target output are known from the data point, and so we optimize a standard cross-entropy loss function (over all i) between the output y i and the target output. During inference, P (v i+1 |Y i , Z) is simply the probability distribution y i , the result of the softmax.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2bc676ee",
+                        "type": "paragraph",
+                        "text": "A sketch is obtained by starting with the root node pair (v 1 , e 1 ) = (root, child), recursively applying Equation 2 to get the output distribution y i , sampling a value for v i+1 from y i , and growing the tree by adding the sampled node to it. The edge e i+1 is provided as c or s depending on the v i+1 that was Remarks. In our implementation, we generate trees in a depth-first fashion, by exploring a child edge before a sibling edge if both are possible. If a node has two children, a neural encoding of the nodes that were generated on the left is carried onto the right sub-tree so that the generation of this tree can leverage additional information about its previously generated sibling. We refer the reader to Section 2.4 of Zhang et al. (2016) for more details.",
+                        "extracted_citations": [
+                            "Citation_b35"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5dce28fe",
+                "title": "D ADDITIONAL EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_b6409262",
+                        "type": "paragraph",
+                        "text": "In this section, we provide results of additional experimental evaluation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_179160a9",
+                "title": "D.1 CLUSTERING",
+                "blocks": [
+                    {
+                        "block_id": "b_9c3160b8",
+                        "type": "paragraph",
+                        "text": "Similar to the visualization of the 2-dimensional latent space in Figure 5 , we also plotted the latent space of the GSNN-Sk model trained on sketches. Figure 12 shows this plot. We observed that the latent space is clustered, relatively, more densely than that of our model (keep in mind that the plot colors are different when comparing them).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ca37b461",
+                "title": "D.2 QUALITATIVE EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_21cc306a",
+                        "type": "paragraph",
+                        "text": "To give a sense of the quality of the end-to-end generation, we present and discuss a few usage scenarios for our system, BAYOU. In each scenario, we started with a set of API calls, types or keywords as labels that indicate what we (as the user) would like the generated code to perform. We then pick a single program in the top-5 results returned by BAYOU and discuss it. Figure 13 shows three such example usage scenarios.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c954cdea",
+                        "type": "paragraph",
+                        "text": "In the first scenario, we would like the system to generate a program to write something to a file by calling write using the type FileWriter. With this label, we invoked BAYOU and it returned with a program that actually accomplishes the task. Note that even though we only specified FileWriter, the program uses it to feed a BufferedWriter to write to a file. This is an interesting pattern learned from data, that file reads and writes in Java often take place in a buffered manner. Also note that the program correctly flushes the buffer before closing it, even though none of this was explicitly specified in the input.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1e43adc3",
+                        "type": "paragraph",
+                        "text": "In the second scenario, we would like the generated program to set the title and message of an Android dialog. This time we provide no API calls or types but only keywords. With this, BAYOU generated a program that first builds an Android dialog box using the helper class AlertDialog.Builder, and does set its title and message. In addition, the program also adds a",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Androiddrawer 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Tensorflow: Large-scale machine learning on heterogeneous distributed systems Martin Abadi Ashish Agarwal Paul Barham Eugene Brevdo Zhifeng Chen Craig Citro Greg Corrado Andy Davis Jeffrey Dean Matthieu Devin Sanjay Ghemawat Ian Goodfellow Andrew Harp Geoffrey Irving Michael Isard Yangqing Jia Rafal Jozefowicz Lukasz Kaiser Manjunath Kudlur Josh Levenberg Dan Mane Rajat Monga Sherry Moore Derek Murray Chris Olah Mike Schuster Jonathon Shlens Benoit Steiner Ilya Sutskever Kunal Talwar Paul Tucker Vincent Vanhoucke Vijay Vasudevan Fernanda Viegas Oriol Vinyals Pete Warden Martin Wattenberg Martin Wicke Yuan Yu Xiaoqiang Zheng 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Mining idioms from source code Miltiadis Allamanis Charles Sutton FSE 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Armando Solar-Lezama, Emina Torlak, and Abhishek Udupa. Syntax-guided synthesis Rajeev Alur Rastislav Bod\u00edk Garvit Juniwal M K Milo Mukund Martin Raghothaman A Sanjit Rishabh Seshia Singh FMCAD 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Deepcoder: Learning to write programs Matej Balog Alexander L Gaunt Marc Brockschmidt Sebastian Nowozin Daniel Tarlow ICLR 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "PHOG: probabilistic model for code Pavol Bielik Veselin Raychev Martin T Vechev ICML 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Robustfill: Neural program learning under noisy I/O Jacob Devlin Jonathan Uesato Surya Bhupatiraju Rishabh Singh Abdel-Rahman Mohamed Pushmeet Kohli ICML 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Synthesizing data structure transformations from input-output examples John K Feser Swarat Chaudhuri Isil Dillig PLDI ACM 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Terpret: A probabilistic programming language for program induction Marc Alexander L Gaunt Rishabh Brockschmidt Nate Singh Pushmeet Kushman Jonathan Kohli Daniel Taylor Tarlow arXiv:1608.04428 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Automating string processing in spreadsheets using input-output examples Sumit Gulwani POPL ACM 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Inductive programming meets the real world Sumit Gulwani Jos\u00e9 Hern\u00e1ndez-Orallo Emanuel Kitzelmann Stephen H Muggleton Ute Schmid Benjamin Zorn Communications of the ACM 58 11 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Program synthesis Sumit Gulwani Oleksandr Polozov Rishabh Singh Foundations and Trends in Programming Languages 4 1-2 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "David Ha Douglas Eck arXiv:1704.03477 A neural representation of sketch drawings 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "On the naturalness of software Abram Hindle Earl T Barr Zhendong Su Mark Gabel Premkumar Devanbu ICSE 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Diederik Kingma Jimmy Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Auto-encoding variational bayes P Diederik Max Kingma Welling ICLR 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Matt J Kusner Brooks Paige Jos\u00e9 Miguel Hern\u00e1ndez-Lobato arXiv:1703.01925 Grammar variational autoencoder 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Latent predictor networks for code generation Wang Ling Edward Grefenstette Karl Moritz Hermann Tom\u00e1\u0161 Ko\u010disk\u1ef3 Andrew Senior Fumin Wang Phil Blunsom arXiv:1603.06744 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Visualizing data using t-sne Laurens Van Der Maaten Geoffrey Hinton Journal of Machine Learning Research 9 Nov. 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Structured generative models of natural source code C J Maddison D Tarlow ICML Zohar Manna Richard J Waldinger 2014. 1971 14 Toward automatic program synthesis",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Graph-based statistical language model for code Anh Tuan Nguyen Tien N Nguyen ICSE 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "A statistical semantic language model for source code Thanh Tung Anh Tuan Nguyen Hoan Nguyen Anh Nguyen Tien N Nguyen ESEC/FSE 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Pixel recurrent neural networks Aaron Van Den Oord Nal Kalchbrenner Koray Kavukcuoglu arXiv:1601.06759 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Emilio Parisotto Abdel-Rahman Mohamed Rishabh Singh Lihong Li Dengyong Zhou Pushmeet Kohli arXiv:1611.01855 2016 Neuro-symbolic program synthesis. arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Flashmeta: A framework for inductive program synthesis Oleksandr Polozov Sumit Gulwani OOPSLA 2015 50",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Abstract syntax networks for code generation and semantic parsing Maxim Rabinovich Mitchell Stern Dan Klein arXiv:1704.07535 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Code completion with statistical language models Veselin Raychev Martin Vechev Eran Yahav PLDI 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Programming with a differentiable forth interpreter Sebastian Riedel Matko Bosnjak Tim Rockt\u00e4schel CoRR, abs/1605.06640 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Stochastic program optimization Eric Schkufza Rahul Sharma Alex Aiken Commun. ACM 59 2 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Skylot Jadx Dex to Java decompiler 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Learning structured output representation using deep conditional generative models Kihyuk Sohn Honglak Lee Xinchen Yan NIPS 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Combinatorial sketching for finite programs Armando Solar-Lezama Liviu Tancau Rastislav Bod\u00edk A Sanjit Vijay A Seshia Saraswat ASPLOS 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "A methodology for LISP program construction from examples D Phillip Summers Journal of the ACM (JACM) 24 1 1977",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Show and tell: A neural image caption generator Oriol Vinyals Alexander Toshev Samy Bengio Dumitru Erhan CVPR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "A syntactic neural model for general-purpose code generation Pengcheng Yin Graham Neubig arXiv:1704.01696 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Top-down tree long short-term memory networks Xingxing Zhang Liang Lu Mirella Lapata NAACL-HLT 2016",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This is a very well-written and nicely structured paper that tackles the problem of generating/inferring code given an incomplete description (sketch) of the task to be achieved.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "This is a novel contribution to existing machine learning approaches to automated programming that is achieved by training on a large corpus of Android apps.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The combination of the proposed technique and leveraging of real data are a substantial strength of the work compared to many approaches that have come previously.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "This paper has many strengths:\n1) The writing is clear, and the paper is well-motivated\n2) The proposed algorithm is described in excellent detail, which is essential to reproducibility\n3) As stated previously, the approach is validated with a large number of real Android projects\n4) The fact that the language generated is non-trivial (Java-like) is a substantial plus\n5) Good discussion of limitations\n\nOverall, this paper is a valuable addition to the empirical software engineering community, and a nice break from more traditional approaches of learning abstract syntax trees.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The authors introduce an algorithm in the subfield of conditional program generation that is able to create programs in a rich java like programming language.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "In this setting, they propose an algorithm based on sketches- abstractions of programs that capture the structure but discard program specific information that is not generalizable such as variable names.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Conditioned on information such as type specification or keywords of a method they generate the method's body from the trained sketches.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "Positives:\n\u00a0\n\t\u2022\tNovel algorithm and addition of rich java like language in subfield of 'conditional program generation' proposed\n\t\u2022\tVery good abstract: It explains high level overview of topic and sets it into context plus gives a sketch of the algorithm and presents the positive results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "\u2022\tExcellently structured and presented paper\n\u00a0\n\t\u2022\tMotivation given in form of relevant applications and mention that it is relatively unstudied\n\t\u2022\tThe hypothesis/ the papers goal is clearly stated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "It is introduced with 'We ask' followed by two well formulated lines that make up the hypothesis.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "It is repeated multiple times throughout the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Every mention introduces either a new argument on why this is necessary or sets it in contrast to other learners, clearly stating discrepancies.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "\u2022\tExplanations are exceptionally well done: terms that might not be familiar to the reader are explained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "This is true for mathematical aspects as well as program generating specific terms.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Examples are given where appropriate in a clear and coherent manner\n\t\u2022\tProblem statement well defined mathematically and understandable for a broad audience\n\t\u2022\tMentioning of failures and limitations demonstrates a realistic  view on the project\n\t\u2022\tComplexity and time analysis provided\n\t\u2022\tPaper written so that it's easy for a reader to implement the methods\n\t\u2022\tDetailed descriptions of all instantiations even parameters and comparison methods\n\t\u2022\tSystem specified\n\t\u2022\tValidation method specified\n\t\u2022\tData and repository, as well as cleaning process provided\n\t\u2022\tEvery figure and plot is well explained and interpreted\n\t\u2022\tLarge successful evaluation section provided\n\t\u2022\tMany different evaluation measures defined to measure different properties of the project\n\t\u2022\tDifferent observability modes\n\t\u2022\tEvaluation against most compatible methods from other sources \n\t\u2022\t Results are in line with hypothesis\n\t\u2022\tThorough appendix clearing any open questions \n\u00a0\nIt would have been good to have a summary/conclusion/future work section\n\u00a0\nSUMMARY: ACCEPT.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "The authors present a very intriguing novel approach that  in a clear and coherent way.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "The approach is thoroughly explained for a large audience.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "The task itself is interesting and novel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "The large evaluation section that discusses many different properties is a further indication that this approach is not only novel but also very promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "Even though no conclusive section is provided, the paper is not missing any information.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.1262,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper aims to synthesize programs in a Java-like language from a task description (X) that includes some names and types of the components that should be used in the program.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The paper argues that it is too difficult to map directly from the description to a full program, so it instead formulates the synthesis in two parts.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "First, the description is mapped to a \"sketch\" (Y) containing high level program structure but no concrete details about, e.g., variable names.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "Afterwards, the sketch is converted into a full program (Prog) by stochastically filling in the abstract parts of the sketch with concrete instantiations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "The paper presents an abstraction method for converting a program into a sketch, a stochastic encoder-decoder model for converting descriptions to trees, and rejection sampling-like approach for converting sketches to programs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Experimentally, it is shown that using sketches as an intermediate abstraction outperforms directly mapping to the program AST.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "The data is derived from an online repository of ~1500 Android apps, and from that were extracted ~150k methods, which makes the data very respectable in terms of realisticness and scale.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "This is one of the strongest points of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "One point I found confusing is how exactly the Combinatorial Concretization step works.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Am I correct in understanding that this step depends only on Y, and that given Y, Prog is conditionally independent of X?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "If this is correct, how many Progs are consistent with a typical Y?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "Some additional discussion of why no learning is required for the P(Prog | Y) step would be appreciated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "I'm also curious whether using a stochastic latent variable (Z) is necessary.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "Would the approach work as well using a more standard encoder-decoder model with determinstic Z?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Some discussion of Grammar Variational Autoencoder (Kusner et al) would probably be appropriate.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "Overall, I really like the fact that this paper is aiming to do program synthesis on programs that are more like those found \"in the wild\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "While the general pattern of mapping a specification to abstraction with a neural net and then mapping the abstraction to a full program with a combinatorial technique is not necessarily novel, I think this paper adds an interesting new take on the pattern (it has a very different abstraction than say, DeepCoder), and this paper is one of the more interesting recent papers on program synthesis using machine learning techniques, in my opinion.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_578518d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_578518d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_578518d2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "sec_6e318f54",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_578518d2"
+        },
+        {
+            "source": "sec_6e318f54",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b70836f3"
+        },
+        {
+            "source": "b_a8a2c409",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_a8a2c409",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "sec_6e318f54",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a8a2c409"
+        },
+        {
+            "source": "b_78b0ccb7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_78b0ccb7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_78b0ccb7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_78b0ccb7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_78b0ccb7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_78b0ccb7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_78b0ccb7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_6e318f54",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_78b0ccb7"
+        },
+        {
+            "source": "sec_6e318f54",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_67afb494"
+        },
+        {
+            "source": "b_8bea58b6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_6e318f54",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8bea58b6"
+        },
+        {
+            "source": "sec_6e318f54",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_65e66b21"
+        },
+        {
+            "source": "sec_086551da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4fa6fc22"
+        },
+        {
+            "source": "sec_086551da",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3fc5c5e2"
+        },
+        {
+            "source": "sec_6c826ced",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8a21044a"
+        },
+        {
+            "source": "sec_6c826ced",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b8d7b728"
+        },
+        {
+            "source": "sec_35bcc4e2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b93a7fc8"
+        },
+        {
+            "source": "sec_35bcc4e2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bfee4beb"
+        },
+        {
+            "source": "sec_82771240",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_14a55b11"
+        },
+        {
+            "source": "b_860cdda7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_82771240",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_860cdda7"
+        },
+        {
+            "source": "sec_82771240",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_00b031eb"
+        },
+        {
+            "source": "sec_82771240",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_366a4ed3"
+        },
+        {
+            "source": "sec_82771240",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_349c2422"
+        },
+        {
+            "source": "sec_0735596c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5a9e8dc1"
+        },
+        {
+            "source": "sec_0735596c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ce8e05cf"
+        },
+        {
+            "source": "sec_a54f4b05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3ac6d9d0"
+        },
+        {
+            "source": "sec_a54f4b05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_27ba40bf"
+        },
+        {
+            "source": "sec_a54f4b05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0aa4897e"
+        },
+        {
+            "source": "sec_a54f4b05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fb23843e"
+        },
+        {
+            "source": "sec_a54f4b05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5c92b8fc"
+        },
+        {
+            "source": "sec_a54f4b05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_490c32b3"
+        },
+        {
+            "source": "b_63046fed",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_a54f4b05",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_63046fed"
+        },
+        {
+            "source": "b_b0dc7fe0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_b0dc7fe0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_602e7462",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b0dc7fe0"
+        },
+        {
+            "source": "sec_602e7462",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3887e194"
+        },
+        {
+            "source": "sec_602e7462",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_69f9d822"
+        },
+        {
+            "source": "sec_602e7462",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_899f2f9f"
+        },
+        {
+            "source": "sec_602e7462",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09d701b4"
+        },
+        {
+            "source": "sec_602e7462",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7441cf16"
+        },
+        {
+            "source": "b_ee347b94",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_8984a6f2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee347b94"
+        },
+        {
+            "source": "b_4d4b47d5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_a165032f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4d4b47d5"
+        },
+        {
+            "source": "b_f3976fcc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_a165032f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f3976fcc"
+        },
+        {
+            "source": "sec_a165032f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fcec3ecc"
+        },
+        {
+            "source": "b_4f53ae4e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_4346395f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4f53ae4e"
+        },
+        {
+            "source": "sec_d15a8cfc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b82f1f43"
+        },
+        {
+            "source": "sec_d15a8cfc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eef21b17"
+        },
+        {
+            "source": "sec_d15a8cfc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6bbcd41e"
+        },
+        {
+            "source": "sec_d15a8cfc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f069064b"
+        },
+        {
+            "source": "sec_d15a8cfc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ce3b329a"
+        },
+        {
+            "source": "sec_d15a8cfc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2a1e565e"
+        },
+        {
+            "source": "sec_538abc18",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2cdcc2b2"
+        },
+        {
+            "source": "b_2a36ca5a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_8c8894a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2a36ca5a"
+        },
+        {
+            "source": "sec_c6ea7be6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_89614b92"
+        },
+        {
+            "source": "sec_c6ea7be6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_43c7a202"
+        },
+        {
+            "source": "sec_c6ea7be6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b3e590fd"
+        },
+        {
+            "source": "sec_c6ea7be6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fd585aa4"
+        },
+        {
+            "source": "sec_993553b8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_352ac18e"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_ae3503d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_2b18c129",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ae3503d4"
+        },
+        {
+            "source": "sec_2b18c129",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a131389b"
+        },
+        {
+            "source": "b_3bffb459",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "b_3bffb459",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_3bffb459",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_3bffb459",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_2b18c129",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3bffb459"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_edcb792a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_2b18c129",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_edcb792a"
+        },
+        {
+            "source": "b_a33e5df4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_a33e5df4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_a33e5df4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_a33e5df4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_a33e5df4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_2b18c129",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a33e5df4"
+        },
+        {
+            "source": "b_8ff088b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_2b18c129",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ff088b9"
+        },
+        {
+            "source": "sec_420c8e82",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_39a577f6"
+        },
+        {
+            "source": "b_c58a35ba",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_c58a35ba",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_420c8e82",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c58a35ba"
+        },
+        {
+            "source": "sec_420c8e82",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee212284"
+        },
+        {
+            "source": "sec_420c8e82",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e9dbe7d3"
+        },
+        {
+            "source": "sec_420c8e82",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4b0d1b8d"
+        },
+        {
+            "source": "sec_420c8e82",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e51983ff"
+        },
+        {
+            "source": "sec_420c8e82",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5bf11754"
+        },
+        {
+            "source": "b_2bc676ee",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "sec_420c8e82",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2bc676ee"
+        },
+        {
+            "source": "sec_5dce28fe",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b6409262"
+        },
+        {
+            "source": "sec_179160a9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9c3160b8"
+        },
+        {
+            "source": "sec_ca37b461",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_21cc306a"
+        },
+        {
+            "source": "sec_ca37b461",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c954cdea"
+        },
+        {
+            "source": "sec_ca37b461",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1e43adc3"
+        }
+    ]
+}

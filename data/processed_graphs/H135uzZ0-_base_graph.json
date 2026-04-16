@@ -1,0 +1,680 @@
+{
+    "paper_metadata": {
+        "paper_id": "H135uzZ0-",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Accepted",
+        "total_reviews_available": 2
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_97e737dc",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_af683032",
+                        "type": "paragraph",
+                        "text": "While single precision floating point (FP32) representation has been the mainstay for deep learning training, half-precision and sub-half-precision arithmetic has recently captured interest of the academic and industrial research community. Primarily this interest stems from the ability to attain potentially upto 2X or more speedup of training as compared to FP32, when using half-precision fused-multiply and accumulate operations. For instance NVIDIA Volta NVIDIA (2017) provides 8X more half-precision Flops as compared to FP32.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f7afa5a3",
+                        "type": "paragraph",
+                        "text": "Unlike single precision floating point, which is a unanimous choice for 32b training, half-precision training can either use half-precision floating point (FP16), or integers (INT16). These two options offer varying degrees of precision and range; with INT16 having higher precision but lower dynamic range as compared to FP16. This also leads to residues between half-precision representation and single precision to be fundamentally different -with integer representations contributing lower residual errors for larger (and possibly more important) elements of a tensor. Beyond this first order distinction in data types, there are multiple algorithmic and semantic differences (for example FP16 multiply-and-accumulate operation accumulating into FP32 results) for each of these data types. Hence, when discussing half-precision training, the whole gamut of tensor representation, semantics of multiply-and-accumulate operation, down-conversion scheme (if the accumulation is to a higher precision), scaling and normalization techniques, and overflow management methods must be considered in totality to achieve SOTA accuracy. Indeed, unless the right combination of the aforesaid vectors are selected, half precision training is likely to fail. Conversely, drawing conclusions on the efficacy of a method by not selecting all vectors properly can lead to inaccurate conclusions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1d755645",
+                        "type": "paragraph",
+                        "text": "In this work we describe a mixed-precision training setup which uses:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3086dc4d",
+                        "type": "paragraph",
+                        "text": "\u2022 INT16 tensors with shared tensor-wide exponent, with a potential to extend to sub-tensor wide exponents.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5e02a188",
+                        "type": "paragraph",
+                        "text": "\u2022 An instruction which multiplies two INT16 numbers and stores the output into a INT32 accumulator.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_44a86449",
+                        "type": "paragraph",
+                        "text": "\u2022 A down-convert scheme based on the maximum value of the output tensor in the current iteration using multiple rounding methods like nearest, stochastic, and biased rounding.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5b6dcb1f",
+                        "type": "paragraph",
+                        "text": "\u2022 An overflow management scheme which accumulates partial INT32 results into FP32, along with trading off input precision with length of accumulate chain to gain performance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bd82ba1a",
+                        "type": "paragraph",
+                        "text": "The compute for neural network training is dominated by GEMM-like, convolution, or dot-product operations. These are amenable to speedup via specialized low-precision instructions for fusedmultiply-and-accumulate (FMA), like AVX512_4VNNI 1 . However, this does not necessarily mean using half-precision representation for all tensors, or using only half-precision operations. In fact, performance speedups by migrating the compute intensive operations in both forward and back prorogation (FPROP, BPROP and WTGRAD) is often close to the maximum achievable speedup obtained by replacing all operations (for instance SGD) in half-precision. In cases where it is not, performance degradation typically happens due to limitations of memory bandwidth, and other architectural reasons.Hence on a balanced general purpose machine, a mixed-precision strategy of keeping precision critical operations (like SGD and some normalizations) in single precision and compute intensive operations in half precision can be employed. The proposed integer-16 based mixed-precision training follows this template.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f879c70e",
+                        "type": "paragraph",
+                        "text": "Using the aforesaid method, we train multiple visual understanding CNNs and achieve Top-1 accuracies Russakovsky et al. (2015) on the ImageNet-1K dataset Deng et al. (2009) which match or exceed single precision results. These results are obtained without changing any hyper-parameters, and in as many iterations as the baseline FP32 training. We achieve 75.77% Top-1 accuracy for ResNet-50 which, to the best of our knowledge, significantly exceeds any result published for halfprecision training, for example Micikevicius et al. (2017) ; Ginsburg et al. (2017) . Further, we also demonstrate our methodology achieves state-of-the-art accuracy (comparable to FP32 baseline) with int16 training on GoogLeNet-v1, VGG-16 and AlexNet networks. To the best of our knowledge, these are first such results using int16 training. Custom fixed point representations offer more flexibility -in terms of both increased precision and dynamic range. This allows for better mapping of the representation to the underlying application, thus making it more robust and accurate than floating-point based schemes. Vanhoucke et al. (2011) have shown that the dynamically scaled fixed point representation proposed by Williamson (1991) can be very effective for convolution neural networks -demonstrating upto to 4\u00d7 improvement over an aggressively tuned floating point implementation on general purpose CPU hardware. Gupta et al. (2015) have done a comprehensive study on the effect of low precision fixed point computation for deep learning and have successfully trained smaller networks using 16-bit fixed point on specialized hardware. With further reduced bit-widths, such fixed point data representations are more attractive -offering increased capacity for precision with larger mantissa bits and dynamically scaled shared exponents. There have been several publications with <16-bit precision and almost all of them use such custom fixed point schemes. Courbariaux et al. (2014) use a dynamical fixed point format (DFXP), with low precision multiplications with upto 12-bit operations. Building on this Courbariaux et al. (2015) proposed training with only binary weights while all other tensors and operations are in full precision. Hubara et al. (2016a) further extended this to use binary activations as well, but with gradients and weights still retained in full precision. Hubara et al. (2016b) proposed training with activations and weights quantized up to 6-bits and gradients in full precision. Rastegari et al. (2016) use binary representation for all components including gradients. However, all of the aforementioned use smaller benchmark model/data-sets and results in a non-trivial drop in accuracy with larger ImageNet data-set Deng et al. (2009) and classification task Russakovsky et al. (2015) . K\u00f6ster et al. (2017) have shown that a fixed point numerical format designed for deep neural networks (Flexpoint), out-performs FP16 and achieves numerical parity with FP32 across a wide set of applications. However, this is designed specifically for specialized hardware and the published results are with software emulation. Here we propose a more general dynamic fixed point representation and associated compute primitives, which can leverage general purpose hardware using the integercompute pipeline. Further we provide actual accuracy and performance for training large networks for the ILSVRC classification task, measured on available hardware.",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b6",
+                            "Citation_b17",
+                            "Citation_b8",
+                            "Citation_b25",
+                            "Citation_b9",
+                            "Citation_b4",
+                            "Citation_b5",
+                            "Citation_b19",
+                            "Citation_b6",
+                            "Citation_b20",
+                            "Citation_b14"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_87882d43",
+                "title": "THE DYNAMIC FIXED POINT FORMAT",
+                "blocks": [
+                    {
+                        "block_id": "b_cae456b3",
+                        "type": "paragraph",
+                        "text": "Dynamic Fixed Point (DFP) tensors are represented by a combination of an integer tensor I and an exponent E s , shared across all the integer elements. For the sake of convenience, the DFP tensor can be denoted as DFP-P = I, E s , where P represents the number of bits used by the integer elements in I (ex: DFP-16 contains 16-bit integers).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8c9b1c10",
+                        "type": "paragraph",
+                        "text": "Figure 1 illustrates the differences in data representation between IEEE-754 standard format float, half-float and DFP-16 data format. DFP-16 data type offers a trade-off between float and half-float in terms of precision and dynamic range. When compared to full-precision floats, DFP-16 can achieve higher compute density and can carry higher effective precision compared to half-floats because of In this work, we use a single shared exponent for each tensor. The integers are stored in 2's complement representation and the shared exponent is an 8-bit signed integer. We use standard commodity integer hardware to perform arithmetic operations on DFP tensors. This implies that the exponent handling and precision management of DFP is done in the software, which is covered in more detail in Section 4.3.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_81611eac",
+                "title": "DFP TENSOR PRIMITIVES",
+                "blocks": [
+                    {
+                        "block_id": "b_08e2dca6",
+                        "type": "paragraph",
+                        "text": "To facilitate end-to-end mixed-precision training using DFP, we have created primitives to perform arithmetic operations on DFP tensors and data conversions between DFP and float. When converting floating point tensors into to DFP data type, the shared exponent is derived from the exponent of absolute maximum value of the floating point tensor. If F is the floating point tensor, the exponent of the absolute maximum value is expressed as follows.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ae230b24",
+                        "type": "paragraph",
+                        "text": "The value of the shared exponent E s is a function of E f max and the number of bits P used by the output integer tensor I.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_edd543af",
+                        "type": "paragraph",
+                        "text": "(2) The relationship of the resulting DFP tensor I, E s with the input floating point tensor F is expressed by Eq.3.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5996ed98",
+                        "type": "paragraph",
+                        "text": "\u2200i n \u2208 I, f n = i n \u00d7 2 Es , wheref n \u2208 F (3) Extending this basic formulation Eq.3, we can define a set of common DFP primitives required for neural network training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a701451a",
+                        "type": "paragraph",
+                        "text": "\u2022 Multiplying two DFP-16 tensors produces 32-bit I tensor with a new shared exponent expressed as follows.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a052b1d8",
+                        "type": "paragraph",
+                        "text": "\u2022 Adding two DFP-16 tensors results in a 32-bit I tensor and a new shared exponent.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ab35a00c",
+                        "type": "paragraph",
+                        "text": "Note that when a Fused Multiply and Add operation is performed, all products have the same shared exponent: E ab s = E a s + E b s , and hence the sum of such products also has the same shared exponent.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_435a073f",
+                        "type": "paragraph",
+                        "text": "\u2022 Down-Conversion scales DFP-32 output of a layer to DFP-16 to be passed as input to the next layer. The 32-bit I tensor right-shifted R s bits to fit into 16-bit tensor. The R s value and the new shared exponent are expressed as follows.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f6e549f8",
+                        "type": "paragraph",
+                        "text": "In Eqn.6, A is accumulator bit-width, LZC( ) returns the leading zero bit-count.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_65700255",
+                "title": "NEURAL NETWORK TRAINING USING DYNAMIC FIXED POINT",
+                "blocks": [
+                    {
+                        "block_id": "b_3c25740e",
+                        "type": "paragraph",
+                        "text": "Neural network training is an iterative process over mini-batches of data points, with four main operations on a given mini-batch: forward propagation (FPROP), back-propagation (BPROP), weight gradient computation (WTGRAD), and the solver (typically stochastic gradient descent, or ADAM).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_abcefd46",
+                        "type": "paragraph",
+                        "text": "In a CNN, the three steps of forward-propagation, back-propagation, and weight-gradient computation are often the compute intensive steps, and consist of GEMM-like (General Matrix Multiply) convolution operations which dominate the compute, and additional element-wise operations like normalization, non-linear (ReLU) and element-wise addition. In this work we propse a method to use INT16 operations, for implementing kernels for the convolutions and GEMM. There kernels are stitched with the rest of the operations in neural network training via Dynamic Fixed Point to floating point conversions described earlier in Section 3. In this section, we first describe the overall method for using dynamic fixed point in neural network training, and then explain the optimized kernel for convolutions.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8a521487",
+                "title": "TRAINING WITH DYNAMIC FIXED POINT",
+                "blocks": [
+                    {
+                        "block_id": "b_96760805",
+                        "type": "paragraph",
+                        "text": "The mixed precision training scheme used in this work is described in Figure 2 . The core compute kernels in this scheme are the FP, BP, and WU convolution functions which take two DFP-16 tensors as input and produces a FP32 tensor as output. For example FP accepts two DFP-16 tensors, a q , and w q (activations and weights for layer-l), and produces a FP32 output tensorThe FP and BP operations are followed by quantization steps (Q a , Q e ) which convert the FP32 tensors to DFP-16 tensors (\u00e2 l q , e l q ) for operations in the next layer. The WU step is followed by the Stochastic Gradient Descent (SGD) step, which takes the FP32 tensor for weight-gradients (\u2206w) and a FP32 copy of the weights (W l ) as inputs, and produces an updated weight tensor as output. We follow the now established practice Micikevicius et al. (2017) of keeping a FP32 copy of weights as well as a low precision (DFP-16) copy of weights. Therefore SGD or other solvers are FP32 operations. In case a batch-norm layer is used, the DFP-16 tensors are loaded into registers and then the data is up-converted to FP32 to prevent overflows during stats computation.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6cd26547",
+                "title": "CORE COMPUTE KERNELS",
+                "blocks": [
+                    {
+                        "block_id": "b_b48c737a",
+                        "type": "paragraph",
+                        "text": "In this section we delve into efficient implementations of core compute kernels written using Integer FMA instruction sequence; in particular the AVX512_4VNNI instruction (described in Algorithm 1). This instruction takes a memory pointer as the first input and four vector registers as the second input and performs 8 multiply-add operations per output (16 Integer-OPs). For each 32b lane, the instruction takes two pairs of 16-bit Integers, performs a multiply followed by a horizontal add.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8dfc0fcf",
+                        "type": "paragraph",
+                        "text": "Algorithm 1 Semantics of the QVNNI16 Instruction The FPROP convolution kernel is written using AVX512_4VNNI instruction in Algorithm 2. The data layout of the weights captures the 2-way horizontal accumulation operation in AVX512_4VNNI. Here the last dimension moves along consecutive input-feature maps. Hence the dimensions of activations is: N, C/16, H, W, 16, and that of weights is C/16, K/16, KH, KW, 8c, 16k, 2c (where C and K are input and output feature maps, H, W are input feature map height and width, and KH, KW are kernel height/width). Note that while we briefly touch upon data layout and blocking of the core kernel loops in Algorithm 2, detailed analysis of performance is not the objective of this work. These details are explored only to highlight different functional components of the kernel. One way to prevent overflows is to convert an INT32 intermediate output into FP32 before accumulation as described in lines 26-31 in Algorithm 2. Here we first convert the INT32 result to FP32 using the VCVTINTFP32 instruction, followed by a scale and accumulate into the final FP32 result using the VFP32MADD instruction. The scale used is 2 (Einp+Ewt) (equation 3), which is broadcast and stored in the vscale vector register. The instruction sequence in lines 26-31 can be applied after every AVX512_4VNNI instruction to prevent almost all overflows. However the overheads would be significant and hurt performance. Hence we pick the strategy of partial accumulations into INT32 for short accumulate chains, and subsequently converting the results into FP32.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e9ca5052",
+                        "type": "paragraph",
+                        "text": "Performance Impact: As outlined in Algorithm2 for performance we block additionally over the input feature maps (ICBLK) and use optimal register blocking (RB_SIZE). The difference between an ideal instruction sequence (with no overflow management) and Algorithm 2 is essentially the additional VCVTINTFP32 instruction (line 28). In the loop in lines 8-31, we have (ICBLK/16)*KH*KW*2*RB AVX512_4VNNI instructions, and RB*4 + (ICBLK/16)*KH*KW*4 non-AVX512_4VNNI instructions, and RB VCVTINTFP32 instructions. The instruction overhead from overflow management therefore varies between <1% in most cases, to at most 3%.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_41cd338c",
+                        "type": "paragraph",
+                        "text": "The length of the accumulate chain (via sizing the input feature map blocking factor ICBLK in line 7) is selected to optimize instruction overheads and cache/instruction reuse. In this work we strive to keep the accumulate chain to more than 200 (which is empirically shown to be close to optimal). Often this accumulate chain also overflows, which we circumvent by shifting inputs. In this work, we shift both the inputs by 1-bit for all convolutions in all experiments. Hence effectively we have a DFP15 representation of all DFP tensors. It is notable that this shift value is largely dependent on this inner accumulate chain length, and by constraining it we can find a shift value applicable across all operations. The combination of input shift and conversion of outputs to FP32 allows us to prevent occurrence of any overflows and hence catastrophic errors during training.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_10f4e031",
+                "title": "EXPERIMENTS AND RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_f1ddb296",
+                        "type": "paragraph",
+                        "text": "We compare mixed precision DFP16 training with baseline full precision (FP32) for several ImageNetclass SOTA CNNs. Both baseline and DFP16 experiments are run using versions of the BVLC CAFFE framework Jia et al. (2014) . For the baseline runs we use Intel's CAFFE branch 2 . For the mixed precision DFP16 experiments we use a private fork of this branch, where we have added DFP16 data-type support. The DFP16 compute primitives are supported through the prototype 16-bit integer kernels in Intel's MKL-DNN library 3 along with explicit exponent management as described in Section.   It can be seen from Figure .3 that DFP16, closely tracks the full precision training. For some models like GoogLeNet-v1 and AlexNet, we observe the initially DFP16 training lags the baseline, however this gaps is closed with subsequent epochs especially after the learning rate changes. Further, we observe that compared to baseline run -with DFP16 the validation/test loss tracks much closer to the training loss. We believe this is the effect of the additional noise introduced from reduced precision computation/storage, which is results in better generalization with reduced training-testing gap and better accuracies.",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a9f2dcff",
+                "title": "PERFORMANCE DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_ba0918a5",
+                        "type": "paragraph",
+                        "text": "For demonstrating the performance potential with mixed precision DFP16 training, we present detailed performance analysis and breakdown for the ResNet-50 topology as case study. The performance numbers reported below were measured on an Intel R XeonPhi TM Processor 7295 (codename Knights-Mill) 5 4",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "OC/16][OH][OW][16] = 0) 2: _m512 vwt[0. . . 3 DFP16 <weights 32 IC/16. vout[RB_SIZE], vtemp, vscale",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "OW/RB_SIZE-1 do 7: for ifm = 0 ... IC/ICBLK-1 do 8: for rb=0 = Vbroadcast Setzero 10: end for 11: for ifmb = 0 ... ICBLK/16-1 do 12: for kh = 0 . . . KH-1 do 13: for kw = 0 . . . KW-1 do 14: for ib = 0. . . 1 do 15 RB_SIZE-1 do 9: vout[rb]. for v= 0. . . 3 do 16: vwt[v] = LOAD(&weights[ifm][ofm][kh][kw. ib*4+v",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "RB_SIZE-1 do 19: AVX512_4VNNI(&input[ifm*(IC/ICBLK)+icb 17: end for 18: for rb = 0 . . S*ofh+kh. S*ofw+kw. vwt[0. . . 3], vout[rb",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "RB-1 do 27: vtemp = LOAD 22 0 &output[ofm][ofmh. ofmw*RB_SIZE + rb",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Matthieu Courbariaux Yoshua Bengio Jean-Pierre David arXiv:1412.7024 Training deep neural networks with low precision multiplications 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Binaryconnect: Training deep neural networks with binary weights during propagations Matthieu Courbariaux Yoshua Bengio Jean-Pierre David Advances in Neural Information Processing Systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Imagenet: A large-scale hierarchical image database Jia Deng Wei Dong Richard Socher Li-Jia Li Kai Li Li Fei-Fei Computer Vision and Pattern Recognition IEEE 2009. 2009 CVPR 2009. IEEE Conference on",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "arXiv:1511.04561 Tim Dettmers. 8-bit approximations for parallelism in deep learning 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Training of deep networks with halfprecision float Boris Ginsburg Sergei Nikolaev Paulius Micikevicius NVidia GPU Technology Conference 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Deep learning with limited numerical precision Suyog Gupta Ankur Agrawal Kailash Gopalakrishnan Pritish Narayanan ICML 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Deep residual learning for image recognition Kaiming He Xiangyu Zhang Shaoqing Ren Jian Sun Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition the IEEE Conference on Computer Vision and Pattern Recognition 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Ran El-Yaniv, and Yoshua Bengio. Binarized neural networks Itay Hubara Matthieu Courbariaux Daniel Soudry Advances in neural information processing systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Ran El-Yaniv, and Yoshua Bengio Itay Hubara Matthieu Courbariaux Daniel Soudry arXiv:1609.07061 Quantized neural networks: Training neural networks with low precision weights and activations 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Yangqing Jia Evan Shelhamer Jeff Donahue Sergey Karayev Jonathan Long Ross Girshick Sergio Guadarrama Trevor Darrell Caffe arXiv:1408.5093 Convolutional architecture for fast feature embedding 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Flexpoint: An adaptive numerical format for efficient training of deep neural networks Urs K\u00f6ster Tristan Webb Xin Wang Marcel Nassar Arjun K Bansal William Constable Oguz Elibol Stewart Hall Luke Hornof Amir Khosrowshahi Carey Kloss Ruby J Pai Naveen Rao CoRR, abs/1711.02213 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Imagenet classification with deep convolutional neural networks Alex Krizhevsky Ilya Sutskever Geoffrey E Hinton Advances in neural information processing systems 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Naveen Mellempudi Abhisek Kundu Dheevatsa Mudigere Dipankar Das Bharat Kaul Pradeep Dubey arXiv:1705.01462 Ternary neural networks with fine-grained quantization 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Paulius Micikevicius Sharan Narang Jonah Alben Gregory Diamos Erich Elsen David Garcia Boris Ginsburg Michael Houston Oleksii Kuchaev arXiv:1710.03740 Ganesh Venkatesh, et al. Mixed precision training 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Nvidia tesla v100 gpu architecture -whitepaper Nvidia 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Xnor-net: Imagenet classification using binary convolutional neural networks Mohammad Rastegari Vicente Ordonez Joseph Redmon Ali Farhadi ECCV 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Imagenet large scale visual recognition challenge Olga Russakovsky Jia Deng Hao Su Jonathan Krause Sanjeev Satheesh Sean Ma Zhiheng Huang Andrej Karpathy Aditya Khosla Michael Bernstein International Journal of Computer Vision 115 3 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Very deep convolutional networks for large-scale image recognition Karen Simonyan Andrew Zisserman arXiv:1409.1556 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Going deeper with convolutions Christian Szegedy Wei Liu Yangqing Jia Pierre Sermanet Scott Reed Dragomir Anguelov Dumitru Erhan Vincent Vanhoucke Andrew Rabinovich Proceedings of the IEEE conference on computer vision and pattern recognition the IEEE conference on computer vision and pattern recognition 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Improving the speed of neural networks on cpus Vincent Vanhoucke Andrew Senior Mark Z Mao Proc. Deep Learning and Unsupervised Feature Learning NIPS Workshop Deep Learning and Unsupervised Feature Learning NIPS Workshop 1",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Citeseer 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Dynamically scaled fixed point arithmetic Darrell Williamson Communications, Computers and Signal Processing IEEE 1991. 1991 IEEE Pacific Rim Conference on",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This work presents a CNN training setup that uses half precision implementation that can get 2X speedup for training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The work is clearly presented and the evaluations seem convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The presented implementations are competitive in terms of accuracy, when compared to the FP32 representation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "I'm not an expert in this area but the contribution seems relevant to me, and enough for being published.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.8515,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper is about low-precision training for ConvNets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "It proposed a \"dynamic fixed point\" scheme that shares the exponent part for a tensor, and developed procedures to do NN computing with this format.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The proposed method is shown to achieve matching performance against their FP32 counter-parts with the same number of training iterations on several state-of-the-art ConvNets architectures on Imagenet-1K.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "According to the paper, this is the first time such kind of performance are demonstrated for limited precision training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Potential improvements:\n\t\n  - Please define the terms like FPROP and WTGRAD at the first occurance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "- For reference, please include wallclock time and actual overall memory consumption comparisons of the proposed methods and other methods as well as the baseline (default FP32 training).",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_af683032"
+        },
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f7afa5a3"
+        },
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d755645"
+        },
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3086dc4d"
+        },
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e02a188"
+        },
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_44a86449"
+        },
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5b6dcb1f"
+        },
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bd82ba1a"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_f879c70e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_97e737dc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f879c70e"
+        },
+        {
+            "source": "sec_87882d43",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cae456b3"
+        },
+        {
+            "source": "sec_87882d43",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8c9b1c10"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_08e2dca6"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ae230b24"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_edd543af"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5996ed98"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a701451a"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a052b1d8"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ab35a00c"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_435a073f"
+        },
+        {
+            "source": "sec_81611eac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f6e549f8"
+        },
+        {
+            "source": "sec_65700255",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3c25740e"
+        },
+        {
+            "source": "sec_65700255",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_abcefd46"
+        },
+        {
+            "source": "b_96760805",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_8a521487",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_96760805"
+        },
+        {
+            "source": "sec_6cd26547",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b48c737a"
+        },
+        {
+            "source": "sec_6cd26547",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8dfc0fcf"
+        },
+        {
+            "source": "sec_6cd26547",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e9ca5052"
+        },
+        {
+            "source": "sec_6cd26547",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_41cd338c"
+        },
+        {
+            "source": "b_f1ddb296",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_10f4e031",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f1ddb296"
+        },
+        {
+            "source": "sec_a9f2dcff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ba0918a5"
+        }
+    ]
+}

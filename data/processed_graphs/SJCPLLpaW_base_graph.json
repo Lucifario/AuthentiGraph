@@ -1,0 +1,944 @@
+{
+    "paper_metadata": {
+        "paper_id": "SJCPLLpaW",
+        "source": "OpenReview_ICLR_2018",
+        "year": "2018",
+        "decision": "Rejected",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_2aa5954b",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_289410c8",
+                        "type": "paragraph",
+                        "text": "Training convolutional neural networks (CNNs) is increasingly compute-intensive and timeconsuming. It takes days or even weeks to train deep CNNs from scratch (Szegedy et al., 2014; Zeiler & Fergus, 2014; Simonyan & Zisserman, 2014; Szegedy et al., 2016) . Existing deep learning frameworks such as TensorFlow, PyTorch, and Caffe2 parallelize the training process onto multiple processors (usually GPUs) using image parallelism 1 dividing the entire image dataset into batches with the same number of images and assigning each batch to a dedicated processor.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b11",
+                            "Citation_b8",
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_da51fc04",
+                        "type": "paragraph",
+                        "text": "The standard parallelization of CNN training only exploits image parallelism. However, other dimensions can also parallelize the training process. For example, in CNNs for 2D images, data is commonly organized as 4-dimensional tensors (i.e., image, height, width, channel) . The image dimension includes an index for each image in the input dataset. The height and width dimensions specify a position in an image. For a particular position, the channel dimension 2 indexes different neurons for that position. Exploring these other parallelizable dimensions can potentially reduce the compute time and data transfer cost when training CNNs (see Section 2). Moreover, different layers in a CNN may prefer different parallelism configurations for achieving optimal performance. We propose DeePa, a deep learning framework that explores parallelism in all parallelizable dimensions to accelerate the training of CNNs. To the best of our knowledge, DeePa is the first system that models and exploits the parallelism of neural networks at the granularity of each individual layer. To generate a parallelism configuration for each layer, DeePa uses an elimination-based algorithm that automatically finds the configuration with the best estimated performance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_88972058",
+                        "type": "paragraph",
+                        "text": "The main contributions of this paper are:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_919641f9",
+                        "type": "paragraph",
+                        "text": "\u2022 We present DeePa, a deep learning framework that explores parallelism in all parallelizable dimensions to accelerate the training of CNNs. \u2022 The parallelization strategy is selected at the granularity of each individual layer.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7aaacc9f",
+                        "type": "paragraph",
+                        "text": "\u2022 We present an elimination-based algorithm for finding the parallelism configuration with optimal estimated performance for each layer. \u2022 Our evaluation shows that, compared to state-of-the-art deep learning frameworks (e.g., TensorFlow and PyTorch), DeePa achieves 6.5\u00d7, 1.9\u00d7, and 1.5\u00d7 speedup for AlexNet,",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0ba8da5c",
+                "title": "MOTIVATION",
+                "blocks": [
+                    {
+                        "block_id": "b_f2a78734",
+                        "type": "paragraph",
+                        "text": "This work is motivated by the following observations. 1 . For each convolutional layer, we tried parallelizing the computation in each individual parallelizable dimension as well as combinations of different parallelizable dimensions, and we report the performance of the standard parallelization over images along with the worst and best parallelization strategies we discovered. Figure 1 shows that different parallelism configurations result in very different performance, and image parallelism generally achieves suboptimal performance. Therefore, exploring parallelism in other dimensions can potentially accelerate the training of convolutional layers.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_69261df5",
+                "title": "REDUCING DATA TRANSFER COST",
+                "blocks": [
+                    {
+                        "block_id": "b_b46db271",
+                        "type": "paragraph",
+                        "text": "Different parallelization strategies can also result in significantly different amounts of data movement. Figure 3 shows an example of parallelizing the first fully-connected layer of VGG-16 on two GPUs in different dimensions. In image parallelism (Figure 3a ), each GPU processes a batch of images and computes the gradient for the entire fully-connected layer. This requires each GPU to synchronize the gradients for the entire fully-connected layer (shown as the shadow rectangles) after each step. An alternative approach (Figure 3b ) parallelizes in the channel dimension by assigning  a subset of the output channels to each GPU. As a result, different GPUs compute the gradients for disjoint subsets of the fully-connected layer, which eliminates transferring the fully-connected layer but introduces additional data transfers for input tensors (shown as the shadow rectangles). For this particular case, using parallelism in the channel dimension reduces data transfer costs by 12\u00d7.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c8cd561f",
+                "title": "OPTIMIZING PER-LAYER PERFORMANCE",
+                "blocks": [
+                    {
+                        "block_id": "b_0d825ee5",
+                        "type": "paragraph",
+                        "text": "When processing a batch of images, increasing the number of workers does not always improve overall execution time, due to the data transfer overhead to synchronize gradients across different workers. Figure 2 shows the per-step training time for three different layers in Inception-v3 for a batch size of 512 images on up to 16 GPUs. The training time includes forward processing, backward propagation, and gradient aggregation. The figure shows that different layers in a neural network may prefer different hardware configurations, and there is no single configuration that is optimal for all layers. For example, the third layer performs best on 16 GPUs while the last layer performs best on 4 GPUs. Thus, a parallelism configuration includes both selecting the data dimensions to be parallelized and the number of parallel workers (or, equivalently, the number of subsets into which the data is partitioned). Similar to TensorFlow and PyTorch, DeePa uses computation graphs to describe dependencies between operations. In a computation graph G = (V, E), each node n \u2208 V is an operation (e.g., a convolution or matrix-multiply), and each directed edge (u, v) \u2208 E is a tensor that is an output of u and an input of v.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c10e6891",
+                "title": "Width",
+                "blocks": [
+                    {
+                        "block_id": "b_e131b895",
+                        "type": "paragraph",
+                        "text": "One key difference between DeePa and TensorFlow or PyTorch is that each node in the DeePa computation graph also includes a configuration that describes how the corresponding operation is parallelized across different workers. For each parallelizable dimension (i.e., image, height, width, and channel), the configuration includes an integer that describes the degree of parallelism in that dimension. For a configuration, the product of the integers over all dimensions is the number of workers needed to process the operation in that configuration. Figure 4 demonstrates some example configurations that explore parallelism in a single dimension as well as combinations of different dimensions. DeePa assumes equal partitioning in each dimension. As a result, each worker receives the same size input, which provides well-balanced workload distribution in our experiments.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_58fb7939",
+                        "type": "paragraph",
+                        "text": "For each node in the computation graph, its configuration describes how the output tensor is divided onto multiple workers. Each worker computes a disjoint subset of the output tensor, and thus each worker can process the operation in parallel without data dependencies. Given a node's configuration, DeePa calculates the input sets for each worker and automatically schedules proper data transfers between operations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4ccc3556",
+                        "type": "paragraph",
+                        "text": "DeePa also provides three additional functions:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_55731f19",
+                        "type": "paragraph",
+                        "text": "\u2022 For each node v and configuration c, v.compute(c) estimates the time to process the corresponding operation under the parallelism configuration c. This includes both the forward processing and back propagation time and is estimated by running the operation in that configuration multiple times on the device and measuring the average execution time.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b5a0b29a",
+                        "type": "paragraph",
+                        "text": "\u2022 For each edge e = (u, v), e.xfer(c u , c v ) estimates the time to transfer the input tensor e to each worker, using the size of the data to be moved and the known communication bandwidth. Note that e.xfer(c u , c v ) is zero if u and v have the same configuration (i.e., c u = c v ), in which case no data is transferred. As with compute(), we precompute the xfer() function for each edge in the graph by calculating the overall data transfer size for all possible source and destination configurations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_09f7e7a6",
+                        "type": "paragraph",
+                        "text": "\u2022 For each node v and configuration c, v.update(c) estimates the time to update parameters for the corresponding operation. We use the data transfer time to approximate the update time, since the data transfer time is much longer than the compute time for updating parameters. Note that different configurations can have significantly different update time, as described in Section 2.2.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1560f522",
+                        "type": "paragraph",
+                        "text": "A global configuration g includes a parallelism configuration for each node in a computation graph: g(v) describes the parallelism configuration for node v. Using the functions defined above, we can model the per-step execution time for a computation graph:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2506d5fa",
+                        "type": "paragraph",
+                        "text": "Cost(g, (V, E)) estimates the per-step execution time if the computation graph (V, E) is parallelized using global configuration g. This execution time includes forwarding processing, backward propagation, and gradient aggregation. Equation 1 expresses the problem of finding the configuration for each individual node as a global optimization problem.   We now describe our algorithm for finding a global configuration that minimizes Equation 1. In DeePa, each node can select any of a fixed (but large) set of parallelism configurations. Therefore the number of potential global configurations is exponential in the number of nodes in a computation graph, which makes it impractical to enumerate all global configurations for deep CNNs such as VGG-16 and Inception-v3.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_227fd9be",
+                "title": "FINDING OPTIMAL GLOBAL CONFIGURATIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_ea1ca297",
+                        "type": "paragraph",
+                        "text": "However, the CNNs we have seen in practice exhibit strong locality: each node is only connected to a few nodes with similar depth in a computation graph. Based on this observation, we use the following two elimination strategies to iteratively simplify the computation graph while preserving the globally optimal configuration.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_baac9887",
+                        "type": "paragraph",
+                        "text": "Node elimination. For each node w with a single in-edge e 1 = (u, w) and a single out-edge e 2 = (w, v), we remove node w and the two edges e 1 and e 2 from the graph and insert a new edge e = (u, v) (shown in Figure 5a ). The xfer() function for node e is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_45a84fef",
+                        "type": "paragraph",
+                        "text": "Note that because we have precomputed the xfer() function for edges in the original graph, we can similarly compute the xfer() function for the transitive edge added by a node elimination; i.e., we use dynamic programming to compute the optimal configuration for node w for every possible choice of configurations for nodes u and v. For CNNs with a linear computation graph (e.g., AlexNet and VGG-16), node elimination is sufficient to reduce the original graph to a graph with only 2 nodes.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_66025f1e",
+                        "type": "paragraph",
+                        "text": "Edge elimination. For two edges with the same source and destination node (i.e., e 1 = (u, v) and e 2 = (u, v)), we can remove e 1 and e 2 from the graph and insert a new edge e = (u, v) (shown in Figure 5b ). The xfer() function for node e is  As with node elimination, we compute the xfer() function for e using the already computed xfer() functions for e 1 and e 2 . Figure 6 shows how DeePa iteratively eliminates nodes and edges for an Inception-v3 module. The full Inception-v3 computation graph has 120 nodes, which DeePa reduces to a 2-node graph.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bada8049",
+                        "type": "paragraph",
+                        "text": "DeePa iteratively uses node and edge eliminations to simplify a computation graph until neither elimination can be applied. DeePa then enumerates all global configurations for the final graph and chooses the one that minimizes the Cost function in Equation 1 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d1f44b48",
+                        "type": "paragraph",
+                        "text": "After deciding the configuration for each node in the final graph, DeePa then decides the configuration for the eliminated nodes by undoing the node and edge eliminations in reverse order. When undoing a node elimination for node w, DeePa selects the configuration that minimizes Equation 2 for node w. After undoing all eliminations, DeePa has a configuration for every node in the original graph. In Appendix A.1, we prove that our algorithm finds an optimal global configuration. In our experiments, DeePa finds an optimal configuration for parallelizing the largest CNN we have worked with, Inception-v3, on 16 GPUs in about 100ms.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1b0613ac",
+                "title": "IMPLEMENTATION",
+                "blocks": [
+                    {
+                        "block_id": "b_7c837659",
+                        "type": "paragraph",
+                        "text": "We found that it is non-trivial to parallelize the training of CNNs in the height, width, and channel dimensions in existing frameworks (e.g., TensorFlow, PyTorch, and Caffe2), and none provides an interface for controlling per-operation parallelism. We implemented DeePa in Legion (Bauer et al., 2012) , a high-performance parallel runtime for distributed heterogeneous architectures, and use cuDNN (Chetlur et al., 2014) and cuBLAS (cub, 2016) as the underlying libraries for processing neural network operations. The following Legion features significantly simplify our implementation for DeePa. First, Legion supports high-dimensional partitioning that allows us to parallelize any operation in any combination of the dimensions. Second, Legion allows DeePa to control parallelism at the granularity of each operation. Third, Legion allows fine-grain control over the placement of data in memory. Fourth, Legion's asynchronous tasking model makes it easy to exploit task as well as image parallelism. We also include two critical optimizations that help achieve good performance.",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d8d6898e",
+                        "type": "paragraph",
+                        "text": "Overlapping computation with data transfers. DeePa manages the gradients of each operation separately and transfers an operation's gradients as long as its back propagation is completed. We have found that this can effectively hide the data transfer overhead for gradient synchronization. As a result, the synchronous training performance matches asynchronous training in DeePa, which allows users to use synchronous training with its better algorithmic efficiency.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_75a62d50",
+                        "type": "paragraph",
+                        "text": "Distributing parameter servers. Existing frameworks use parameter servers to store and update variables for a CNN model. Parameter servers are located in CPU memory in TensorFlow and Py-Torch. Because DeePa manages the parameters for each operation separately, DeePa can opportunistically distribute the parameter server onto the GPU memories whenever possible. This eliminates data transfers for operations whose gradients and parameter server are located on the same GPU and transforms all GPU to CPU copies into faster GPU to GPU copies.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_068eb0e0",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_e2c56518",
+                        "type": "paragraph",
+                        "text": "To the best of our knowledge, DeePa is the first deep learning framework that controls and optimizes the parallelism of neural networks in all dimensions at the granularity of each operation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8c69a221",
+                        "type": "paragraph",
+                        "text": "Existing frameworks such as TensorFlow (Abadi et al., 2016) We use AlexNet (Krizhevsky, 2014) , VGG-16 (Simonyan & Zisserman, 2014) , and Inception-v3 (Szegedy et al., 2016) as benchmark CNNs and use the ImageNet dataset (Russakovsky et al., 2015) as the input. For each CNN, we compare the performance of DeePa against TensorFlow, Py-Torch, and OWT. We implement OWT in DeePa by restricting all convolutional and pooling layers to use image parallelism and all fully-connected layers to use model parallelism.",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b5",
+                            "Citation_b8",
+                            "Citation_b10",
+                            "Citation_b7"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5dce6ef2",
+                "title": "CASE STUDY ON A 16-GPU MACHINE",
+                "blocks": [
+                    {
+                        "block_id": "b_cebc759c",
+                        "type": "paragraph",
+                        "text": "We conduct a detailed case study for training the three CNNs on a 16-GPU machine, with two Intel 10-core E5-2680 Xeon processors, 256 GB main memory, and 16 NVIDIA Tesla K80 GPUs 4 . We use all 16 GPUs for training each CNN model with a minibatch size of 512 images. As a result, each GPU processes a batch of 32 images in the image parallelism configuration. DeePa uses the search algorithm in Section 4 to find the optimal parallelism configurations, which requires 0.7, 1.1, and 4.8 seconds for AlexNet, VGG-16, and Inception-v3, respectively.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6e4b83c5",
+                        "type": "paragraph",
+                        "text": "Figure 7 shows the synchronous training throughput for a minibatch size of 512 images on 16 GPUs. When DeePa uses image parallelism for all operations, DeePa achieves competitive performance compared to the best of TensorFlow and PyTorch. The OWT approach that uses model parallelism for fully-connected layers speeds up the training throughput by 1.4\u00d7, 1.2\u00d7, and 1.07\u00d7 compared to image parallelism using DeePa. The best configurations found by DeePa achieve 6.5\u00d7, 1.9\u00d7, and 1.5\u00d7 speedup compared to TensorFlow and PyTorch.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0e748b75",
+                        "type": "paragraph",
+                        "text": "Three main optimizations in DeePa achieve most of the performance benefit over the other frameworks. First, DeePa significantly reduces data transfers in each step, as shown in Figure 8 . Compared to image parallelism, the OWT approach reduces data transfers by 1.05-8.4\u00d7. However, the best configuration used by DeePa further reduces data transfers by 1.2-2.7\u00d7 compared to OWT. Second, the optimization for overlapping computation with data transfers (described in Section 5) effectively hides data transfer latency and achieves better GPU utilization. The grey bars in Figure 7 Under review as a conference paper at ICLR 2018 illustrate DeePa's performance when the overlap optimization is disabled, which shows that overlapping computation with data transfers can improve the training throughput by 10%-30%. Third, DeePa also improves performance by exploring parallelism in the height and width dimensions (see Section 7.1.3).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_345c6559",
+                "title": "THE BEST CONFIGURATIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_8bc35c65",
+                        "type": "paragraph",
+                        "text": "We describe the best configurations discovered for AlexNet, VGG-16, and Inception-v3 in Sections 7.1.2 to 7.1.4. The best configurations have several similarities.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8ee7ea08",
+                        "type": "paragraph",
+                        "text": "First, for the beginning layers with large height/width dimensions and small channel dimensions, DeePa uses image parallelism on all available GPUs, since the data transfers for synchronizing gradients are much smaller than the data transfers for moving tensors between operations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6ee756cf",
+                        "type": "paragraph",
+                        "text": "Second, deeper layers in CNNs tend to have smaller height/width dimensions and larger channel dimensions. As a result, the cost for moving tensors between different operations decreases, while the cost for synchronizing gradients increases. DeePa adaptively reduces the number of GPU workers for these layers to reduce the expensive data transfers for synchronizing gradients at the cost of introducing cheaper data transfers for moving tensors.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_73d6c33c",
+                        "type": "paragraph",
+                        "text": "Third, DeePa uses model parallelism on a small number of GPU workers for fully-connected layers, because synchronizing gradients and moving tensors are both much more expensive than the compute time for fully-connected layers. DeePa reduces the data transfers for synchronizing gradients and moving tensors at the cost of using fewer GPUs.  Figure 9 shows the global configuration for AlexNet on 16 GPU workers. Note that DeePa selects the parallelism configuration that optimizes the performance for each layer. Table 2 lists the cost for different configurations of the first fully-connected layer. The standard image parallelism configuration eliminates the cost for transferring the input tensors but introduces additional data transfers for synchronizing gradients. The OWT approach completely eliminates gradient synchronization at the cost of replicating the input tensors on every GPU worker. The configuration chosen by DeePa only uses 2 GPU workers for training the first fully-connected layer, which prolongs the compute time but significantly reduces the cost for both transferring input tensors and synchronizing gradients. As a result, DeePa reduces the total cost by 5\u00d7 compared to other approaches.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_039daaab",
+                "title": "ALEXNET",
+                "blocks": [
+                    {
+                        "block_id": "b_38a09fd7",
+                        "type": "paragraph",
+                        "text": "DeePa uses image parallelism for all convolutional and pooling layers, because the additional data transfer cost introduced by transforming configurations outweighs any performance benefits.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_96e7dc5b",
+                "title": "VGG-16",
+                "blocks": [
+                    {
+                        "block_id": "b_f8d1b5cd",
+                        "type": "paragraph",
+                        "text": "Configurations:   DeePa uses similar configurations for parallelizing the fully-connected layers in VGG-16 (Figure 10 ). In addition, DeePa also uses a different configuration to cooperatively accelerate the last three convolutional layers (the yellow node in Figure 10 ). Table 3 lists the cost for different parallelism configurations for the last three convolutional layers. The configuration with optimal total cost uses only four GPU workers for the last three convolutional layers to reduce data transfers for synchronizing gradients. DeePa also exploits parallelism in the height and width dimensions to further reduce the compute time.  The Inception-v3 model has multiple Inception modules (Szegedy et al., 2016) . Each module has several branches of convolutional and pooling layers, which are then concatenated as the output tensor of the module. Figure 11 shows the global configuration for Inception-v3. DeePa uses different configurations to parallelize different branches for the InceptionE1 module, as shown in Figure 12 . We found that this configuration reduces data transfers by 30% in InceptionE1 and InceptionE2 and reduces overall data transfers by 20%.",
+                        "extracted_citations": [
+                            "Citation_b10"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_29e3d8f4",
+                "title": "MINIBATCH SIZE",
+                "blocks": [
+                    {
+                        "block_id": "b_56060545",
+                        "type": "paragraph",
+                        "text": "The minibatch size plays an important rule on the performance of CNNs. Figure 13 compares DeePa, PyTorch, and TensorFlow with different minibatch sizes. All three networks were trained on 16 Tesla K80 GPUs on a single node, as described in Section 7.1. We were not able to train VGG-16 and Inception-v3 with a minibatch size of 2048 images, because the required metadata size exceeds the aggregate memory capacity of the 16 GPUs.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c2316cfb",
+                        "type": "paragraph",
+                        "text": "Figure 13 shows that, DeePa achieves constant speedups compared to PyTorch and TensorFlow for various minibatch sizes. In particular, DeePa achieves 4.6-6.5\u00d7, 1.6-1.9\u00d7, and 1.2-1.5\u00d7 speedup for AlexNet, VGG-16, and Inception-v3, respectively.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0f6044b0",
+                "title": "MULTI-NODE RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_e865f7d6",
+                        "type": "paragraph",
+                        "text": "We evaluate the scalability of different frameworks by comparing their training throughput with different number of GPUs and compute nodes. The experiments were performed on a GPU cluster",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_19dc298f",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_42c2613e",
+                        "type": "paragraph",
+                        "text": "We have presented DeePa, a deep learning framework that explores parallelism in all parallelizable dimensions to accelerate the training of CNNs. DeePa optimizes the parallelism configuration chosen at the granularity of individual layers. DeePa achieves up to 6.5\u00d7 for training CNNs and reduces overall data transfers by up to 23\u00d7 compared to state-of-the-art deep learning frameworks.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_58923c9f",
+                "title": "A APPENDIX A.1 NODE AND EDGE ELIMINATION",
+                "blocks": [
+                    {
+                        "block_id": "b_73bd9eee",
+                        "type": "paragraph",
+                        "text": "We prove the correctness of the node and edge eliminations in Section 4. In particular, we prove that after applying node and edge eliminations, the modified graph has the same optimal configuration as the original graph.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_af5b7ccd",
+                "title": "A.1.1 NODE ELIMINATION",
+                "blocks": [
+                    {
+                        "block_id": "b_8565cc0d",
+                        "type": "paragraph",
+                        "text": "For a given computation graph G = (V, E), applying a node elimination on w requires w having a single in-edge e 1 = (u, w) and a single out-edge e 2 = (w, v). The node elimination results in a modified graph G = (V , E ), where V = V -{w}, E = E -e 1 -e 2 + e , and e = (u, v). Theorem 1. Consider graphs (V, E) and the result of a single node elimination (V , E ). Then an optimal configuration of V, E) is also an optimal configuration of (V , E ), and an optimal configuration of (V , E ) is extensible to a an optimal configuration of (V, E).",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Tensors and Dynamic neural networks in Python with strong GPU acceleration 2016. 2016. 2017 A New Lightweight, Modular, and Scalable Deep Learning Framework",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Tensorflow: A system for largescale machine learning Mart\u00edn Abadi Paul Barham Jianmin Chen Zhifeng Chen Andy Davis Jeffrey Dean Matthieu Devin Sanjay Ghemawat Geoffrey Irving Michael Isard OSDI 2016 16",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Legion: Expressing locality and independence with logical regions Michael Bauer Sean Treichler Elliott Slaughter Alex Aiken Proceedings of the International Conference on High Performance Computing, Networking, Storage and Analysis the International Conference on High Performance Computing, Networking, Storage and Analysis 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "cudnn: Efficient primitives for deep learning Sharan Chetlur Cliff Woolley Philippe Vandermersch Jonathan Cohen John Tran Bryan Catanzaro Evan Shelhamer CoRR, abs/1410.0759 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Yangqing Jia, and Kaiming He. Accurate, large minibatch SGD: training imagenet in 1 hour Priya Goyal Piotr Doll\u00e1r Ross B Girshick Pieter Noordhuis Lukasz Wesolowski Aapo Kyrola Andrew Tulloch CoRR, abs/1706.02677 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "One weird trick for parallelizing convolutional neural networks Alex Krizhevsky CoRR, abs/1404.5997 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Device placement optimization with reinforcement learning Azalia Mirhoseini Hieu Pham V Quoc Benoit Le Rasmus Steiner Yuefeng Larsen Naveen Zhou Mohammad Kumar Samy Norouzi Jeff Bengio Dean CoRR, abs/1706.04972 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Imagenet large scale visual recognition challenge Olga Russakovsky Jia Deng Hao Su Jonathan Krause Sanjeev Satheesh Sean Ma Zhiheng Huang Andrej Karpathy Aditya Khosla Michael Bernstein International Journal of Computer Vision 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Very deep convolutional networks for large-scale image recognition Karen Simonyan Andrew Zisserman CoRR, abs/1409.1556 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Going deeper with convolutions Christian Szegedy Wei Liu Yangqing Jia Pierre Sermanet Scott E Reed Dragomir Anguelov Dumitru Erhan Vincent Vanhoucke Andrew Rabinovich CoRR, abs/1409.4842 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Rethinking the inception architecture for computer vision Christian Szegedy Vincent Vanhoucke Sergey Ioffe Jon Shlens Zbigniew Wojna Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition the IEEE Conference on Computer Vision and Pattern Recognition 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Visualizing and understanding convolutional networks D Matthew Rob Zeiler Fergus European conference on computer vision 2014",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "The paper proposes an approach that offers speedup on common convolutional neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "It presents the approach well and shows results comparing with other popular frameworks used in the field.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "Originality\n- The automation of parallelism across the different dimensions in each of the layers appears somewhat new.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "Although parallelism across each of the individual dimensions has been explored (batch parallel is most common and best supported, height and width is discussed at least in the DistBelief paper), automatically exploring this to find the most efficient approach is new.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "The splitting across channels seems not to have been covered in a paper before.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Significance\n- Paper shows a significant speedup over existing approaches on a single machine (16 GPUs).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "It is unclear how well this would translate across machines or to more devices, and also on newer devices - the experiments were all done on 16 K80s (3 generations old GPUs).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "While the approach is interesting, its impact also depends on the speedup on the common hardware used today.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Pros:\n- Providing better parallelism opportunities for convolutional neural networks\n- Simple approach to finding optimal global configurations that seems to work well\n- Positive results with significant speedups across 3 different networks\n\nCons:\n- Unclear if speedups hold on newer devices\n- Useful to see how this scales across more than 1 machine\n- Claim on overlapping computation with data transfer seems incorrect.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "I am pretty sure TensorFlow and possibly PyTorch supports this.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "Questions:\n- How long does finding the optimal global configuration take for each model?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.6382,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper develops a framework for parallelization of convolutional neural nets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "In the framework, parallelism on different dimensions are explored for convolutional layers to accelerate the computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "An algorithm is developed to find the best global configuration.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "The presentation needs to be more organized, it is not very easy to follow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "Computation throughput is not defined.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "Although the author mentions DeePa with Tensorflow or Pytorch several times, I think it is not proper to make this comparison.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "The main idea of this paper is to optimize the parallelization scheme of CNN, which is independent of the framework used.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "It is more useful if the configuration searching can be developed on tensorflow / pytorch.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "The per layer comparison is not very informative for practice because the data transfer costs of convolution layers could be completely hidden in data parallelization.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "In data parallelism, the GPU devices are often fully occupied during the forward pass and backward pass.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Gaps are only in between forward and backward, and between iterations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "Model parallelism would add gaps everywhere in each layer.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "This could be more detrimental when the communication is over ethernet.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "To be more convincing, it is better to show the profile graph of each run to show which gaps are eliminated, rather than just numbers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "The batch size is also a crucial factor, difference batch size would favor different methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "More comparisons are necessary.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.4205,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "The paper proposes a deep learning framework called DeePa that supports multiple dimensions of parallelism in computation to accelerate training of convolutional neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Whereas the majority of work on parallel or distributed deep learning partitions training over bootstrap samples of training data (called image parallelism in the paper), DeePa is able to additionally partition the operations over image height, width and channel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "This gives more options to parallelize different parts of the neural network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "For example, the best DeePa configurations studied in the paper for AlexNet, VGG-16, and Inception-v3 typically use image parallelism for the initial layers, reduce GPU utilization for the deeper layers to reduce data transfer overhead, and use model parallelism on a smaller number of GPUs for fully connected layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "The net is that DeePa allows such configurations to be created that provide an increase in training throughput and lower data transfer in practice for training these networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "These configurations for parellism are not easily programmed in other frameworks like TensorFlow and PyTorch.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "The paper can potentially be improved in a few ways.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "One is to explore more demanding training workloads that require larger-scale distribution and parallelism.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "The ImageNet 22-K would be a good example and would really highlight the benefits of the DeePa in practice.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "Beyond that, more complex workloads like 3D CNNs for video modeling would also provide a strong motivation for having multiple dimensions of the data for partitioning operations.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_289410c8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_289410c8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_289410c8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_289410c8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_2aa5954b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_289410c8"
+        },
+        {
+            "source": "sec_2aa5954b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_da51fc04"
+        },
+        {
+            "source": "sec_2aa5954b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_88972058"
+        },
+        {
+            "source": "sec_2aa5954b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_919641f9"
+        },
+        {
+            "source": "sec_2aa5954b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7aaacc9f"
+        },
+        {
+            "source": "sec_0ba8da5c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f2a78734"
+        },
+        {
+            "source": "sec_69261df5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b46db271"
+        },
+        {
+            "source": "sec_c8cd561f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0d825ee5"
+        },
+        {
+            "source": "sec_c10e6891",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e131b895"
+        },
+        {
+            "source": "sec_c10e6891",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_58fb7939"
+        },
+        {
+            "source": "sec_c10e6891",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4ccc3556"
+        },
+        {
+            "source": "sec_c10e6891",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_55731f19"
+        },
+        {
+            "source": "sec_c10e6891",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b5a0b29a"
+        },
+        {
+            "source": "sec_c10e6891",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09f7e7a6"
+        },
+        {
+            "source": "sec_c10e6891",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1560f522"
+        },
+        {
+            "source": "sec_c10e6891",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2506d5fa"
+        },
+        {
+            "source": "sec_227fd9be",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ea1ca297"
+        },
+        {
+            "source": "sec_227fd9be",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_baac9887"
+        },
+        {
+            "source": "sec_227fd9be",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_45a84fef"
+        },
+        {
+            "source": "sec_227fd9be",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_66025f1e"
+        },
+        {
+            "source": "sec_227fd9be",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bada8049"
+        },
+        {
+            "source": "sec_227fd9be",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d1f44b48"
+        },
+        {
+            "source": "b_7c837659",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_7c837659",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_1b0613ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7c837659"
+        },
+        {
+            "source": "sec_1b0613ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d8d6898e"
+        },
+        {
+            "source": "sec_1b0613ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_75a62d50"
+        },
+        {
+            "source": "sec_068eb0e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e2c56518"
+        },
+        {
+            "source": "b_8c69a221",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_8c69a221",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_8c69a221",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_8c69a221",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_8c69a221",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_068eb0e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8c69a221"
+        },
+        {
+            "source": "sec_5dce6ef2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cebc759c"
+        },
+        {
+            "source": "sec_5dce6ef2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6e4b83c5"
+        },
+        {
+            "source": "sec_5dce6ef2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0e748b75"
+        },
+        {
+            "source": "sec_345c6559",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8bc35c65"
+        },
+        {
+            "source": "sec_345c6559",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ee7ea08"
+        },
+        {
+            "source": "sec_345c6559",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6ee756cf"
+        },
+        {
+            "source": "sec_345c6559",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_73d6c33c"
+        },
+        {
+            "source": "sec_039daaab",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_38a09fd7"
+        },
+        {
+            "source": "b_f8d1b5cd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_96e7dc5b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f8d1b5cd"
+        },
+        {
+            "source": "sec_29e3d8f4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_56060545"
+        },
+        {
+            "source": "sec_29e3d8f4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c2316cfb"
+        },
+        {
+            "source": "sec_0f6044b0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e865f7d6"
+        },
+        {
+            "source": "sec_19dc298f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_42c2613e"
+        },
+        {
+            "source": "sec_58923c9f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_73bd9eee"
+        },
+        {
+            "source": "sec_af5b7ccd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8565cc0d"
+        }
+    ]
+}

@@ -1,0 +1,2458 @@
+{
+    "paper_metadata": {
+        "paper_id": "747",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Rejected",
+        "total_reviews_available": 8
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_e04b72ab",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_3e554cfb",
+                        "type": "paragraph",
+                        "text": "Practitioners of machine learning regularly inspect the coefficients of linear models as a measure of feature importance. This process allows them to understand and debug these models. The natural analog of these coefficients for deep models are the gradients of the prediction score with respect to the input. For linear models, the gradient of an input feature is equal to its coefficient. For deep nonlinear models, the gradient can be thought of as a local linear approximation (Simonyan et al. (2013) ). Unfortunately, (see the next section), the network can saturate and as a result an important input feature can have a tiny gradient.",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ab711a16",
+                        "type": "paragraph",
+                        "text": "While there has been other work (see Section 2.10) to address this problem, these techniques involve instrumenting the network. This instrumentation currently involves significant developer effort because they are not primitive operations in standard machine learning libraries. Besides, these techniques are not simple to understand-they invert the operation of the network in different ways, and have their own peculiarities-for instance, the feature importances are not invariant over networks that compute the exact same function (see Figure 14 ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_89c2b836",
+                        "type": "paragraph",
+                        "text": "In contrast, the method we propose builds on the very familiar, primitive concept of the gradient-all it involves is inspecting the gradients of a few carefully chosen counterfactual inputs that are scaled versions of the initial input. This allows anyone who knows how to extract gradients-presumably even novice practitioners that are not very familiar with the network's implementation-to debug the network. Ultimately, this seems essential to ensuring that deep networks perform predictably when deployed.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a2bee400",
+                "title": "OUR TECHNIQUE 2.1 GRADIENTS DO NOT REFLECT FEATURE IMPORTANCE",
+                "blocks": [
+                    {
+                        "block_id": "b_a82bda6e",
+                        "type": "paragraph",
+                        "text": "Let us start by investigating the performance of gradients as a measure of feature importance. We use an object recognition network built using the GoogleNet architecture (Szegedy et al. ( 2014 )) as a running example; we refer to this network by its codename Inception. (We present applications of our techniques to other networks in Section 3.) The network has been trained on the ImageNet object recognition dataset (Russakovsky et al. (2015) ). It is is 22 layers deep with a softmax layer on top for classifying images into one of the 1000 ImageNet object classes. The input to the network is a 224 \u00d7 224 sized RGB image.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_18975ea3",
+                        "type": "paragraph",
+                        "text": "Before evaluating the use of gradients for feature importance, we introduce some basic notation that is used throughout the paper.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_60739224",
+                        "type": "paragraph",
+                        "text": "We represent a 224 \u00d7 224 sized RGB image as a vector in R 224\u00d7224\u00d73 . Let Incp L : R 224\u00d7224\u00d73 \u2192 [0, 1] be the function represented by the Inception network that computes the softmax score for the object class labeled L. Let Incp L (img) be the gradients of Incp L at the input image img. Thus, the vector Incp L (img) is the same size as the image and lies in R 224\u00d7224\u00d73 . As a shorthand, we write Incp L i,j,c (img) for the gradient of a specific pixel (i, j) and color channel c \u2208 {R, G, B}.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a26b4554",
+                        "type": "paragraph",
+                        "text": "We compute the gradients of Incp L (with respect to the image) for the highest-scoring object class, and then aggregate the gradients Incp L (img) along the color dimension to obtain pixel importance scores. 1 \u2200i, j : P L i,j (img) :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_215cc01e",
+                        "type": "paragraph",
+                        "text": "Next, we visualize pixel importance scores by scaling the intensities of the pixels in the original image in proportion to their respective scores; thus, higher the score brighter would be the pixel.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9694e57d",
+                        "type": "paragraph",
+                        "text": "Figure 1a shows a visualization for an image for which the highest scoring object class is \"reflex camera\" with a softmax score of 0.9938.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_84490d72",
+                        "type": "paragraph",
+                        "text": "Intuitively, one would expect the the high gradient pixels for this classification to be ones falling on the camera or those providing useful context for the classification (e.g., the lens cap). However, most of the highlighted pixels seem to be on the left or above the camera, which to a human seem not essential to the prediction. This could either mean that (1) the highlighted pixels are somehow important for the internal computation performed by the Inception network, or (2) gradients of the image fail to appropriately quantify pixel importance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cbd35338",
+                        "type": "paragraph",
+                        "text": "Let us consider hypothesis (1). In order to test it we ablate parts of the image on the left and above the camera (by zeroing out the pixel intensities) and run the ablated image through the Inception network. See Figure 1b . The top predicted category still remains \"reflex camera\" with a softmax score of 0.9966 -slightly higher than before. This indicates that the ablated portions are indeed irrelevant to the classification. On computing gradients of the ablated image, we still find that most of the high gradient pixels lie outside of the camera. This suggests that for this image, it is in fact hypothesis (2) that holds true. Upon studying more images (see Figure 4 ), we find that the gradients often fail to highlight the relevant pixels for the predicted object label.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_62170d14",
+                "title": "SATURATION",
+                "blocks": [
+                    {
+                        "block_id": "b_0ff9069c",
+                        "type": "paragraph",
+                        "text": "In theory, it is easy to see that the gradients may not reflect feature importance if the prediction function flattens in the vicinity of the input, or equivalently, the gradient of the prediction function with respect to the input is tiny in the vicinity of the input vector. This is what we call saturation, which has also been reported in previous work (Shrikumar et al. (2016) , Glorot & Bengio (2010) ).",
+                        "extracted_citations": [
+                            "Citation_b17",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e60141ba",
+                        "type": "paragraph",
+                        "text": "We analyze how widespread saturation is in the Inception network by inspecting the behavior of the network on counterfactual images obtained by uniformly scaling pixel intensities from zero to their values in an actual image. Formally, given an input image img \u2208 R 224\u00d7224\u00d73 , the set of counterfactual images is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_18ca7864",
+                        "type": "paragraph",
+                        "text": "Figure 2a shows the trend in the softmax output of the highest scoring class, for thirty randomly chosen images form the ImageNet dataset. More specifically, for each image img, it shows the trend in Incp L (\u03b1 img) as \u03b1 varies from zero to one with L being the label of highest scoring object class for img. It is easy to see that the trend flattens (saturates) for all images \u03b1 increases. Notice that saturation is present even for images whose final score is significantly below 1.0. Moreover, for a majority of images, saturation happens quite soon when \u03b1 = 0.2.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_05d94115",
+                        "type": "paragraph",
+                        "text": "One may argue that since the output of the Inception network is the result of applying the softmax function to a vector of activation values, the saturation is expected due to the squashing property of the softmax function. However, as shown in Figure 2b , we find that even the pre-softmax activation scores for the highest scoring class saturate.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_36009d88",
+                        "type": "paragraph",
+                        "text": "In fact, to our surprise, we found that the saturation is inherently present in the Inception network and the outputs of the intermediate layers also saturate. We plot the distance between the intermediate layer neuron activations for a scaled down input image and the actual input image with respect to the scaling parameter, and find that the trend flattens. Due to lack of space, we provide these plots in Figure 12 in the appendix.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c3d6876b",
+                        "type": "paragraph",
+                        "text": "It is quite clear from these plots that saturation is widespread across images in the Inception network, and there is a lot more activity in the network for counterfactual images at relatively low values of the scaling parameter \u03b1. This observation forms the basis of our technique for quantifying feature importance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_605d3891",
+                        "type": "paragraph",
+                        "text": "Note that it is well known that the saturation of gradients prevent the model from converging to a good quality minima (Glorot & Bengio (2010) ). So one may expect good quality models to not have saturation and hence for the (final) gradients to convey feature importance. Clearly, our observations on the Inception model show that this is not the case. It has good prediction accuracy, but also exhibits saturation (see Figure 2 ). Our hypothesis is that the gradients of important features are not saturated early in the training process. The gradients only saturate after the features have been learned adequately, i.e., the input is far away from the decision boundary.",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_413b07ad",
+                "title": "INTERIOR GRADIENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_29c5e158",
+                        "type": "paragraph",
+                        "text": "We study the importance of input features in a prediction made for an input by examining the gradients of the counterfactuals obtained by scaling the input; we call this set of gradients interior gradients.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8db3e238",
+                        "type": "paragraph",
+                        "text": "While the method of examining gradients of counterfactual inputs is broadly applicable to a wide range of networks, we first explain it in the context of Inception. Here, the counterfactual image inputs we consider are obtained by uniformly scaling pixel intensities from zero to their values in the actual image (this is the same set of counterfactuals that was used to study saturation). The interior gradients are the gradients of these images.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c91bf9b0",
+                        "type": "paragraph",
+                        "text": "These interior gradients explore the behavior of the network along the entire scaling curve depicted in Figure 2a , rather than at a specific point. We can aggregate the interior gradients along the color dimension to obtain interior pixel importance scores using equation 1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ca9c6dce",
+                        "type": "paragraph",
+                        "text": "We individually visualize the pixel importance scores for each scaling parameter \u03b1 by scaling the intensities of the pixels in the actual image in proportion to their scores. The visualizations show how the importance of each pixel evolves as we scale the image, with the last visualization being identical to one generated by gradients at the actual image. In this regard, the interior gradients offer strictly more insight into pixel importance than just the gradients at the actual image.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eb539d1e",
+                        "type": "paragraph",
+                        "text": "Figure 3 shows the visualizations for the \"reflex camera\" image from Figure 1a for various values of the scaling parameter \u03b1. The plot in the top right corner shows the trend in the absolute magnitude of the average pixel importance score. The magnitude is significantly larger at lower values of \u03b1 and nearly zero at higher values -the latter is a consequence of saturation. Note that each visualization is only indicative of the relative distribution of the importance scores across pixels and not the absolute magnitude of the scores, i.e., the later snapshots are responsible for tiny increases in the scores as the chart in the top right depicts.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f7148699",
+                        "type": "paragraph",
+                        "text": "The visualizations show that at lower values of \u03b1, the pixels that lie on the camera are most important, and as \u03b1 increases, the region above the camera gains importance. Given the high magnitude of gradients at lower values of \u03b1, we consider those gradients to be the primary drivers of the final prediction score. They are more indicative of feature importance in the prediction compared to the gradients at the actual image (i.e., when \u03b1 = 1).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c7174628",
+                        "type": "paragraph",
+                        "text": "The visualizations of the interior pixel gradients can also be viewed together as a single animation that chains the visualizations in sequence of the scaling parameter. This animation offers a concise yet complete summary of how pixel importance moves around the image as the scaling parameter increase from zero to one.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cdacad4d",
+                        "type": "paragraph",
+                        "text": "Rationale. While measuring saturation via counterfactuals seems natural, using them for quantifying feature importance deserves some discussion. The first thing one may try to identify feature importance is to examine the deep network like one would with human authored code. This seems hard; just as deep networks employ distributed representations (such as embeddings), they perform convoluted (pun intended) distributed reasoning. So instead, we choose to probe the network with several counterfactual inputs (related to the input at hand), hoping to trigger all the internal workings of the network. This process would help summarize the effect of the network on the protagonist input; the assumption being that the input is human understandable. Naturally, it helps to work with gradients in this process as via back propagation, they induce an aggregate view over the function computed by the neurons.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f0b26941",
+                        "type": "paragraph",
+                        "text": "Interior gradients use counterfactual inputs to artifactually induce a procedure on how the networks attention moves across the image as it compute the final prediction score. From the animation, we gather that the network focuses on strong and distinctive patterns in the image at lower values of the scaling parameter, and subtle and weak patterns in the image at higher values. Thus, we speculate that the network's computation can be loosely abstracted by a procedure that first recognize distinctive features of the image to make an initial prediction, and then fine tunes (these are small score jumps as the chart in Figure 3 shows) the prediction using weaker patterns in the image.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f2f7a740",
+                "title": "CUMULATING INTERIOR GRADIENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_c4d96786",
+                        "type": "paragraph",
+                        "text": "A different summarization of the interior gradients can be obtained by cumulating them. While there are a few ways of cumulating counterfactual gradients, the approach we take has the nice attribution property (Proposition 1) that the feature importance scores approximately add up to the prediction score. The feature importance scores are thus also referred to as attributions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7989d059",
+                        "type": "paragraph",
+                        "text": "Notice that the set of counterfactual images {\u03b1 img | 0 \u2264 \u03b1 \u2264 1} fall on a straight line path in R 224\u00d7224\u00d73 . Interior gradients -which are the gradients of these counterfactual images -can be cumulated by integrating them along this line. We call the resulting gradients as integrated gradients. In what follows, we formalize integrated gradients for an arbitrary function F : R n \u2192 [0, 1] (representing a deep network), and an arbitrary set of counterfactual inputs falling on a path in R n .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7ad75099",
+                        "type": "paragraph",
+                        "text": "Let x \u2208 R n be the input at hand, and \u03b3 = (\u03b3 1 , . . . , \u03b3 n ) : [0, 1] \u2192 R n be a smooth function specifying the set of counterfactuals; here, \u03b3(0) is the baseline input (for Inception, a black image), and \u03b3(1) is the actual input (for Inception, the image being studied). Specifically, {\u03b3(\u03b1) | 0 \u2264 \u03b1 \u2264 1} is the set of counterfactuals (for Inception, a series of images that interpolate between the black image and the actual input).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_74814f36",
+                        "type": "paragraph",
+                        "text": "The integrated gradient along the i th dimension for an input x \u2208 R n is defined as follows.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c4fb34bb",
+                        "type": "paragraph",
+                        "text": "IntegratedGrads i (x) ::=",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6d6efceb",
+                        "type": "paragraph",
+                        "text": "where \u2202F (x)  \u2202xi is the gradient of F along the i th dimension at x. A nice technical property of the integrated gradients is that they add up to the difference between the output of F at the final counterfactual \u03b3(1) and the baseline counterfactual \u03b3(0). This is formalized by the proposition below, which is an instantiation of the fundamental theorem of calculus for path integrals.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_336874bf",
+                        "type": "paragraph",
+                        "text": "For most deep networks, it is possible to choose counterfactuals such that the prediction at the baseline counterfactual is near zero (F (\u03b3(0)) \u2248 0). 3 For instance, for the Inception network, the counterfactual defined by the scaling path satisfies this property as Incp(0 224\u00d7224\u00d73 ) \u2248 0. In such cases, it follows from the Proposition that the integrated gradients form an attribution of the prediction output F (x), i.e., they almost exactly distribute the output to the individual input features.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9675a4f4",
+                        "type": "paragraph",
+                        "text": "The additivity property provides a form of sanity checking for the integrated gradients and ensures that we do not under or over attribute to features. This is a common pitfall for attribution schemes based on feature ablations, wherein, an ablation may lead to small or a large change in the prediction score depending on whether the ablated feature interacts disjunctively or conjunctively to the rest of the features. This additivity is even more desirable when the networks score is numerically critical, i.e., the score is not used purely in an ordinal sense. In this case, the attributions (together with additivity) guarantee that the attributions are in the units of the score, and account for all of the score.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5331ca62",
+                        "type": "paragraph",
+                        "text": "We note that these path integrals of gradients have been used to perform attribution in the context of small non-linear polynomials (Sun & Sundararajan (2011) ), and also within the cost-sharing literature in economics where function at hand is a cost function that models the cost of a project as a function of the demands of various participants, and the attributions correspond to cost-shares.",
+                        "extracted_citations": [
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2378cb66",
+                        "type": "paragraph",
+                        "text": "The specific path we use corresponds to a cost-sharing method called Aumann-Shapley (Aumann & Shapley (1974) ).",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_afbd6d4f",
+                        "type": "paragraph",
+                        "text": "Computing integrated gradients. The integrated gradients can be efficiently approximated by Riemann sum, wherein, we simply sum the gradients at points occurring at sufficiently small intervals along the path of counterfactuals.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_209d4e30",
+                        "type": "paragraph",
+                        "text": "Here m is the number of steps in the Riemman approximation of the integral. Notice that the approximation simply involves computing the gradient in a for loop; computing the gradient is central to deep learning and is a pretty efficient operation. The implementation should therefore be straightforward in most deep learning frameworks. For instance, in TensorFlow (ten), it essentially amounts to calling tf.gradients in a loop over the set of counterfactual inputs (i.e., \u03b3( k m ) for k = 1, . . . , m), which could also be batched. Going forward, we abuse the term \"integrated gradients\" to refer to the approximation described above.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ed340f90",
+                        "type": "paragraph",
+                        "text": "Integrated gradients for Inception. We compute the integrated gradients for the Inception network using the counterfactuals obtained by scaling the input image; \u03b3(\u03b1) = \u03b1 img where img is the input image. Similar to the interior gradients, the integrated gradients can also be aggregated along the color channel to obtain pixel importance scores which can then be visualized as discussed earlier.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_55cec750",
+                        "type": "paragraph",
+                        "text": "Figure 4 shows these visualizations for a bunch of images. For comparison, it also presents the corresponding visualization obtained from the gradients at the actual image. From the visualizations, it seems quite evident that the integrated gradients are better at capturing important features.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_84388e41",
+                "title": "TWO NORMATIVE AXIOMS FOR FEATURE ATTRIBUTIONS",
+                "blocks": [
+                    {
+                        "block_id": "b_8245e837",
+                        "type": "paragraph",
+                        "text": "We discuss two desirable axioms for feature attribution methods. We show that our integrated gradients method satisfies both. On the other hand, the other feature attribution methods in literature break one of the two axioms. These methods include DeepLift (Shrikumar et al. (2016) ), Layer-wise relevance propagation (LRP) (Binder et al. (2016) ), Deconvolutional networks (Zeiler & Fergus (2014) ), and Guided back-propagation (Springenberg et al. ( 2014 )).",
+                        "extracted_citations": [
+                            "Citation_b17",
+                            "Citation_b5",
+                            "Citation_b25"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7826a02a",
+                "title": "Sensitivity.",
+                "blocks": [
+                    {
+                        "block_id": "b_96006037",
+                        "type": "paragraph",
+                        "text": "A highly desirable property for feature attributions is Sensitivity. If a non-zero change in a single input variable (holding all other variables fixed) changes the output by a non-zero amount, then this variable should be given a non-zero attribution. In other words, attribution should be sensitive to change.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_487283f4",
+                        "type": "paragraph",
+                        "text": "Integrated Gradients (ignoring the approximation in computing integrals) satisfies Sensitivity. The attribution to the variable is in fact equal to the change in function value (this is a one-variable instance of Proposition 1).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3895fb0c",
+                        "type": "paragraph",
+                        "text": "While this property is satisfied by the integrated gradients method, it is broken by Gradients, Deconvolution networks (DeConvNets) (Zeiler & Fergus (2014) ), Guided back-propagation (Springenberg et al. ( 2014 )).",
+                        "extracted_citations": [
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_df29552a",
+                        "type": "paragraph",
+                        "text": "Gradients break Sensitivity due to saturation (see Section 2.2), i.e., the prediction function may flatten at the input and thus have zero gradient despite the function value at the input being different from that at the benchmark. For a concrete example, consider a one variable, one ReLU network, f (x) = 1 -ReLU(1 -x). Suppose we change the input from x = 0 to x = 2. The function changes from 0 to 1, but because f is flat at x = 1, the gradient method gives attribution of 0 to x, violating sensitivity. We defer the counterexamples for other methods to Appendix B.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_07b34bf3",
+                        "type": "paragraph",
+                        "text": "Implementation Invariance. Two networks can be functionally equivalent, i.e., their outputs are equal for all inputs, despite having very different implementations. We would like our attribution method to satisfy Implementation Invariance, i.e., the attributions are always identical for two functionally equivalent networks. To motivate this, notice that attribution can be colloquially defined as distributing the blame (or credit) for the output to the input features. Such a definition does not refer to implementation details. Moreover, the common practice of machine learning tends to evaluate the models from an input-output point of view, where implementations are purely means to an end.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d681e694",
+                        "type": "paragraph",
+                        "text": "Attributions generated by integrated gradients (or gradients, or any function of the interior gradients) satisfy Implementation Invariance since they are based only on the gradients of the function represented by the network. On the other hand, this fundamental property is unfortunately broken for the DeepLift and LRP methods. Below, we describe intuition for why Implementation Invariance is broken by these methods; a concrete example is provided in Appendix B.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_af68bda1",
+                        "type": "paragraph",
+                        "text": "First, notice that gradients are invariant to implementation. In fact, the chain-rule for gradients \u2202f \u2202g = \u2202f \u2202h \u2022 \u2202h \u2202g is essentially about implementation invariance. To see this, think of g and f as the input and output of a system. The gradient of output f to input g can be computed either directly by \u2202f \u2202g , ignoring the intermediate function h, or by invoking the chain rule via h. This is exactly how backpropagation works.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5eb37715",
+                        "type": "paragraph",
+                        "text": "As previously discussed, gradients don't satisfy sensitivity, and are therefore unsuitable for attribution. Methods like DeepLift tackle this issue by introducing a benchmark, and in some sense try to compute \"discrete gradients\" instead of gradients. They use a backpropagation procedure for composing discrete gradients. Unfortunately, such approaches are problematic because chain rule does not hold for discrete gradients in general. Formally",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_85b361a0",
+                        "type": "paragraph",
+                        "text": "does not hold, and therefore these methods fail to satisfy implementation invariance.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_192c4f35",
+                        "type": "paragraph",
+                        "text": "If an attribution method fails to satisfy Implementation Invariance, the attributions are potentially sensitive to unimportant aspects of the models. For instance, in the example in Section B, the network architecture has more degrees of freedom than needed for representing the function, and as a result there are two set of values for the network parameters that lead to the same function.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a62e725c",
+                        "type": "paragraph",
+                        "text": "The training procedure can converge at either set of values depending on the initializtion or for other reasons, but the underlying network function would remain the same. It is undesirable that attributions differ for such reasons.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7c7718c9",
+                "title": "A FULL AXIOMATIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_01aa770e",
+                        "type": "paragraph",
+                        "text": "There are many methods that satisfy Implementation Invariance and Sensitivity. In this section we show that Integrated Gradients is not just one of them. It is in fact also the only method that satisfies an extended set of axioms. The additional axioms are reasonably natural but perhaps not as fundamental to attribution. As we shall see in the next section there does not seem to be a perfect empirical evaluation for attribution methods. We hope that these axioms provide a theoretical framework for evaluating attribution methods, which provide a good complement to empirical evaluations.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c809ff2d",
+                        "type": "paragraph",
+                        "text": "As discussed earlier Integrated Gradients corresponds to a method called Aumann-Shapley studied by economists in the context of cost-sharing. (The function at hand is a cost-function whose input variables are demands of different participants and attributions correspond to cost-shares.) Here is the list of axioms, borrowed from the cost-sharing literature Billera & Heath (1982) ; a longer discussion of the desirability of these axioms in the context of attribution can be found in Sun & Sundararajan (2011) .",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_90163505",
+                        "type": "paragraph",
+                        "text": "\u2022 Dummy: If the function implemented by the deep network does not depend on a variable, then the attribution to it is always zero.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e4db51e7",
+                        "type": "paragraph",
+                        "text": "\u2022 Additivity: For all inputs, the attributions for a function f 1 +f 2 is the sum of the attributions for the function f 1 and the function f 2 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f17aa5fc",
+                        "type": "paragraph",
+                        "text": "\u2022 Completeness: The attributions add up to the difference between the function values at the input and the benchmark.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a0f03fcb",
+                        "type": "paragraph",
+                        "text": "\u2022 Scale Invariance: Informally, if the inputs to two networks differ in the scale of one of the variables (say Farenheit and Celsius), but have the same output for corresponding (rescaled) inputs, then the attributions should be identical.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_91a6b46a",
+                        "type": "paragraph",
+                        "text": "\u2022 Proportional Attributions for Homogenous Variables: If a function can be represented by the sum of the two variables, then the two variables should receive attributions proportional to their input values.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f14bc44d",
+                        "type": "paragraph",
+                        "text": "Proposition 2 Billera & Heath (1982) Integrated Gradients is the unique method that satisfies all of the axioms above.",
+                        "extracted_citations": [
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_21469b76",
+                "title": "AN EMPIRICAL EVALUATION OF OUR APPROACH",
+                "blocks": [
+                    {
+                        "block_id": "b_a2a1849b",
+                        "type": "paragraph",
+                        "text": "We now discuss an emprical evaluation of integrated gradients as a measure of feature importance, using gradients as a benchmark.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1fd9a7f9",
+                        "type": "paragraph",
+                        "text": "Pixel ablations. The first evaluation is based on a method by Samek et al. (2015) . Here we ablate 4 the top 5000 pixels (10% of the image) by importance score, and compute the score drop for the highest scoring object class. The ablation is performed 100 pixels at a time, in a sequence of 50 steps. At each perturbation step k we measure the average drop in score up to step k. This quantity is referred to a area over the perturbation curve (AOPC) by Samek et al. (2015) .",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6dcca566",
+                        "type": "paragraph",
+                        "text": "Figure 5 shows the AOPC curve with respect to the number of perturbation steps for integrated gradients and gradients at the image. AOPC values at each step represent the average over a dataset of 150 randomly chosen images. It is clear that ablating the top pixels identified by integrated gradients leads to a larger score drop that those identified by gradients at the image.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3f0cdeda",
+                        "type": "paragraph",
+                        "text": "Having said that, we note an important issue with the technique. The images resulting from pixel perturbation are often unnatural, and it could be that the scores drop simply because the network has never seen anything like it in training.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2636311b",
+                        "type": "paragraph",
+                        "text": "Localization. The second evaluation is to consider images with human-drawn bounding boxes around objects, and compute the percentage of pixel attribution inside the bounding box. We use the 2012 ImageNet object localization challenge dataset to get a set of human-drawn bounding boxes. We run our evaluation on 100 randomly chosen images satisfying the following properties -(1) the total size of the bounding box(es) is less than two thirds of the image size, and (2) ablating the bounding box significantly drops the prediction score for the object class. ( 1 ) is for ensuring that the boxes are not so large that the bulk of the attribution falls inside them by definition, and ( 2 ) is for ensuring that the boxed part of the image is indeed responsible for the prediction score for the image. We find that on 82 images the integrated gradients technique leads to a higher fraction of the pixel attribution inside the box than gradients at the actual image. The average difference in the percentage pixel attribution inside the box for the two techniques is 8.4%.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9ed7b24a",
+                        "type": "paragraph",
+                        "text": "While these results are promising, we note the following caveat. Integrated gradients are meant to capture pixel importance with respect to the prediction task. While for most objects, one would expect the pixel located on the object to be most important for the prediction, in some cases the context in which the object occurs may also contribute to the prediction. The cabbage butterfly image from Figure 4 is a good example of this where the pixels on the leaf are also surfaced by the integrated gradients.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_77f11a6f",
+                        "type": "paragraph",
+                        "text": "Eyeballing. Ultimately, it was hard to come up with a perfect evaluation technique. So we did spend a large amount of time applying and eyeballing the results of our technique to various networksthe ones presented in this paper, as well as some networks used within products. For the Inception network, we welcome you to eyeball more visualizations in Figure 11 in the appendix and also at: https://github.com/ankurtaly/Attributions. While we found our method to beat gradients at the image for the most part, this is clearly a subjective process prone to interpretation and cherry-picking, but is also ultimately the measure of the utility of the approach-debugging inherently involves the human.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_92175b2b",
+                        "type": "paragraph",
+                        "text": "Finally, also note that we did not compare against other whitebox attribution techniques (e.g., DeepLift (Shrikumar et al. (2016) )), because our focus was on black-box techniques that are easy to implement, so comparing against gradients seems like a fair comparison.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_16a39a99",
+                "title": "DEBUGGING NETWORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_d54548c2",
+                        "type": "paragraph",
+                        "text": "Despite the widespread application of deep neural networks to problems in science and technology, their internal workings largely remain a black box. As a result, humans have a limited ability to understand the predictions made by these networks. This is viewed as hindrance in scenarios where the bar for precision is high, e.g., medical diagnosis, obstacle detection for robots, etc. (dar (2016)).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a5613665",
+                        "type": "paragraph",
+                        "text": "Quantifying feature importance for individual predictions is a first step towards understanding the behavior of the network; at the very least, it helps debug misclassified inputs, and sanity check the internal workings. We present evidence to support this below.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c7e2251a",
+                        "type": "paragraph",
+                        "text": "We use feature importance to debug misclassifications made by the Inception network. In particular, we consider images from the ImageNet dataset where the groundtruth label for the image not in the top five labels predicted by the Inception network. We use interior gradients to compute pixel importance scores for both the Inception label and the groundtruth label, and visualize them to gain insight into the cause for misclassification.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e99c1268",
+                        "type": "paragraph",
+                        "text": "Figure 6 shows the visualizations for two misclassified images. The top image genuinely has two objects, one corresponding to the groundtruth label and other corresponding to the Inception label. We find that the interior gradients for each label are able to emphasize the corresponding objects. Therefore, we suspect that the misclassification is in the ranking logic for the labels rather than the recognition logic for each label. For the bottom image, we observe that the interior gradients are largely similar. Moreover, the cricket gets emphasized by the interior gradients for the mantis (Inception label). Thus, we suspect this to be a more serious misclassification, stemming from the recognition logic for the mantis.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_74e9fe8f",
+                "title": "DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_a7c244d0",
+                        "type": "paragraph",
+                        "text": "Faithfullness. A natural question is to ask why gradients of counterfactuals obtained by scaling the input capture feature importance for the original image. First, from studying the visualizations in Figure 4 , the results look reasonable in that the highlighted pixels capture features representative of the predicted class as a human would perceive them. Second, we confirmed that the network too seems to find these features representative by performing ablations. It is somewhat natural to expect that the Inception network is robust to to changes in input intensity; presumably there are some low brightness images in the training set.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_28573ac1",
+                        "type": "paragraph",
+                        "text": "However, these counterfactuals seem reasonable even for networks where such scaling does not correspond to a natural concept like intensity, and when the counterfactuals fall outside the training set; for instance in the case of the ligand-based virtual screening network (see Section 3.1). We speculate that the reason why these counterfactuals make sense is because the network is built by composing ReLUs. As one scales the input starting from a suitable baseline, various neurons activate, and the scaling process that does a somewhat thorough job of exploring all these events that contribute to the prediction for the input. There is an analogous argument for other operator such as max pool, average pool, and softmax-here the triggering events arent discrete but the argument is analogous.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9ec18871",
+                        "type": "paragraph",
+                        "text": "Limitations of Approach. We discuss some limitations of our technique; in a sense these are limitations of the problem statement and apply equally to other techniques that attribute to base input features.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f81798c8",
+                        "type": "paragraph",
+                        "text": "\u2022 Inability to capture Feature interactions: The models could perform logic that effectively combines features via a conjunction or an implication-like operations; for instance, it could be that a molecule binds to a site if it has a certain structure that is essentially a conjunction of certain atoms and certain bonds between them. Attributions or importance scores have no way to represent these interactions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8eb85d2d",
+                        "type": "paragraph",
+                        "text": "\u2022 Feature correlations: Feature correlations are a bane to the understandability of all machine learning models. If there are two features that frequently co-occur, the model is free to assign weight to either or both features. The attributions would then respect this weight assignment. But, it could be that the specific weight assignment chosen by the model is not human-intelligible. Though there have been approaches to feature selection that reduce feature correlations (Yu & Liu (2003) ), it is unclear how they apply to deep models on dense input.",
+                        "extracted_citations": [
+                            "Citation_b23"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_aebf9e9d",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_db7fa9fc",
+                        "type": "paragraph",
+                        "text": "Over the last few years, there has been a vast amount work on demystifying the inner workings of deep networks. Most of this work has been on networks trained on computer vision tasks, and deals with understanding what a specific neuron computes (Erhan et al. (2009) ; Le ( 2013 )) and interpreting the representations captured by neurons during a prediction (Mahendran & Vedaldi (2015) ; Dosovitskiy & Brox (2015) ; Yosinski et al. (2015) ).",
+                        "extracted_citations": [
+                            "Citation_b7",
+                            "Citation_b11",
+                            "Citation_b6",
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_78254c4a",
+                        "type": "paragraph",
+                        "text": "Our work instead focuses on understanding the network's behavior on a specific input in terms of the base level input features. Our technique quantifies the importance of each feature in the prediction. Known approaches for accomplishing this can be divided into three categories.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c97bf7d9",
+                        "type": "paragraph",
+                        "text": "Gradient based methods. The first approach is to use gradients of the input features to quantify feature importance (Baehrens et al. (2010) ; Simonyan et al. (2013) ). This approach is the easiest to implement. However, as discussed earlier, naively using the gradients at the actual input does not accurate quantify feature importance as gradients suffer from saturation.",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4a473d70",
+                        "type": "paragraph",
+                        "text": "Score back-propagation based methods. The second set of approaches involve back-propagating the final prediction score through each layer of the network down to the individual features. These include DeepLift (Shrikumar et al. (2016) ), Layer-wise relevance propagation (LRP) (Binder et al. (2016) ), Deconvolutional networks (DeConvNets) (Zeiler & Fergus (2014) ), and Guided backpropagation (Springenberg et al. ( 2014 )). These methods largely differ in the backpropagation logic for various non-linear activation functions. While DeConvNets, Guided back-propagation and LRP rely on the local gradients at each non-linear activation function, DeepLift relies on the deviation in the neuron's activation from a certain baseline input.",
+                        "extracted_citations": [
+                            "Citation_b17",
+                            "Citation_b5",
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b9f9bca9",
+                        "type": "paragraph",
+                        "text": "Similar to integrated gradients, the DeepLift and LRP also result in an exact distribution of the prediction score to the input features. However, as shown by Figure 14 , the attributions are not invariant across functionally equivalent networks. Besides, the primary advantage of our method over all these methods is its ease of implementation. The aforesaid methods require knowledge of the network architecture and the internal neuron activations for the input, and involve implementing a somewhat complicated back-propagation logic. On the other hand, our method is agnostic to the network architectures and relies only on computing gradients which can done efficiently in most deep learning frameworks.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e887a51e",
+                        "type": "paragraph",
+                        "text": "Model approximation based methods. The third approach, proposed first by Ribeiro et al. (2016a; b) , is to locally approximate the behavior of the network in the vicinity of the input being explained with a simpler, more interpretable model. An appealing aspect of this approach is that it is completely agnostic to the structure of the network and only deals with its input-output behavior. The approximation is learned by sampling the network's output in the vicinity of the input at hand. In this sense, it is similar to our approach of using counterfactuals. Since the counterfactuals are chosen somewhat arbitrarily, and the approximation is based purely on the network's output at the counterfactuals, the faithfullness question is far more crucial in this setting. The method is also expensive to implement as it requires training a new model locally around the input being explained.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6eaf8b65",
+                "title": "APPLICATIONS TO OTHER NETWORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_999b1a3c",
+                        "type": "paragraph",
+                        "text": "The technique of quantifying feature importance by inspecting gradients of counterfactual inputs is generally applicable across deep networks. While for networks performing vision tasks, the counterfactual inputs are obtained by scaling pixel intensities, for other networks they may be obtained by scaling an embedding representation of the input.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8780d703",
+                        "type": "paragraph",
+                        "text": "As a proof of concept, we apply the technique to the molecular graph convolutions network of Kearnes et al. (2016) for ligand-based virtual screening and an LSTM model (Zaremba et al. (2014) ) for the language modeling of the Penn Treebank dataset (Marcus et al. (1993) ).",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b24",
+                            "Citation_b12"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_295d3501",
+                "title": "LIGAND-BASED VIRTUAL SCREENING",
+                "blocks": [
+                    {
+                        "block_id": "b_957fb3f7",
+                        "type": "paragraph",
+                        "text": "The Ligand-Based Virtual Screening problem is to predict whether an input molecule is active against a certain target (e.g., protein or enzyme). The process is meant to aid the discovery of new drug molecules. Deep networks built using molecular graph convolutions have recently been proposed by Kearnes et al. (2016) for solving this problem.",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7212141d",
+                        "type": "paragraph",
+                        "text": "Once a molecule has been identified as active against a target, the next step for medicinal chemists is to identify the molecular features-formally, pharmacophores 5 -that are responsible for the ac-   tivity. This is akin to quantifying feature importance, and can be achieved using the method of integrated gradients. The attributions obtained from the method help with identifying the dominant molecular features, and also help sanity check the behavior of the network by shedding light on its inner workings. With regard to the latter, we discuss an anecdote later in this section on how attributions surfaced an anomaly in W1N2 network architecture proposed by Kearnes et al. (2016) .",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_665471ba",
+                        "type": "paragraph",
+                        "text": "Defining the counterfactual inputs. The first step in computing integrated gradients is to define the set of counterfactual inputs. The network requires an input molecule to be encoded by hand as a set of atom and atom-pair features describing the molecule as an undirected graph. Atoms are featurized using a one-hot encoding specifying the atom type (e.g., C, O, S, etc.), and atom-pairs are featurized by specifying either the type of bond (e.g., single, double, triple, etc.) between the atoms, or the graph distance between them 6",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1a42ac26",
+                        "type": "paragraph",
+                        "text": "The counterfactual inputs are obtained by scaling down the molecule features down to zero vectors, i.e., the set {\u03b1Features(mol) | 0 \u2264 \u03b1 \u2264 1} where Features(mol) is an encoding of the molecule into atom and atom-pair features.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a4794c1b",
+                        "type": "paragraph",
+                        "text": "The careful reader might notice that these counterfactual inputs are not valid featurizations of molecules. However, we argue that they are still valid inputs for the network. First, all operators in the network (e.g., ReLUs, Linear filters, etc.) treat their inputs as continuous real numbers rather than discrete zeros and ones. Second, all fields of the counterfactual inputs are bounded between zero and one, therefore, we don't expect them to appear spurious to the network. We discuss this further in section 2.9 In what follows, we discuss the behavior of a network based on the W2N2-simple architecture proposed by Kearnes et al. (2016) . On inspecting the behavior of the network over counterfactual inputs, we observe saturation here as well. Figure 13a shows the trend in the softmax score for the task PCBA-588342 for twenty five active molecules as we vary the scaling parameter \u03b1 from zero to one. While the overall saturated region is small, saturation does exist near vicinity of the input (0.9 \u2264 \u03b1 \u2264 1). Figure 13b in the appendix shows that the total feature gradient varies significantly along the scaling path; thus, just the gradients at the molecule is fully indicative of the behavior of the network.",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_efdb3eb4",
+                        "type": "paragraph",
+                        "text": "Visualizing integrated gradients. We cumulate the gradients of these counterfactual inputs to obtain an attribution of the prediction score to each atom and atom-pair feature. Unlike image inputs, which have dense features, the set of input features for molecules are sparse. Consequently, the attributions are sparse and can be inspected directly. Figure 7 shows heatmaps for the atom and atom-pair attributions for a specific molecule.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fa33f3fc",
+                        "type": "paragraph",
+                        "text": "Using the attributions, one can easily identify the atoms and atom-pairs that that have a strongly positive or strongly negative contribution. Since the attributions add up to the final prediction score (see Proposition 1), the attribution magnitudes can be use for accounting the contributions of each feature. For instance, the atom-pairs that have a bond between them contribute cumulatively contribute 46% of the prediction score, while all other atom pairs cumulatively contribute -3%.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_79150b62",
+                        "type": "paragraph",
+                        "text": "We presented the attributions for 100 molecules active against a specific task to a few chemists.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_17bdf17c",
+                        "type": "paragraph",
+                        "text": "The chemists were able to immediately spot dominant functional groups (e.g., aromatic rings) being surfaced by the attributions. A next step could be cluster the aggregate the attributions across a large set of molecules active against a specific task to identify a common denominator of features shared by all active molecules.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_40213219",
+                        "type": "paragraph",
+                        "text": "Identifying Dead Features. We now discuss how attributions helped us spot an anomaly in the W1N2 architecture. On applying the integrated gradients method to the W1N2 network, we found that several atoms in the same molecule received the exact same attribution. For instance, for the molecule in Figure 7 , we found that several carbon atoms at positions 2, 3, 14, 15, and 16 received the same attribution of 0.0043 despite being bonded to different atoms, for e.g., Carbon at position 3 is bonded to an Oxygen whereas Carbon at position 2 is not. This is surprising as one would expect two atoms with different neighborhoods to be treated differently by the network.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dde9ff6a",
+                        "type": "paragraph",
+                        "text": "On investigating the problem further we found that since the W1N2 network had only one convolution layer, the atoms and atom-pair features were not fully convolved. This caused all atoms that have the same atom type, and same number of bonds of each type to contribute identically to the network. This is not the case for networks that have two or more convolutional layers.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6fd19f48",
+                        "type": "paragraph",
+                        "text": "Despite the aforementioned problem, the W1N2 network had good predictive accuracy. One hypothesis for this is that the atom type and their neighborhoods are tightly correlated; for instance an outgoing double bond from a Carbon is always to another Carbon or Oxygen atom. As a result, given the atom type, an explicit encoding of the neighborhood is not needed by the network. This also suggests that equivalent predictive accuracy can be achieved using a simpler \"bag of atoms\" type model.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f183c970",
+                "title": "LANGUAGE MODELING",
+                "blocks": [
+                    {
+                        "block_id": "b_ed336cd9",
+                        "type": "paragraph",
+                        "text": "To apply our technique for language modeling, we study word-level language modeling of the Penn Treebank dataset (Marcus et al. (1993) ), and apply an LSTM-based sequence model based on Zaremba et al. (2014) . For such a network, given a sequence of input words, and the softmax prediction for the next word, we want to identify the importance of the preceding words for the score.",
+                        "extracted_citations": [
+                            "Citation_b12",
+                            "Citation_b24"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b561de5e",
+                        "type": "paragraph",
+                        "text": "As in the case of the Inception model, we observe saturation in this LSTM network. To describe the setup, we choose 20 randomly chosen sections of the test data, and for each of them inspect the prediction score of the next word using the first 10 words. Then we give each of the 10 input words a weight of \u03b1 \u2208 [0, 1], which is applied to scale their embedding vectors. In Figure 8 , we plot the prediction score as a function of \u03b1. For all except one curves, the curve starts near zero at \u03b1 = 0, moves around in the middle, stabilizes, and turns flat around \u03b1 = 1. For the interesting special case where softmax score is non-zero at \u03b1 = 0, it turns out that that the word being predicted represents out of vocabulary words. [!h] In Table 9 and Table 10 we show two comparisons of gradients to integrated gradients. Due to saturation, the magnitudes of gradients are so small compared to the prediction scores that it is difficult to make sense of them. In comparison, (approximate) integrated gradients have a total amount close to the prediction, and seem to make sense. For example, in the first example, the integrated gradients attribute the prediction score of \"than\" to the preceding word \"more\". This makes sense as \"than\" often follows right after \"more\" in English. On the other hand, standard gradient gives a slightly negative attribution that betrays our intuition. In the second example, in predicting the second \"ual\", integrated gradients are clearly the highest for the first occurrence of",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6b4decf6",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_d47c7077",
+                        "type": "paragraph",
+                        "text": "We present Interior Gradients, a method for quantifying feature importance. The method can be applied to a variety of deep networks without instrumenting the network, in fact, the amount of code required is fairly tiny. We demonstrate that it is possible to have some understanding of the performance of the network without a detailed understanding of its implementation, opening up the possibility of easy and wide application, and lowering the bar on the effort needed to debug deep networks.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e7851f9c",
+                        "type": "paragraph",
+                        "text": "We also wonder if Interior Gradients are useful within training as a measure against saturation, or indeed in other places that gradients are used.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_dc337c40",
+                "title": "Layer mixed5b",
+                "blocks": [
+                    {
+                        "block_id": "b_40b8a7f8",
+                        "type": "paragraph",
+                        "text": "Layer mixed4b Layer mixed3b",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5d82a415",
+                "title": "B ATTRIBUTION COUNTER-EXAMPLES",
+                "blocks": [
+                    {
+                        "block_id": "b_91528877",
+                        "type": "paragraph",
+                        "text": "We show that the methods DeepLift and Layer-wise relevance propagation (LRP) break the implementation invariance axiom, and the Deconvolution and Guided back-propagation methods break the sensitivity axiom.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_07ac1845",
+                        "type": "paragraph",
+                        "text": "Figure 14 provides an example of two equivalent networks f (x 1 , x 2 ) and g(x 1 , x 2 ) for which DeepLift and LRP yield different attributions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d15e0a7f",
+                        "type": "paragraph",
+                        "text": "First, observe that the networks f and g are of the form f (x 1 , x 2 ) = ReLU(h(x 1 , x 2 )) and f (x 1 , x 2 ) = ReLU(k(x 1 , x 2 )) 7 , where h(x 1 , x 2 ) = ReLU(x 1 ) -1 -ReLU(x 2 ) k(x 1 , x 2 ) = ReLU(x 1 -1) -ReLU(x 2 )",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a962d59b",
+                        "type": "paragraph",
+                        "text": "Note that h and k are not equivalent. They have different values whenever x 1 < 1. But f and g are equivalent. To prove this, suppose for contradiction that f and g are different for some x 1 , x 2 . Then it must be the case that ReLU(x 1 ) -1 = ReLU(x 1 -1). This happens only when x 1 < 1, which implies that f (x 1 , x 2 ) = g(x 1 , x 2 ) = 0.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c3eddbe2",
+                        "type": "paragraph",
+                        "text": "Now we leverage the above example to show that Deconvolution and Guided back-propagation break sensitivity. Consider the network f (x 1 , x 2 ) from Figure 14 . For a fixed value of x 1 greater than 1, the output decreases linearly as x 2 increases from 0 to x 1 -1. Yet, for all inputs, Deconvolutional networks and Guided back-propagation results in zero attribution for x 2 . This happens because for all inputs the back-propagated signal received at the node ReLU(x 2 ) is negative and is therefore not back-propagated through the ReLU operation (per the rules of deconvolution and guided backpropagation; see Springenberg et al. (2014) for details). As a result, the feature x 2 receives zero attribution despite the network's output being sensitive to it.",
+                        "extracted_citations": [
+                            "Citation_b19"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Tensorflow",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Explainable Artificial Intelligence 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Values of Non-Atomic Games R J Aumann L S Shapley 1974 Princeton University Press Princeton, NJ",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "How to explain individual classification decisions David Baehrens Timon Schroeter Stefan Harmeling Motoaki Kawanabe Katja Hansen Klaus-Robert M\u00fcller Journal of Machine Learning Research 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Allocation of shared costs: A set of axioms yielding A unique procedure Louis J Billera David C Heath Math. Oper. Res 7 1 1982",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Layer-wise relevance propagation for neural networks with local renormalization layers Alexander Binder Gr\u00e9goire Montavon Sebastian Bach Klaus-Robert M\u00fcller Wojciech Samek 2016 CoRR",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Inverting visual representations with convolutional networks Alexey Dosovitskiy Thomas Brox 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Visualizing higher-layer features of a deep network Yoshua Dumitru Erhan Aaron Bengio Pascal Courville Vincent 1341 2009 University of Montreal Technical Report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Understanding the difficulty of training deep feedforward neural networks Xavier Glorot Yoshua Bengio In Artificial Intelligence and Statistics 10 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Molecular graph convolutions: moving beyond fingerprints Steven Kearnes Kevin Mccloskey Marc Berndl Vijay Pande Patrick Riley Journal of Computer-Aided Molecular Design 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Building high-level features using large scale unsupervised learning V Quoc Le International Conference on Acoustics, Speech, and Signal Processing 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Understanding deep image representations by inverting them Aravindh Mahendran Andrea Vedaldi Conference on Computer Vision and Pattern Recognition (CVPR) 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Building a large annotated corpus of english: The penn treebank Mitchell P Marcus Beatrice Santorini Mary Ann Marcinkiewicz Computational Linguistics 1993",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "why should I trust you?\": Explaining the predictions of any classifier Marco T\u00falio Ribeiro 22nd ACM International Conference on Knowledge Discovery and Data Mining ACM 2016 Sameer Singh 0001, and Carlos Guestrin",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Sameer Singh 0001, and Carlos Guestrin. Model-agnostic interpretability of machine learning Marco T\u00falio Ribeiro 2016 CoRR",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "ImageNet Large Scale Visual Recognition Challenge Olga Russakovsky Jia Deng Hao Su Jonathan Krause Sanjeev Satheesh Sean Ma Zhiheng Huang Andrej Karpathy Aditya Khosla Michael Bernstein Alexander C Berg Li Fei-Fei International Journal of Computer Vision 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Evaluating the visualization of what a deep neural network has learned Wojciech Samek Alexander Binder Gr\u00e9goire Montavon Sebastian Bach Klaus-Robert M\u00fcller CoRR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Not just a black box: Learning important features through propagating activation differences Avanti Shrikumar Peyton Greenside Anna Shcherbina Anshul Kundaje 2016 CoRR",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Deep inside convolutional networks: Visualising image classification models and saliency maps Karen Simonyan Andrea Vedaldi Andrew Zisserman CoRR 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Jost Tobias Springenberg Alexey Dosovitskiy Thomas Brox Martin A Riedmiller Striving for simplicity: The all convolutional net. CoRR 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Axiomatic attribution for multilinear functions Yi Sun Mukund Sundararajan 12th ACM Conference on Electronic Commerce (EC) 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Going deeper with convolutions Christian Szegedy Wei Liu Yangqing Jia Pierre Sermanet Scott E Reed Dragomir Anguelov Dumitru Erhan Vincent Vanhoucke Andrew Rabinovich CoRR, abs/1409.4842 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Understanding neural networks through deep visualization Jason Yosinski Jeff Clune Anh Mai Nguyen Thomas Fuchs Hod Lipson CoRR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Feature selection for high-dimensional data: A fast correlation-based filter solution Lei Yu Huan Liu 20th International Conference on Machine Learning (ICML) 2003",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Wojciech Zaremba Ilya Sutskever Oriol Vinyals Recurrent neural network regularization. CoRR 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Visualizing and understanding convolutional networks Matthew D Zeiler Rob Fergus 13th European Conference on Computer Vision (ECCV) 2014",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.4305,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This work proposes to use visualization of gradients to further understand the importance of features (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "pixels) for visual classification.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "Overall, this presented visualizations are interesting, however, the approach is very ad hoc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The authors do not explain why visualizing regular gradients isn't correlated with the importance of features relevant to the given visual category and proceed to the interior gradient approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "One particular question with regular gradients at features that form the spatial support of the visual class.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Is it the case that the gradients of the features that are confident of the prediction remain low, while those with high uncertainty will have strong gradients?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "With regards to the interior gradients, it is unclear how the scaling parameter \\alpha affects the feature importance and how it is related to attention.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "Finally, does this model use batch normalization?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.234,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "We thank the reviewers for a detailed review.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "The rebuttal below addresses some of the mentioned concerns.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "Regarding \u201cfar too long\u201d and \u201cunnecessarily grandiose name for literally, a scaled image\u201d: \n\nWe\u2019d agree that the paper is long for the ideas in it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "The length stems from the difficulty of not having a crisp evaluation technique for feature importance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "So we try to resort to qualitative discussions together with images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "But we  can definitely try to tighten the writing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "We are open to changing the title of the paper to \u201cInterior Gradients\u201d or something like it, though it is worth noting that while scaling intensities seems natural for images, analogous scaling for Text or Drug Discovery models results in inputs that are more obviously fake, i.e., counterfactual.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "Regarding \u201chow the proposed scheme for feature importance ranking is useful\u201d: \n\nWhile debugging deep networks is hard in general, examining feature importance scores offers a limited but useful insight into the operation of the network on a particular input.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "For us, the experience with the Drug Discovery network where we found, via our attributions, that the bond features were severely underused (see Section 3.1) was a concrete instance of how feature importance analysis could help debug and improve networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "As we discussed in section 2.7, we do mention the limitations of our technique in understanding what the network does.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "The same pros and cons would seem to apply to other feature importance techniques (see Section 2.8).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_11",
+                    "text": "The key difference is that ours is much easier to implement--- as simple as computing a gradient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_12",
+                    "text": "Regarding \u201cThe quantitative evidence is quite limited and most of the paper is spent on qualitative results\u201d: \n\nWe address with the following multipart response; apologies for the lengthy response.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_13",
+                    "text": "First, we do plan to produce a comparison with side by sides for LRP and our method for the MNIST data set over the next few weeks as a sanity check.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_14",
+                    "text": "However, we don\u2019t think that that there is a strong metric to compare different feature importance techniques.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_15",
+                    "text": "This is acknowledged by Samek et al in their 2015 ICML Visualization Workshop work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_16",
+                    "text": "We elaborate on this further at the end of this rebuttal.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_17",
+                    "text": "Methods like DeepLift and Layer-wise Relevance Propagation (LRP) break a fundamental axiom in our mind: the attributions depend on the implementation, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_18",
+                    "text": "two networks that implement identical input-output  relationships can have different attributions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_19",
+                    "text": "This seems odd---see Section 2.4 and Figure 14.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_20",
+                    "text": "Perhaps, we did not emphasize this enough in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_21",
+                    "text": "The main focus for us in the evaluation conducted so far has been to ensure that our output was sensible.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_22",
+                    "text": "In Section 2.5, we discuss a combination of approaches that we used to assess the attributions, including eyeballing, localization, and ablations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_23",
+                    "text": "We welcome you to visualize more attributions at:",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.5593,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "The authors propose to measure \u201cfeature importance\u201d, or specifically, which pixels contribute most to a network\u2019s classification of an image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "A simple (albeit not particularly effective) heuristic for measuring feature importance is to measure the gradients of the predicted class wrt each pixel in an input image I.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "This assigns a score to each pixel in I (that ranks how much the output prediction would change if a given pixel were to change).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "In this paper, the authors build on this and propose to measure feature importance by computing gradients of the output wrt scaled version of the input image, alpha*I, where alpha is a scalar between 0 and 1, then summing across all values of alpha to obtain their feature importance score.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "Here the scaling is simply linear scaling of the pixel values (alpha=0 is all black image, alpha=1 is original image).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "The authors call these scaled images \u201ccounterfactuals\u201d which seems like quite an unnecessarily grandiose name for literally, a scaled image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "The authors show a number of visualizations that indicate that the proposed feature importance score is more reasonable than just looking at gradients only with respect to the original image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "They also show some quantitative evidence that the pixels highlighted by the proposed measure are more likely to fall on the objects rather than spurious parts of the image (in particular, see figure 5).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "The method is also applied to other types of networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "The quantitative evidence is quite limited and most of the paper is spent on qualitative results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "While the goal of understanding deep networks is of key importance, it is not clear whether this paper really help elucidate much.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_11",
+                    "text": "The main interesting observation in this paper is that scaling an image by a small alpha (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_12",
+                    "text": "creating a faint image) places more \u201cimportance\u201d on pixels on the object related to the correct class prediction.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_13",
+                    "text": "Beyond that, the paper builds a bit on this, but no deeper insight is gained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_14",
+                    "text": "The authors propose some hand-wavy explanation of why using small alpha (faint image) may force the network to focus on the object, but the argument is not convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_15",
+                    "text": "It would have been interesting to try to probe a bit deeper here, but that may not be easy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_16",
+                    "text": "Ultimately, it is not clear how the proposed scheme for feature importance ranking is useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_17",
+                    "text": "First, it is still quite noisy and does not truly help understand what a deep net is doing on a particular image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_18",
+                    "text": "Performing a single gradient descent step on an image (or on the collection of scaled versions of the image) hardly begins to probe the internal workings of a network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_19",
+                    "text": "Moreover, as the authors admit, the scheme makes the assumption that each pixel is independent, which is clearly false.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_20",
+                    "text": "Considering the paper presents a very simple idea, it is far too long.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_21",
+                    "text": "The main paper is 14 pages, up to 19 with references and appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_22",
+                    "text": "In general the writing is long-winded and overly verbose.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_23",
+                    "text": "It detracted substantially from the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_24",
+                    "text": "The authors also define unnecessary terminology.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_25",
+                    "text": "\u201cGradients of Coutnerfactuals\u201d sounds quite fancy, but is not very related to the ideas explored in the writing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_26",
+                    "text": "I would encourage the authors to tighten up the writing and figures down to a more readable page length, and to more clearly spell out the ideas explored early on.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_6",
+            "type": "Human",
+            "liang_alpha_score": 0.4305,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_6_s_0",
+                    "text": "This work proposes to use visualization of gradients to further understand the importance of features (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_1",
+                    "text": "pixels) for visual classification.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_2",
+                    "text": "Overall, this presented visualizations are interesting, however, the approach is very ad hoc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_3",
+                    "text": "The authors do not explain why visualizing regular gradients isn't correlated with the importance of features relevant to the given visual category and proceed to the interior gradient approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_4",
+                    "text": "One particular question with regular gradients at features that form the spatial support of the visual class.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_5",
+                    "text": "Is it the case that the gradients of the features that are confident of the prediction remain low, while those with high uncertainty will have strong gradients?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_6",
+                    "text": "With regards to the interior gradients, it is unclear how the scaling parameter \\alpha affects the feature importance and how it is related to attention.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_7",
+                    "text": "Finally, does this model use batch normalization?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_8",
+            "type": "Human",
+            "liang_alpha_score": 0.4305,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_8_s_0",
+                    "text": "This work proposes to use visualization of gradients to further understand the importance of features (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_1",
+                    "text": "pixels) for visual classification.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_2",
+                    "text": "Overall, this presented visualizations are interesting, however, the approach is very ad hoc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_3",
+                    "text": "The authors do not explain why visualizing regular gradients isn't correlated with the importance of features relevant to the given visual category and proceed to the interior gradient approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_4",
+                    "text": "One particular question with regular gradients at features that form the spatial support of the visual class.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_5",
+                    "text": "Is it the case that the gradients of the features that are confident of the prediction remain low, while those with high uncertainty will have strong gradients?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_6",
+                    "text": "With regards to the interior gradients, it is unclear how the scaling parameter \\alpha affects the feature importance and how it is related to attention.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_8_s_7",
+                    "text": "Finally, does this model use batch normalization?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_11",
+            "type": "Human",
+            "liang_alpha_score": 0.234,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_11_s_0",
+                    "text": "We thank the reviewers for a detailed review.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_1",
+                    "text": "The rebuttal below addresses some of the mentioned concerns.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_2",
+                    "text": "Regarding \u201cfar too long\u201d and \u201cunnecessarily grandiose name for literally, a scaled image\u201d: \n\nWe\u2019d agree that the paper is long for the ideas in it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_3",
+                    "text": "The length stems from the difficulty of not having a crisp evaluation technique for feature importance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_4",
+                    "text": "So we try to resort to qualitative discussions together with images.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_5",
+                    "text": "But we  can definitely try to tighten the writing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_6",
+                    "text": "We are open to changing the title of the paper to \u201cInterior Gradients\u201d or something like it, though it is worth noting that while scaling intensities seems natural for images, analogous scaling for Text or Drug Discovery models results in inputs that are more obviously fake, i.e., counterfactual.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_7",
+                    "text": "Regarding \u201chow the proposed scheme for feature importance ranking is useful\u201d: \n\nWhile debugging deep networks is hard in general, examining feature importance scores offers a limited but useful insight into the operation of the network on a particular input.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_8",
+                    "text": "For us, the experience with the Drug Discovery network where we found, via our attributions, that the bond features were severely underused (see Section 3.1) was a concrete instance of how feature importance analysis could help debug and improve networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_9",
+                    "text": "As we discussed in section 2.7, we do mention the limitations of our technique in understanding what the network does.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_10",
+                    "text": "The same pros and cons would seem to apply to other feature importance techniques (see Section 2.8).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_11",
+                    "text": "The key difference is that ours is much easier to implement--- as simple as computing a gradient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_12",
+                    "text": "Regarding \u201cThe quantitative evidence is quite limited and most of the paper is spent on qualitative results\u201d: \n\nWe address with the following multipart response; apologies for the lengthy response.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_13",
+                    "text": "First, we do plan to produce a comparison with side by sides for LRP and our method for the MNIST data set over the next few weeks as a sanity check.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_14",
+                    "text": "However, we don\u2019t think that that there is a strong metric to compare different feature importance techniques.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_15",
+                    "text": "This is acknowledged by Samek et al in their 2015 ICML Visualization Workshop work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_16",
+                    "text": "We elaborate on this further at the end of this rebuttal.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_17",
+                    "text": "Methods like DeepLift and Layer-wise Relevance Propagation (LRP) break a fundamental axiom in our mind: the attributions depend on the implementation, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_18",
+                    "text": "two networks that implement identical input-output  relationships can have different attributions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_19",
+                    "text": "This seems odd---see Section 2.4 and Figure 14.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_20",
+                    "text": "Perhaps, we did not emphasize this enough in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_21",
+                    "text": "The main focus for us in the evaluation conducted so far has been to ensure that our output was sensible.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_22",
+                    "text": "In Section 2.5, we discuss a combination of approaches that we used to assess the attributions, including eyeballing, localization, and ablations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_11_s_23",
+                    "text": "We welcome you to visualize more attributions at:",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_13",
+            "type": "Human",
+            "liang_alpha_score": 0.5593,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_13_s_0",
+                    "text": "The authors propose to measure \u201cfeature importance\u201d, or specifically, which pixels contribute most to a network\u2019s classification of an image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_1",
+                    "text": "A simple (albeit not particularly effective) heuristic for measuring feature importance is to measure the gradients of the predicted class wrt each pixel in an input image I.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_2",
+                    "text": "This assigns a score to each pixel in I (that ranks how much the output prediction would change if a given pixel were to change).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_3",
+                    "text": "In this paper, the authors build on this and propose to measure feature importance by computing gradients of the output wrt scaled version of the input image, alpha*I, where alpha is a scalar between 0 and 1, then summing across all values of alpha to obtain their feature importance score.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_4",
+                    "text": "Here the scaling is simply linear scaling of the pixel values (alpha=0 is all black image, alpha=1 is original image).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_5",
+                    "text": "The authors call these scaled images \u201ccounterfactuals\u201d which seems like quite an unnecessarily grandiose name for literally, a scaled image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_6",
+                    "text": "The authors show a number of visualizations that indicate that the proposed feature importance score is more reasonable than just looking at gradients only with respect to the original image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_7",
+                    "text": "They also show some quantitative evidence that the pixels highlighted by the proposed measure are more likely to fall on the objects rather than spurious parts of the image (in particular, see figure 5).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_8",
+                    "text": "The method is also applied to other types of networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_9",
+                    "text": "The quantitative evidence is quite limited and most of the paper is spent on qualitative results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_10",
+                    "text": "While the goal of understanding deep networks is of key importance, it is not clear whether this paper really help elucidate much.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_11",
+                    "text": "The main interesting observation in this paper is that scaling an image by a small alpha (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_12",
+                    "text": "creating a faint image) places more \u201cimportance\u201d on pixels on the object related to the correct class prediction.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_13",
+                    "text": "Beyond that, the paper builds a bit on this, but no deeper insight is gained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_14",
+                    "text": "The authors propose some hand-wavy explanation of why using small alpha (faint image) may force the network to focus on the object, but the argument is not convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_15",
+                    "text": "It would have been interesting to try to probe a bit deeper here, but that may not be easy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_16",
+                    "text": "Ultimately, it is not clear how the proposed scheme for feature importance ranking is useful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_17",
+                    "text": "First, it is still quite noisy and does not truly help understand what a deep net is doing on a particular image.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_18",
+                    "text": "Performing a single gradient descent step on an image (or on the collection of scaled versions of the image) hardly begins to probe the internal workings of a network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_19",
+                    "text": "Moreover, as the authors admit, the scheme makes the assumption that each pixel is independent, which is clearly false.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_20",
+                    "text": "Considering the paper presents a very simple idea, it is far too long.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_21",
+                    "text": "The main paper is 14 pages, up to 19 with references and appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_22",
+                    "text": "In general the writing is long-winded and overly verbose.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_23",
+                    "text": "It detracted substantially from the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_24",
+                    "text": "The authors also define unnecessary terminology.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_25",
+                    "text": "\u201cGradients of Coutnerfactuals\u201d sounds quite fancy, but is not very related to the ideas explored in the writing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_26",
+                    "text": "I would encourage the authors to tighten up the writing and figures down to a more readable page length, and to more clearly spell out the ideas explored early on.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.4305,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "This work proposes to use visualization of gradients to further understand the importance of features (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "pixels) for visual classification.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "Overall, this presented visualizations are interesting, however, the approach is very ad hoc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "The authors do not explain why visualizing regular gradients isn't correlated with the importance of features relevant to the given visual category and proceed to the interior gradient approach.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "One particular question with regular gradients at features that form the spatial support of the visual class.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_5",
+                    "text": "Is it the case that the gradients of the features that are confident of the prediction remain low, while those with high uncertainty will have strong gradients?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_6",
+                    "text": "With regards to the interior gradients, it is unclear how the scaling parameter \\alpha affects the feature importance and how it is related to attention.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_7",
+                    "text": "Finally, does this model use batch normalization?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_3e554cfb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_e04b72ab",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3e554cfb"
+        },
+        {
+            "source": "sec_e04b72ab",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ab711a16"
+        },
+        {
+            "source": "sec_e04b72ab",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_89c2b836"
+        },
+        {
+            "source": "b_a82bda6e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_a2bee400",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a82bda6e"
+        },
+        {
+            "source": "sec_a2bee400",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18975ea3"
+        },
+        {
+            "source": "sec_a2bee400",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_60739224"
+        },
+        {
+            "source": "sec_a2bee400",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a26b4554"
+        },
+        {
+            "source": "sec_a2bee400",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_215cc01e"
+        },
+        {
+            "source": "sec_a2bee400",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9694e57d"
+        },
+        {
+            "source": "sec_a2bee400",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_84490d72"
+        },
+        {
+            "source": "sec_a2bee400",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cbd35338"
+        },
+        {
+            "source": "b_0ff9069c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_0ff9069c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_62170d14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ff9069c"
+        },
+        {
+            "source": "sec_62170d14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e60141ba"
+        },
+        {
+            "source": "sec_62170d14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18ca7864"
+        },
+        {
+            "source": "sec_62170d14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_05d94115"
+        },
+        {
+            "source": "sec_62170d14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36009d88"
+        },
+        {
+            "source": "sec_62170d14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c3d6876b"
+        },
+        {
+            "source": "b_605d3891",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_62170d14",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_605d3891"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_29c5e158"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8db3e238"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c91bf9b0"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ca9c6dce"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb539d1e"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f7148699"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c7174628"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cdacad4d"
+        },
+        {
+            "source": "sec_413b07ad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f0b26941"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c4d96786"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7989d059"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ad75099"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_74814f36"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c4fb34bb"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6d6efceb"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_336874bf"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9675a4f4"
+        },
+        {
+            "source": "b_5331ca62",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5331ca62"
+        },
+        {
+            "source": "b_2378cb66",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2378cb66"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_afbd6d4f"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_209d4e30"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ed340f90"
+        },
+        {
+            "source": "sec_f2f7a740",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_55cec750"
+        },
+        {
+            "source": "b_8245e837",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_8245e837",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_8245e837",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_84388e41",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8245e837"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_96006037"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_487283f4"
+        },
+        {
+            "source": "b_3895fb0c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3895fb0c"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_df29552a"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07b34bf3"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d681e694"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_af68bda1"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5eb37715"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_85b361a0"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_192c4f35"
+        },
+        {
+            "source": "sec_7826a02a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a62e725c"
+        },
+        {
+            "source": "sec_7c7718c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_01aa770e"
+        },
+        {
+            "source": "b_c809ff2d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_c809ff2d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_7c7718c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c809ff2d"
+        },
+        {
+            "source": "sec_7c7718c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_90163505"
+        },
+        {
+            "source": "sec_7c7718c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4db51e7"
+        },
+        {
+            "source": "sec_7c7718c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f17aa5fc"
+        },
+        {
+            "source": "sec_7c7718c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a0f03fcb"
+        },
+        {
+            "source": "sec_7c7718c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_91a6b46a"
+        },
+        {
+            "source": "b_f14bc44d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_7c7718c9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f14bc44d"
+        },
+        {
+            "source": "sec_21469b76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a2a1849b"
+        },
+        {
+            "source": "b_1fd9a7f9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_1fd9a7f9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_21469b76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1fd9a7f9"
+        },
+        {
+            "source": "sec_21469b76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6dcca566"
+        },
+        {
+            "source": "sec_21469b76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3f0cdeda"
+        },
+        {
+            "source": "sec_21469b76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2636311b"
+        },
+        {
+            "source": "sec_21469b76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9ed7b24a"
+        },
+        {
+            "source": "sec_21469b76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_77f11a6f"
+        },
+        {
+            "source": "b_92175b2b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_21469b76",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_92175b2b"
+        },
+        {
+            "source": "sec_16a39a99",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d54548c2"
+        },
+        {
+            "source": "sec_16a39a99",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a5613665"
+        },
+        {
+            "source": "sec_16a39a99",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c7e2251a"
+        },
+        {
+            "source": "sec_16a39a99",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e99c1268"
+        },
+        {
+            "source": "sec_74e9fe8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a7c244d0"
+        },
+        {
+            "source": "sec_74e9fe8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28573ac1"
+        },
+        {
+            "source": "sec_74e9fe8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9ec18871"
+        },
+        {
+            "source": "sec_74e9fe8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f81798c8"
+        },
+        {
+            "source": "b_8eb85d2d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "sec_74e9fe8f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8eb85d2d"
+        },
+        {
+            "source": "b_db7fa9fc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_db7fa9fc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_db7fa9fc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_db7fa9fc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_aebf9e9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_db7fa9fc"
+        },
+        {
+            "source": "sec_aebf9e9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_78254c4a"
+        },
+        {
+            "source": "b_c97bf7d9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_c97bf7d9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_aebf9e9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c97bf7d9"
+        },
+        {
+            "source": "b_4a473d70",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_4a473d70",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_4a473d70",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_aebf9e9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4a473d70"
+        },
+        {
+            "source": "sec_aebf9e9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b9f9bca9"
+        },
+        {
+            "source": "sec_aebf9e9d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e887a51e"
+        },
+        {
+            "source": "sec_6eaf8b65",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_999b1a3c"
+        },
+        {
+            "source": "b_8780d703",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_8780d703",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_8780d703",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_6eaf8b65",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8780d703"
+        },
+        {
+            "source": "b_957fb3f7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_957fb3f7"
+        },
+        {
+            "source": "b_7212141d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7212141d"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_665471ba"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1a42ac26"
+        },
+        {
+            "source": "b_a4794c1b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a4794c1b"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_efdb3eb4"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fa33f3fc"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_79150b62"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_17bdf17c"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_40213219"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dde9ff6a"
+        },
+        {
+            "source": "sec_295d3501",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6fd19f48"
+        },
+        {
+            "source": "b_ed336cd9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_ed336cd9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_f183c970",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ed336cd9"
+        },
+        {
+            "source": "sec_f183c970",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b561de5e"
+        },
+        {
+            "source": "sec_6b4decf6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d47c7077"
+        },
+        {
+            "source": "sec_6b4decf6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e7851f9c"
+        },
+        {
+            "source": "sec_dc337c40",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_40b8a7f8"
+        },
+        {
+            "source": "sec_5d82a415",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_91528877"
+        },
+        {
+            "source": "sec_5d82a415",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07ac1845"
+        },
+        {
+            "source": "sec_5d82a415",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d15e0a7f"
+        },
+        {
+            "source": "sec_5d82a415",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a962d59b"
+        },
+        {
+            "source": "b_c3eddbe2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_5d82a415",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c3eddbe2"
+        }
+    ]
+}

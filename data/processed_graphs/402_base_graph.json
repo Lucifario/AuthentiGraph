@@ -1,0 +1,2085 @@
+{
+    "paper_metadata": {
+        "paper_id": "402",
+        "source": "PeerRead",
+        "year": "Pre-2022",
+        "decision": "Accepted",
+        "total_reviews_available": 12
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_29bbba99",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_406dfd10",
+                        "type": "paragraph",
+                        "text": "The task of hyperparameter optimization is becoming increasingly important as modern data analysis pipelines grow in complexity. The quality of a predictive model critically depends on its hyperparameter configuration, but it is poorly understood how these hyperparameters interact with each other to affect the quality of the resulting model. Consequently, practitioners often default to either hand-tuning or automated brute-force methods like random search and grid search.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_019a5666",
+                        "type": "paragraph",
+                        "text": "In an effort to develop more efficient search methods, the problem of hyperparameter optimization has recently been dominated by Bayesian optimization methods (Snoek et al., 2012; Hutter et al., 2011; Bergstra et al., 2011) that focus on optimizing hyperparameter configuration selection. These methods aim to identify good configurations more quickly than standard baselines like random search by selecting configurations in an adaptive manner; see Figure 1(a) . Existing empirical evidence suggests that these methods outperform random search (Thornton et al., 2013; Eggensperger et al., 2013; Snoek et al., 2015) . However, these methods tackle a fundamentally challenging problem of simultaneously fitting and optimizing a high-dimensional, non-convex function with unknown smoothness, and possibly noisy evaluations. To overcome these difficulties, some Bayesian optimization methods resort to heuristics, at the expense of consistency guarantees, to model the objective function or speed up resource intensive subroutines. 1 Moreover, these adaptive configuration selection methods are intrinsically sequential and thus difficult to parallelize.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b7",
+                            "Citation_b3",
+                            "Citation_b27",
+                            "Citation_b5",
+                            "Citation_b23"
+                        ]
+                    },
+                    {
+                        "block_id": "b_36d06784",
+                        "type": "paragraph",
+                        "text": "An orthogonal approach to hyperparameter optimization focuses on speeding up configuration evaluation; see Figure 1(b ). These methods are adaptive in computation, allocating more resources to promising hyperparameter configurations while quickly eliminating poor ones. Resources can take various forms, including size of training set, number of features, or number of iterations for iterative algorithms. By adaptively allocating these resources, these methods aim to examine orders of magnitude more hyperparameter configurations than methods that uniformly train all configurations to completion, thereby quickly identifying good hyperparameters. While there are methods that combine Bayesian optimization with adaptive resource allocation (Swersky et al., 2013; 2014; Domhan et al., 2015) , we focus on speeding up random search as it offers a simple, parallelizable, and theoretically principled launching point and is shown to outperform grid search (Bergstra & Bengio, 2012) . Our novel configuration evaluation method, HYPERBAND, relies on a principled early-stopping strategy to allocate resources, allowing it to evaluate orders of magnitude more configurations than uniform allocation strategies. HYPERBAND is a general-purpose technique that makes minimal assumptions, unlike prior configuration evaluation approaches (Swersky et al., 2013; Domhan et al., 2015; Swersky et al., 2014; Gy\u00f6rgy & Kocsis, 2011; Agarwal et al., 2011) . In this work, we describe HYPERBAND, provide intuition for the algorithm through a detailed example, and present a wide range of empirical results comparing HYPERBAND with well established competitors. We also briefly describe the theoretical underpinnings of HYPERBAND, however a thorough theoretical treatment is beyond the scope of this paper and is deferred to Li et al. (2016) .",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b4",
+                            "Citation_b2",
+                            "Citation_b25",
+                            "Citation_b4",
+                            "Citation_b26",
+                            "Citation_b6",
+                            "Citation_b0",
+                            "Citation_b14"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_169ab7de",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_81fa0923",
+                        "type": "paragraph",
+                        "text": "Bayesian optimization techniques model the conditional probability p(f |\u03bb) of a configuration's performance on a metric f given a set of hyperparameters \u03bb. For instance, SMAC uses random forests to model p(f |\u03bb) as a Gaussian distribution (Hutter et al., 2011) . TPE is a non-standard Bayesian optimization algorithm based on tree-structured Parzen density estimators (Bergstra et al., 2011) . A third popular method, Spearmint, uses Gaussian processes (GP) to model p(f |\u03bb) and performs slice sampling over the GP's hyperparameters (Snoek et al., 2012) .",
+                        "extracted_citations": [
+                            "Citation_b7",
+                            "Citation_b3",
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f5e6cc71",
+                        "type": "paragraph",
+                        "text": "Adaptive configuration evaluation is not a new idea. Maron & Moore (1993) considered a setting where training time is negligible (e.g., k-nearest-neighbor classification) and evaluation on a large validation set is accelerated by evaluating on an increasing subset of the validation set, stopping early configurations that are performing poorly. Since subsets of the validation set provide unbiased estimates of its expected performance, this is an instance of the stochastic best-arm identification problem for multi-armed bandits (see Jamieson & Nowak (2014) for a brief survey).",
+                        "extracted_citations": [
+                            "Citation_b15",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6e241f81",
+                        "type": "paragraph",
+                        "text": "In contrast, this paper assumes that evaluation time is negligible and the goal is to early-stop longrunning training procedures by evaluating partially trained models on the validation set. Previous approaches either require strong assumptions or use heuristics to perform adaptive resource allocation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_09419f0e",
+                        "type": "paragraph",
+                        "text": "Several works propose methods that make strong assumptions on the convergence behavior of training algorithms, providing theoretical performance guarantees under these assumptions (Gy\u00f6rgy & Kocsis, 2011; Agarwal et al., 2011; Swersky et al., 2013; 2014; Domhan et al., 2015; Sabharwal et al., 2016) . Unfortunately, these assumptions are often hard to verify, and empirical performance can drastically suffer when they are violated. One recent work of particular interest proposes a heuristic based on sequential analysis to determine stopping times for training configurations on increasing subsets of the data (Krueger et al., 2015) . However, it has a few shortcomings: (1) it is designed to speedup multi-fold cross-validation and is not significantly faster than standard holdout, (2) it is not an anytime algorithm and requires the set of configurations to be evaluated as an input, and",
+                        "extracted_citations": [
+                            "Citation_b6",
+                            "Citation_b0",
+                            "Citation_b25",
+                            "Citation_b4",
+                            "Citation_b20",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_5116b2e7",
+                        "type": "paragraph",
+                        "text": "(3) the theoretical correctness and empirical performance of this method are highly dependent on a user-defined \"safety-zone.\" 2 Lastly, in an effort avoid heuristics and strong assumptions, Sparks et al. (2015) proposed a halving style algorithm that did not require explicit convergence behavior, and Jamieson & Talwalkar (2015) analyzed a similar algorithm, providing theoretical guarantees and encouraging empirical results. Unfortunately, these halving style algorithms suffer from the n vs B/n issue which we will discuss in Section 3.",
+                        "extracted_citations": [
+                            "Citation_b24",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_23f28aca",
+                        "type": "paragraph",
+                        "text": "Finally, Klein et al. (2016) recently introduced Fabolas, a Bayesian optimization method that combines adaptive selection and evaluation. Similar to Swersky et al. (2013; 2014) , it models the conditional validation error as a Gaussian process using a kernel that captures the covariance with downsampling rate to allow for adaptive evaluation. While we intended to compare HYPERBAND with Fabolas, we encountered some technical difficulties when using the package 3 and are working with the authors of Klein et al. (2016) to resolve the issues.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b25",
+                            "Citation_b10"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cf146a31",
+                "title": "HYPERBAND ALGORITHM",
+                "blocks": [
+                    {
+                        "block_id": "b_dc659157",
+                        "type": "paragraph",
+                        "text": "HYPERBAND extends the SUCCESSIVEHALVING algorithm proposed for hyperparameter optimization in Jamieson & Talwalkar (2015) and calls it as a subroutine. The idea behind SUCCESSIVE-HALVING follows directly from its name: uniformly allocate a budget to a set of hyperparameter configurations, evaluate the performance of all configurations, throw out the worst half, and repeat until one configurations remains. The algorithm allocates exponentially more resources to more promising configurations. Unfortunately, SUCCESSIVEHALVING requires the number of configurations n as an input to the algorithm. Given some finite time budget B (e.g. an hour of training time to choose a hyperparameter configuration), B/n resources are allocated on average across the configurations. However, for a fixed B, it is not clear a priori whether we should (a) consider many configurations (large n) with a small average training time; or (b) consider a small number of configurations (small n) with longer average training times.",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_67d4976e",
+                        "type": "paragraph",
+                        "text": "We use a simple example to better understand this tradeoff. Figure 1 (c) shows the validation loss as a function of total resources allocated for two configurations with terminal validation losses \u03bd 1 and \u03bd 2 . The shaded areas bound the maximum deviation from the terminal validation loss and will be referred to as \"envelope\" functions. It is possible to differentiate between the two configurations when the envelopes diverge. Simple arithmetic shows that this happens when the width of the envelopes is less than \u03bd 2 -\u03bd 1 , i.e. when the intermediate losses are guaranteed to be less than \u03bd2-\u03bd1 2 away from the terminal losses. There are two takeaways from this observation: more resources are needed to differentiate between the two configurations when either (1) the envelope functions are wider or (2) the terminal losses are closer together.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1dff89a1",
+                        "type": "paragraph",
+                        "text": "However, in practice, the optimal allocation strategy is unknown because we do not have knowledge of the envelope functions nor the distribution of terminal losses. Hence, if more resources are required before configurations can differentiate themselves in terms of quality (e.g., if an iterative training method converges very slowly for a given dataset or if randomly selected hyperparameter configurations perform similarly well) then it would be reasonable to work with a small number of configurations. In contrast, if the quality of a configuration is typically revealed using minimal resources (e.g., if iterative training methods converge very quickly for a given dataset or if randomly selected hyperparameter configurations are of low-quality with high probability) then n is the bottleneck and we should choose n to be large.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5c8b6cb9",
+                "title": "HYPERBAND",
+                "blocks": [
+                    {
+                        "block_id": "b_a27be458",
+                        "type": "paragraph",
+                        "text": "HYPERBAND, shown in Algorithm 1, addresses this \"n versus B/n\" problem by considering several possible values of n for a fixed B, in essence performing a grid search over feasible value of n. Associated with each value of n is a minimum resource r that is allocated to all configurations before some are discarded; a larger value of n corresponds to a smaller r and hence more aggressive early stopping. There are two components to HYPERBAND; (1) the inner loop invokes SUCCESSIVEHALV-ING for fixed values of n and r (lines 3-9) and (2) the outer loop which iterates over different values of n and r (lines 1-2). We will refer to each such run of SUCCESSIVEHALVING within HYPERBAND as a \"bracket.\" Each bracket is designed to use about B total resources and corresponds to a different tradeoff between n and B/n. A single execution of HYPERBAND takes a finite number of iterations, and in practice can be repeated indefinitely.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3a9b7ad8",
+                        "type": "paragraph",
+                        "text": "HYPERBAND requires two inputs (1) R, the maximum amount of resource that can be allocated to a single configuration, and (2) \u03b7, an input that controls the proportion of configurations discarded in each round of SUCCESSIVEHALVING. The two inputs dictate how many different brackets are considered; specifically, s max + 1 different values for n are considered with s max = log \u03b7 (R) . HYPERBAND begins with the most aggressive bracket s = s max , which sets n to maximize exploration, subject to the constraint that at least one configuration is allocated R resources. Each subsequent bracket reduces n by a factor of approximately \u03b7 until the final bracket, s = 0, in which every configuration is allocated R resources (this bracket simply performs classical random search). Hence, HYPERBAND performs a geometric search in the average budget per configuration to address the \"n versus B/n\" problem, at the cost of approximately s max + 1 times more work than running SUCCESSIVEHALVING for a fixed n. By doing so, HYPERBAND is able to exploit situations in which adaptive allocation works well, while protecting itself in situations where more conservative allocations are required.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_04601ca4",
+                        "type": "paragraph",
+                        "text": "Algorithm 1: HYPERBAND algorithm for hyperparameter optimization.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_de09b142",
+                        "type": "paragraph",
+                        "text": "input : R, \u03b7 (default \u03b7 = 3) initialization : R represents the maximum amount of resources that can be allocated to any given configuration. In most cases, there is a natural upper bound on the maximum budget per configuration that is often dictated by the resource type (e.g., training set size for dataset downsampling; limitations based on memory constraint for feature downsampling; rule of thumb regarding number of epochs when iteratively training neural networks). R is also the number of configurations evaluated in the bracket that performs the most exploration, i.e s = s max . In practice one may want n \u2264 n max to limit overhead associated with training many configurations on a small budget, i.e. costs associated with initialization, loading a model, and validation. In this case, set s max = log \u03b7 (n max ) .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_968f286b",
+                        "type": "paragraph",
+                        "text": "The value of \u03b7 can be viewed as a knob that can be tuned based on practical user constraints. Larger values of \u03b7 correspond to a more aggressive elimination schedule and thus fewer rounds of elimination; specifically, each round retains 1/\u03b7 configurations for a total of log \u03b7 (n) + 1 rounds of elimination with n configurations. If one wishes to receive a result faster at the cost of a sub-optimal asymptotic constant, one can increase \u03b7 to reduce the budget per bracket B = ( log \u03b7 (R) + 1)R. We stress that results are not very sensitive to the choice of \u03b7. In practice we suggest taking \u03b7 to be equal to 3 or 4.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_19b71d46",
+                        "type": "paragraph",
+                        "text": "HYPERBAND requires the following methods to be defined for any given learning problem: get hyperparameter configuration(n) returns a set of n i.i.d. samples from some distribution defined over the hyperparameter configuration space; run then return val loss(t, r) takes a hyperparameter configuration (t) and resource allocation (r) and returns the validation loss after training for the allocated resources; and top k(configs, losses, k) takes a set of configurations as well as their associated losses and returns the top k performing configurations.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6d9e33bc",
+                "title": "EXAMPLE APPLICATION WITH ITERATIONS AS A RESOURCE: LENET",
+                "blocks": [
+                    {
+                        "block_id": "b_b947a9df",
+                        "type": "paragraph",
+                        "text": "We next present a simple example to provide intuition. We work with the MNIST dataset and optimize hyperparameters for the LeNet convolutional neural network trained using mini-batch SGD. Our search space includes learning rate, batch size, and number of kernels for the two layers of the network as hyperparameters (details are shown in Table 3 in Appendix A).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_83d3c6ec",
+                        "type": "paragraph",
+                        "text": "We further define the number of iterations as the resource to allocate, with one unit of resource corresponding to one epoch or a full pass over the dataset. We set R to 81 and use the default value of \u03b7 = 3, resulting in s max = 4 and thus 5 brackets of SUCCESSIVEHALVING with different tradeoffs between n and B/n. The resources allocated within each bracket are displayed in Table 1 .  Figure 2 compares the empirical performance of the different brackets of HYPERBAND if they were used separately, as well as standard HYPERBAND (all results are averaged over 70 trials). In practice we do not know a priori which bracket s \u2208 {0, . . . , 4} will be most effective, and in this case neither the most (s = 4) nor least aggressive (s = 0) setting is optimal. However, note that HYPERBAND does nearly as well as the optimal bracket (s = 3) and vastly outperforms the baseline uniform allocation (i.e. random search), which is equivalent to bracket s = 0.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5cec6f7b",
+                "title": "OVERVIEW OF THEORETICAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_c4361f97",
+                        "type": "paragraph",
+                        "text": "Although a detailed theoretical analysis is beyond the scope of this paper, we provide an intuitive, high-level description of theoretical properties of HYPERBAND. Suppose there are n configurations, each with a given terminal validation error \u03bd i for i = 1, . . . , n. Without loss of generality, index the configurations by performance so that \u03bd 1 corresponds to the best performing configuration, \u03bd 2 to the second best, and so on. Now consider the task of identifying the best configuration. The optimal strategy would allocate to each configuration i the minimum resource required to distinguish it from \u03bd 1 , i.e., enough so that the envelope functions depicted in Figure 1 (c) bound the intermediate loss to be less than \u03bdi-\u03bd1 2 away from the terminal value. As shown in Jamieson & Talwalkar (2015) and Li et al. (2016) , the budget required by SUCCESSIVEHALVING is in fact only a small factor away from this optimal approach because it capitalizes on configurations that are easy to distinguish from \u03bd 1 . In contrast, the naive uniform allocation strategy, which allocates B/n to each configuration, has to allocate to every configuration the resource required to distinguish \u03bd 2 from \u03bd 1 .",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1d70dfa5",
+                        "type": "paragraph",
+                        "text": "The relative size of the budget required for uniform allocation and SUCCESSIVEHALVING depends on the envelope functions bounding deviation from terminal losses as well as the distribution from which \u03bd i 's are drawn. The budget required for SUCCESSIVEHALVING is smaller when the optimal n versus B/n tradeoff requires fewer resources per configuration. Hence, if the envelope functions tighten quickly as a function of resource allocated, or the average distances between terminal losses is large, then SUCCESSIVEHALVING can be substantially faster than uniform allocation. Of course we do not have knowledge of either function in practice, so we will hedge our aggressiveness with HYPERBAND. Remarkably, despite having no knowledge of the envelope functions or the distribution of \u03bd i 's, HYPERBAND requires a budget that is only log factors larger than the optimal for SUCCESSIVEHALVING. See Li et al. (2016) for details.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_de590b91",
+                "title": "HYPERPARAMETER OPTIMIZATION EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_09fa332a",
+                        "type": "paragraph",
+                        "text": "In this section, we evaluate the empirical behavior of HYPERBAND with iterations, data subsamples, and features as resources. For all experiments, we compare HYPERBAND with three well known Bayesian optimization algorithms -SMAC, TPE, and Spearmint. Additionally, we show results for SUCCESSIVEHALVING corresponding to repeating the most exploration bracket of HYPERBAND. Finally for all experiments, we benchmark against standard random search and random 2\u00d7, which is a variant of random search with twice the budget of other methods.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_70666782",
+                "title": "EARLY STOPPING ITERATIVE ALGORITHMS FOR NEURAL NETWORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_59df7935",
+                        "type": "paragraph",
+                        "text": "We study a convolutional neural network with the same architecture as that used in Snoek et al. (2012) and Domhan et al. (2015) from cuda-convnet. The search spaces used in the two previous works differ, and we used a search space similar to that of Snoek et al. (2012) with 6 hyperparameters for stochastic gradient decent and 2 hyperparameters for the response normalization layers. In line with the two previous works, we used a batch size of 100 for all experiments. For these experiments, we also compare against a variant of SMAC named SMAC early that uses the early termination criterion proposed in Domhan et al. (2015) for neural networks. We view SMAC with early stopping to be a combination of adaptive configuration selection and configuration evaluation. See Appendix A for more details about the experimental setup.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b4",
+                            "Citation_b22",
+                            "Citation_b4"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d36cc75f",
+                        "type": "paragraph",
+                        "text": "Datasets: We considered three image classification datasets: CIFAR-10 (Krizhevsky, 2009), rotated MNIST with background images (MRBI) (Larochelle et al., 2007) , and Street View House Numbers (SVHN) (Netzer et al., 2011) . CIFAR-10 and SVHN contain 32 \u00d7 32 RGB images while MRBI contains 28 \u00d7 28 grayscale images. The splits used for each dataset are as follows: (1) CIFAR-10 has 40k, 10k, and 10k instances; (2) MRBI has 10k, 2k, and 50k instances; and (3) SVHN has close to 600k, 6k, and 26k instances for training, validation, and test respectively. For all datasets, the only preprocessing performed on the raw images was demeaning.",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b16"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8700fcff",
+                "title": "HYPERBAND Configuration:",
+                "blocks": [
+                    {
+                        "block_id": "b_ccfa3122",
+                        "type": "paragraph",
+                        "text": "For these experiments, one unit of resource corresponds to 100 minibatch iterations. For CIFAR-10 and MRBI, R is set to 300 (or 30k total iterations). For SVHN, R is set to 600 (or 60k total iterations) to accommodate the larger training set. \u03b7 was set to 4 for all experiments, resulting in 5 SUCCESSIVEHALVING brackets for HYPERBAND.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1617f52f",
+                        "type": "paragraph",
+                        "text": "Results: Ten independent trials were performed for each searcher. For CIFAR-10, the results in Figure 3 (a) show that HYPERBAND is more than an order of magnitude faster than its competitors. In Figure 6 of Appendix A, we extend the x-axis for CIFAR-10 out to 100R. The results show that Bayesian optimization methods ultimately converge to similar errors as HYPERBAND. For MRBI, HYPERBAND is more than an order of magnitude faster than standard configuration selection approaches and 5\u00d7 faster than SMAC with early stopping. For SVHN, while HYPERBAND finds a good configuration faster, Bayesian optimization methods are competitive and SMAC with early stopping outperforms HYPERBAND. This result demonstrates that there is merit to incorporating early stopping with configuration selection approaches.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5275d405",
+                        "type": "paragraph",
+                        "text": "Across the three datasets, HYPERBAND and SMAC early are the only two methods that consistently outperform random 2\u00d7. On these datasets, HYPERBAND is over 20\u00d7 faster than random search while SMAC early is \u2264 7\u00d7 faster than random search within the evaluation window. In fact, the first result returned by HYPERBAND after using a budget of 5R is often competitive with results returned by other searchers after using 50R. Additionally, HYPERBAND is less variable than other searchers across trials, which is highly desirable in practice (see Appendix A for plots with error bars).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_882847c7",
+                        "type": "paragraph",
+                        "text": "For computationally expensive problems in high dimensional search spaces, it may make sense to just repeat the most exploratory brackets. Similarly, if meta-data is available about a problem or it is known that the quality of a configuration is evident after allocating a small amount of resource, then one should just repeat the most exploration bracket. Indeed, for these experiments, repeating the most exploratory bracket of HYPERBAND outperforms cycling through all the brackets. In fact, bracket s = 4 vastly outperforms all other methods on CIFAR-10 and MRBI and is nearly tied with SMAC early for first on SVHN.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4741786f",
+                        "type": "paragraph",
+                        "text": "Finally, CIFAR-10 is a very popular dataset and state-of-the-art models achieve much better accuracy than what is shown in Figure 3 . The difference in performance is mainly attributable to higher model complexities and data manipulation (i.e. using reflection or random cropping to artificially increase the dataset size). If we limit the comparison to published results that use the same architecture and exclude data manipulation, the best human expert result for the dataset is 18% error and hyperparameter optimized result is 15.0% for Snoek et al. (2012) 4 and 17.2% for Domhan et al. (2015) . These results are better than our results on CIFAR-10 because they use 25% more data by including the validation set and also train for more epochs. The best model found by HYPERBAND achieved a test error of 17.0% when trained on the combined training and validation data for 300 epochs.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5c4d1fb5",
+                "title": "DATA DOWNSAMPLING KERNEL REGULARIZED LEAST SQUARES CLASSIFICATION",
+                "blocks": [
+                    {
+                        "block_id": "b_339627b5",
+                        "type": "paragraph",
+                        "text": "In this experiment, we use HYPERBAND with data samples as the resource to optimize the hyperparameters of a kernel-based classification task on CIFAR-10. We use the multi-class regularized least squares classification model which is known to have comparable performance to SVMs (Rifkin & Klautau, 2004; Agarwal et al., 2014) but can be trained significantly faster. The hyperparameters considered in the search space include preprocessing method, regularization, kernel type, kernel length scale, and other kernel specific hyperparameters (see Appendix A for more details). HY-PERBAND is run with \u03b7 = 4 and R = 400, with each unit of resource representing 100 datapoints. Similar to previous experiments, these inputs result in a total of 5 brackets. Each hyperparameter optimization algorithm is run for ten trials on Amazon EC2 m4.2xlarge instances; for a given trial, HYPERBAND is allowed to run for two outer loops, bracket s = 4 is repeated 10 times, and all other searchers are run for 12 hours.",
+                        "extracted_citations": [
+                            "Citation_b19",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_36bd42d3",
+                        "type": "paragraph",
+                        "text": "Figure 4 shows that HYPERBAND returns a good configuration after just the first SUCCESSIVEHALV-ING bracket in approximately 20 minutes; other searchers fail to reach this error rate on average even after the entire 12 hours. Notably, HYPERBAND was able to evaluate over 250 configurations in this first bracket of SUCCESSIVEHALVING, while competitors were able to evaluate only three configurations in the same amount of time. Consequently, HYPERBAND is over 30\u00d7 faster than Bayesian optimization methods and 70\u00d7 faster than random search. Bracket s = 4 sightly outperforms HYPERBAND but the terminal performance for the two algorithms are the same. Random 2\u00d7 is competitive with SMAC and TPE.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fe03bb80",
+                "title": "FEATURE SUBSAMPLING TO SPEED UP APPROXIMATE KERNEL CLASSIFICATION",
+                "blocks": [
+                    {
+                        "block_id": "b_58fc0000",
+                        "type": "paragraph",
+                        "text": "We next demonstrate the performance of HYPERBAND when using features as a resource, focusing on random feature approximations for kernel methods. Features are randomly generated using the method described in Rahimi & Recht (2007) to approximate the RBF kernel, and these random features are then used as inputs to a ridge regression classifier. We consider hyperparameters of a random feature kernel approximation classifier trained on CIFAR-10, including preprocessing method, kernel length scale, and l 2 penalty. We impose an upper bound of 100k random features for the kernel approximation so that the data will comfortably fit into a machine with 60GB of memory. Additionally, we set one unit of resource to be 100 features for an R = 1000, which gives 5 different brackets with \u03b7 = 4. Each searcher is run for 10 trials, with each trial lasting 12 hours on a n1-standard-16 machine from Google Cloud Compute. The results in Figure 5 show that HYPERBAND is around 6x faster than Bayesian methods and random search. HYPERBAND performs similarly to bracket s = 4. Random 2\u00d7 outperforms Bayesian optimization algorithms.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_05cbf326",
+                "title": "EXPERIMENTAL DISCUSSION",
+                "blocks": [
+                    {
+                        "block_id": "b_2300c98b",
+                        "type": "paragraph",
+                        "text": "For a given R, the most exploratory SUCCESSIVEHALVING round performed by HYPERBAND evaluates \u03b7 log \u03b7 (R) configurations using a budget of ( log \u03b7 (R) + 1)R, which gives an upper bound on the potential speedup over random search. If training time scales linearly with the resource, the maximum speedup offered by HYPERBAND compared to random search is \u03b7 log \u03b7 (R) ( log \u03b7 (R) +1) . For the values of \u03b7 and R used in our experiments, the maximum speedup over random search is approximately 50\u00d7 given linear training time. However, we observe a range of speedups from 6\u00d7 to 70\u00d7 faster than random search. The differences in realized speedup can be explained by two factors:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1724e1ef",
+                        "type": "paragraph",
+                        "text": "(1) the scaling properties of total evaluation time as a function of the allocated resource and (2) the difficulty of finding a good configuration.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6956078f",
+                        "type": "paragraph",
+                        "text": "If training time is superlinear as a function of the resource, then HYPERBAND can offer higher speedups. More generally, if training scales like a polynomial of degree p > 1, the maximum speedup of HYPERBAND over random search is approximately \u03b7 p-1 -1 \u03b7 p-1 \u03b7 log \u03b7 (R) . Hence, higher speedups were observed for the the kernel least square classifier experiment discussed in Section 4.2 because the training time scaled quadratically as a function of the resource.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f43a7f7b",
+                        "type": "paragraph",
+                        "text": "If 10 randomly sampled configurations is sufficient to find a good hyperparameter setting, then the benefit of evaluating orders of magnitude more configurations is muted. Generally the difficulty of the problem scales with the dimension of the search space since coverage diminishes with dimensionality. For low dimensional problems, the number of configurations evaluated by random search and Bayesian methods is exponential in the number of dimensions so good coverage can be achieved; i.e. if d = 3 as in the features subsampling experiment, then n = O(2 d = 8). Hence, HYPERBAND is only 6\u00d7 faster than random search on the feature subsampling experiment. For the neural network experiments however, we hypothesize that faster speedups are observed for HYPERBAND because the dimension of the search space is higher.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_274f4291",
+                "title": "FUTURE WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_aff48c8e",
+                        "type": "paragraph",
+                        "text": "We have introduced a novel bandit-based method for adaptive configuration evaluation with demonstrated competitive empirical performance. Future work involves exploring (i) embedding HYPER-BAND into parallel and distributed computing environments; (ii) adjusting for training methods with different convergence rates; and (iii) combining HYPERBAND with non-random sampling methods.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f1b1c838",
+                "title": "A.3 EXPERIMENTS USING ALEX KRIZHEVSKY'S CNN ARCHITECTURE",
+                "blocks": [
+                    {
+                        "block_id": "b_e0635809",
+                        "type": "paragraph",
+                        "text": "For the experiments discussed in Section 4.1, the exact architecture used is the 18% model provided on cuda-convnet for CIFAR-10. Search Space: The search space used for the experiments is shown in Table 4 . The learning rate reductions hyperparameter indicates how many times the learning rate was reduced by a factor of 10 over the maximum iteration window. For example, on CIFAR-10, which has a maximum iteration of 30,000, a learning rate reduction of 2 corresponds to reducing the learning every 10,000 iterations, for a total of 2 reductions over the 30,000 iteration window. All hyperparameters with the exception of the learning rate decay reduction overlap with those in Snoek et al. (2012) . Two hyperparameters in Snoek et al. (2012) were excluded from our experiments: (1) the width of the response normalization layer was excluded due to limitations of the Caffe framework and (2) the number of epochs was excluded because it is incompatible with dynamic resource allocation.",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9d8243a4",
+                        "type": "paragraph",
+                        "text": "Datasets: CIFAR-10 and SVHN contain 32\u00d732 RGB images while MRBI contains 28\u00d728 grayscale images. For all datasets, the only preprocessing performed on the raw images was demeaning. For CIFAR-10, the training (40,000 instances) and validation (10,000 instances) sets were sampled from data batches 1-5 with balanced classes. The original test set (10,000 instances) is used for testing.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3af57ecf",
+                        "type": "paragraph",
+                        "text": "For MRBI, the training (10,000 instances) and validation (2,000 instances) sets were sampled from the original training set with balanced classes. The original test set (50,000 instances) is used for testing. Lastly, for SVHN, the train, validation, and test splits were created using the same procedure as that in Sermanet et al. (2012) .",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_89cc53a0",
+                "title": "Computational Considerations:",
+                "blocks": [
+                    {
+                        "block_id": "b_140553ce",
+                        "type": "paragraph",
+                        "text": "The experiments took the equivalent of over 1 year of GPU hours on NVIDIA GRID K520 cards available on Amazon EC2 g2.8xlarge instances. We set a total budget constraint in terms of iterations instead of compute time to make comparisons hardware independent. 6 Comparing progress by iterations instead of time ignores overhead costs not associated with training like cost of configuration selection for Bayesian methods and model initialization and validation costs for HYPERBAND. While overhead is hardware dependent, the overhead for HYPERBAND is below 5% on EC2 g2.8xlarge machines, so comparing progress by time passed would not impact results significantly.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_470637b5",
+                        "type": "paragraph",
+                        "text": "Due to the high computational cost of these experiments, we were not able to run all searchers out to convergence. However, we did double the budget for each trial of CIFAR-10 to allow for a comparison of the searchers as they near convergence. Figure 6 shows while Bayesian optimization methods achieve similar performance as HYPERBAND and SUCCESSIVEHALVING, it takes them much longer to achieve a comparable error rate.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_307f9d9c",
+                        "type": "paragraph",
+                        "text": "Comparison with Early Stopping: Adaptive allocation for hyperparameter optimization can be thought of as a form of early stopping where less promising configurations are halted before completion. Domhan et al. (2015) propose an early stopping method for neural networks and combine it with SMAC to speed up hyperparameter optimization. Their method stops training a configuration if the probability of the configuration beating the current best is below a specified threshold. This probability is estimated by extrapolating learning curves fit to the intermediate validation error losses of a configuration. If a configuration is terminated early, the predicted terminal value from the estimated learning curves is used as the validation error passed to the hyperparameter optimization algorithm. Hence, if the learning curve fit is poor, it could impact the performance of the configuration selection algorithm. While this approach is heuristic in nature, it does demonstrate promising empirical performance so we included SMAC with early termination as a competitor. We used the conservative termination criterion with default parameters and recorded the validation loss every 400 iterations and evaluated the termination criterion 3 times within the training period (every 8k iterations for CIFAR-10 and MRBI and every 16k iterations for SVHN). 7 Comparing performance by the total multiple of R used is conservative because it does not account for the time spent fitting the learning curve in order to check the termination criterion.",
+                        "extracted_citations": [
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c3503527",
+                "title": "A.4 KERNEL CLASSIFICATION EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_c24edd4b",
+                        "type": "paragraph",
+                        "text": "We trained the regularized least-squares classification model using a block coordinate descent solver. Our models take less than 10 minutes to train on CIFAR-10 using an 8 core machine, while the default SVM method in Scikit-learn is single core and takes hours. Table 5 shows the hyperparameters and associated ranges considered in the kernel least squares classification experiment discussed in",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Oracle inequalities for computationally budgeted model selection A Agarwal J Duchi P L Bartlett C Levrard COLT 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Least squares revisited: Scalable approaches for multi-class prediction A Agarwal S Kakade N Karampatziakis L Song G Valiant ICML 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Random search for hyper-parameter optimization J Bergstra Y Bengio JMLR 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Algorithms for hyper-parameter optimization J Bergstra NIPS 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Speeding up automatic hyperparameter optimization of deep neural networks by extrapolation of learning curves T Domhan J T Springenberg F Hutter IJCAI 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Towards an empirical foundation for assessing bayesian optimization of hyperparameters K Eggensperger NIPS Bayesian Optimization Workshop 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Efficient multi-start strategies for local search algorithms A Gy\u00f6rgy L Kocsis JAIR 41 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Sequential model-based optimization for general algorithm configuration F Hutter H Hoos K Leyton-Brown Proc. of LION-5 of LION-5 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Best-arm identification algorithms for multi-armed bandits in the fixed confidence setting K Jamieson R Nowak Information Sciences and Systems (CISS), 2014 48th Annual Conference on IEEE 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Non-stochastic best arm identification and hyperparameter optimization K Jamieson A Talwalkar AISTATS 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Fast bayesian optimization of machine learning hyperparameters on large datasets A Klein S Falkner S Bartels P Hennig F Hutter arXiv:1605.07079 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Learning multiple layers of features from tiny images A Krizhevsky 2009 Department of Computer Science, Univsersity of Toronto Technical report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Fast cross-validation via sequential testing T Krueger D Panknin M Braun Journal of Machine Learning Research 16 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "An empirical evaluation of deep architectures on problems with many factors of variation H Larochelle ICML 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "L Li K Jamieson G Desalvo A Rostamizadeh A Talwalkar Hyperband arXiv:1603.06560 A novel banditbased approach to hyperparameter optimization 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Hoeffding races: Accelerating model selection search for classification and function approximation O Maron A Moore NIPS 1993",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Reading digits in natural images with unsupervised feature learning Y Netzer NIPS Workshop on Deep Learning and Unsupervised Feature Learning 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Random features for large-scale kernel machines A Rahimi B Recht NIPS 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Soft margins for adaboost G R\u00e4tsch T Onoda K R M\u00fcller Machine Learning 42 2001",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "In defense of one-vs-all classification R Rifkin A Klautau JMLR 2004",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Selecting near-optimal learners via incremental data allocation A Sabharwal H Samulowitz G Tesauro AAAI 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Convolutional neural networks applied to house numbers digit classification P Sermanet S Chintala Y Lecun ICPR 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Practical bayesian optimization of machine learning algorithms J Snoek H Larochelle R Adams NIPS 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Bayesian optimization using deep neural networks J Snoek ICML 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Automating model search for large scale machine learning E Sparks A Talwalkar D Haas M J Franklin M I Jordan T Kraska Symposium on Cloud Computing 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Multi-task bayesian optimization K Swersky J Snoek R Adams NIPS 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "K Swersky J Snoek R P Adams arXiv:1406.3896 Freeze-thaw bayesian optimization 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Auto-weka: Combined selection and hyperparameter optimization of classification algorithms C Thornton KDD 2013",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0411,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper discusses Hyperband, an extension of successive halving by Jamieson & Talwalkar (AISTATS 2016).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Successive halving is a very nice algorithm that starts evaluating many configurations and repeatedly cuts off the current worst half to explore many configuration for a limited budget.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "Having read the paper for the question period and just rereading it again, I am now not entirely sure what its contribution is meant to be: the only improvement of Hyperband vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "successive halving is in the theoretical worst case bounds (not more than 5x worse than random search), but you can (a) trivially obtain that bound by using a fifth of your time for running random configurations to completion and (b) the theoretical analysis to show this is said to be beyond the scope of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "That makes me wonder whether the theoretical results are the contribution of this paper, or whether they are the subject of a different paper and the current paper is mostly an empirical study of the method?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "I hope to get a response by the authors and see this made clearer in an updated version of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "In terms of experiments, the paper fails to show a case where Hyperband actually performs better than the authors' previous algorithm successive halving with its most agressive setting of bracket b=4.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "Literally, in every figure, bracket b=4 is at least as good (and sometimes substantially better) than Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "That makes me think that in practice I would prefer successive halving with b=4 over Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "(And if I really want Hyperband's guarantee of not being more than 5x worse than random search I can run random search on a fifth of my machines.) \nThe experiments also compare to some Bayesian optimization methods, but not to the most relevant very closely related Multi-Task Bayesian Optimization methods that have been dominating effective methods for deep learning in that area in the last 3 years: \"Multi-Task Bayesian Optimization\" by Swersky, Snoek, and Adams (2013) already showed 5x speedups for deep learning by starting with smaller datasets, and there have been several follow-up papers showing even larger speedups.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "Given that this prominent work on multitask Bayesian optimization exists, I also think the introduction, which sells Hyperband as a very new approach to hyperparameter optimization is misleading.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "I would've much preferred a more down-to-earth pitch that says \"configuration evaluation\" has been becoming a very important feature in hyperparameter optimization, including Bayesian optimization, that sometimes yields very large speedups (this can be quantified by examples from existing papers) and this paper adds some much-needed theoretical understanding to this and demonstrates how important configuration evaluation is even in the simplest case of being used with random search.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "I think this could be done easily and locally by adding a paragraph to the intro.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "As another point regarding novelty, I think the authors should make clear that approaches for adaptively deciding how many resources to use for which evaluation have been studied for (at least) 23 years in the ML community -- see Maron & Moore, NIPS 1993: \"Hoeffding Races: Accelerating Model Selection Search for Classification and Function Approximation\" (",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.4059,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": 4
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "Given the authors' discussion of CVST, I had expected Hyperband to do much better, but their experiment does not show that: \n- Despite Hyperband being an anytime algorithm, the authors ran it much shorter than CVST and got consistently worse mean results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Maybe not far worse, but no characteristics of the task are presented, so one might already get results within the error bars of CVST by picking a random configuration at no cost at all ...",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "Why not run Hyperband as long as CVST and then compare apples with apples?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "- Also, for this experiment, the authors ran Hyperband with a different \\eta than for all other experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "This begs the question: How much do you need to tune the method to work?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "What would be the result of using the same \\eta=4 as elsewhere?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "We thank the reviewers for providing thoughtful comments and feedback for our paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "Below please find our responses to these comments, grouped by theme.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "***Main Contribution***\n\nTo borrow the words of AnonReviewer1, the contribution of this paper is a \"very simple method [with] great empirical results for several deep learning tasks\u201d that is also endowed with theoretical guarantees.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "While we briefly allude to the theoretical properties of Hyperband in Section 3, a thorough theoretical treatment is beyond the scope of the paper (see the arXiv version for detailed theoretical analysis).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "We have updated the introduction to clarify our contributions in this work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "***Related Work***\n\nWe did not intend to suggest that optimizing configuration evaluation is a new idea and recognize that there is a long line of work in this area that stretches back many years.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "To address AnonReviewer1\u2019s concerns, we moved the related work to section 2, expanded on existing configuration evaluation approaches, and added further discussion of existing approaches that combine configuration selection and evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "Also, as per the suggestion of AnonReviewer2, we have added a reference to Bergstra & Bengio 2012 for the random search baseline.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "***Parallelism***\n\nThe reviewers are correct that there are non-trivial design decisions in parallelizing Hyperband, and the updated version of the paper only talks about this topic as an interesting and important avenue of future research.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "***Worst Case Bound and Theoretical Properties***\n\n- \u201cIt's only [Hyperband\u2019s] worst-case analysis that makes no assumption [on the convergence behavior]\u201d\n\nHyperband is endowed with both worst-case and sample complexity guarantees, and neither of these results rely on any assumptions on the shape or rate of convergence of the validation error.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "In both cases, our only assumption is that the validation error eventually converges.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_11",
+                    "text": "- \u201conly improvement of Hyperband vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_12",
+                    "text": "successive halving is in the theoretical worst case bounds (not more than 5x worse than random search), but you can (a) trivially obtain that bound by using a fifth of your time for running random configurations to completion\u201d; \n\nHyperband crucially extends the previous SH work by addressing the n vs B/n problem that we discuss in Section 3.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_13",
+                    "text": "Indeed, our assumption-free complexity results for Hyperband match the oracle SH results up to a log factor (which we discuss further in the next paragraph).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_14",
+                    "text": "We also note that our current work also introduces a novel variant of SH amenable to the finite horizon, where the maximum budget per configuration is limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_15",
+                    "text": "As a further note regarding this log factor, Hyperband\u2019s guarantee actually shows that it is no worse than 5x the best SH bracket, in hindsight.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_16",
+                    "text": "If the best bracket is 50x faster than uniform allocation with random search, then overall, Hyperband is at least 10x faster than uniform allocation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_17",
+                    "text": "But we agree that the fall-back guarantee is somewhat pessimistic.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_18",
+                    "text": "Ideally, instead of looping over the different kinds of brackets, one would treat each bracket as a separate \u201cmeta-arm\u201d of an outerloop bandit algorithm so that we could claim something like \u201cthe sub-optimal brackets are only played a finite number of times.\u201d However, this remains as future work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_19",
+                    "text": "***Empirical Studies***\n\n- \u201cFigure 3 run out far enough that the other methods have had time to converge in order to see what this gap between optimal and near-optimal really is\u201d; \u201cif random2x is shown, then I would also like to see SMAC2x, Spearmint2x, TPE2x...it would be worth seeing 3x, 10x, and so forth.\u201d\n\nThe experiments in Section 4 are resource intensive and we chose our comparison set to be as informative as possible given the high cost of running these experiments (the total cost was over 10k in EC2 credits and the CNN experiments took over 10k GPU hours).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_20",
+                    "text": "That said, we agree that extending the results would be interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_21",
+                    "text": "To this end, we are currently running experiments to extend the chart for CIFAR-10 trained using CNN to twice the current x-axis range to bring all competitors closer to convergence.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_22",
+                    "text": "We will update the paper once the additional trials are complete.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_23",
+                    "text": "- \u201cThe experiments also compare to some Bayesian optimization methods, but not to the most relevant very closely related Multi-Task Bayesian Optimization\u201d\n\nWe did not compare to Multi-Task Bayesian Optimization for two main reasons: (1) the method mainly addresses the problem of transfer learning/meta-learning; and (2) in its simplest form, it may suffer from the \u201cn vs B/n\u201d problem since trying several subset sizes in conjunction exponentially increases the number of MTBO\u2019s own hyperparameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_24",
+                    "text": "Instead, we opted to use the early stopping method presented in Domhan et.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_25",
+                    "text": "2015 to get an idea of how combined configuration selection and configuration evaluation approaches would perform.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_26",
+                    "text": "We have however added a citation for MTBO in our related work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_27",
+                    "text": "- \u201cI am looking forward to seeing the details on these [CVST] experiments\u201d\n\nWe have added a comparison CVST to the updated paper (see Section 2 and also Appendix A.1).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_28",
+                    "text": "- \u201cbracket b=4 is at least as good (and sometimes substantially better) than Hyperband.\u201d \n\nFor the deep learning and kernel experiments studied in Section 4, bracket s=4 does indeed perform very well and one could conceivably just run SH with that particular point in the n vs B/n tradeoff.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_29",
+                    "text": "However, in the LeNet experiment discussed in Section 3, Figure 2 shows that bracket s=3 performed the best.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_30",
+                    "text": "In practice, if meta-data or previous experience suggests that a certain n vs B/n tradeoff is likely to work well in practice, one can exploit this information and simply run SH with that tradeoff.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_31",
+                    "text": "However, oftentimes, this a priori knowledge is not available, thus motivating the use of Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_32",
+                    "text": "Indeed, our empirical results demonstrate the efficacy of Hyperband in this standard setting where the choice of n vs B/n is unknown.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_4",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": 5,
+                "substance": 3,
+                "clarity": 3,
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_4_s_0",
+                    "text": "This was an interesting paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_1",
+                    "text": "The algorithm seems clear, the problem well-recognized, and the results are both strong and plausible.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_2",
+                    "text": "Approaches to hyperparameter optimization based on SMBO have struggled to make good use of convergence during training, and this paper presents a fresh look at a non-SMBO alternative (at least I thought it did, until one of the other reviewers pointed out how much overlap there is with the previously published successive halving algorithm - too bad!).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_3",
+                    "text": "Still, I'm excited to try it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_4_s_4",
+                    "text": "I'm cautiously optimistic that this simple alternative to SMBO may be the first advance to model search for the skeptical practitioner since the case for random search > grid search (",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_5",
+            "type": "Human",
+            "liang_alpha_score": 0.0411,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": 4
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_5_s_0",
+                    "text": "This paper discusses Hyperband, an extension of successive halving by Jamieson & Talwalkar (AISTATS 2016).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_1",
+                    "text": "Successive halving is a very nice algorithm that starts evaluating many configurations and repeatedly cuts off the current worst half to explore many configuration for a limited budget.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_2",
+                    "text": "Having read the paper for the question period and just rereading it again, I am now not entirely sure what its contribution is meant to be: the only improvement of Hyperband vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_3",
+                    "text": "successive halving is in the theoretical worst case bounds (not more than 5x worse than random search), but you can (a) trivially obtain that bound by using a fifth of your time for running random configurations to completion and (b) the theoretical analysis to show this is said to be beyond the scope of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_4",
+                    "text": "That makes me wonder whether the theoretical results are the contribution of this paper, or whether they are the subject of a different paper and the current paper is mostly an empirical study of the method?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_5",
+                    "text": "I hope to get a response by the authors and see this made clearer in an updated version of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_6",
+                    "text": "In terms of experiments, the paper fails to show a case where Hyperband actually performs better than the authors' previous algorithm successive halving with its most agressive setting of bracket b=4.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_7",
+                    "text": "Literally, in every figure, bracket b=4 is at least as good (and sometimes substantially better) than Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_8",
+                    "text": "That makes me think that in practice I would prefer successive halving with b=4 over Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_9",
+                    "text": "(And if I really want Hyperband's guarantee of not being more than 5x worse than random search I can run random search on a fifth of my machines.) \nThe experiments also compare to some Bayesian optimization methods, but not to the most relevant very closely related Multi-Task Bayesian Optimization methods that have been dominating effective methods for deep learning in that area in the last 3 years: \"Multi-Task Bayesian Optimization\" by Swersky, Snoek, and Adams (2013) already showed 5x speedups for deep learning by starting with smaller datasets, and there have been several follow-up papers showing even larger speedups.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_10",
+                    "text": "Given that this prominent work on multitask Bayesian optimization exists, I also think the introduction, which sells Hyperband as a very new approach to hyperparameter optimization is misleading.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_11",
+                    "text": "I would've much preferred a more down-to-earth pitch that says \"configuration evaluation\" has been becoming a very important feature in hyperparameter optimization, including Bayesian optimization, that sometimes yields very large speedups (this can be quantified by examples from existing papers) and this paper adds some much-needed theoretical understanding to this and demonstrates how important configuration evaluation is even in the simplest case of being used with random search.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_12",
+                    "text": "I think this could be done easily and locally by adding a paragraph to the intro.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_5_s_13",
+                    "text": "As another point regarding novelty, I think the authors should make clear that approaches for adaptively deciding how many resources to use for which evaluation have been studied for (at least) 23 years in the ML community -- see Maron & Moore, NIPS 1993: \"Hoeffding Races: Accelerating Model Selection Search for Classification and Function Approximation\" (",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_6",
+            "type": "Human",
+            "liang_alpha_score": 0.6658,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_6_s_0",
+                    "text": "This paper presents Hyperband, a method for hyperparameter optimization where the model is trained by gradient descent or some other iterative scheme.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_1",
+                    "text": "The paper builds on the successive halving + random search approach of Jamieson and Talwalkar and addresses the tradeoff between training fewer models for a longer amount of time, or many models for a shorter amount of time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_2",
+                    "text": "Effectively, the idea is to perform multiple rounds of successive halving, starting from the most exploratory setting, and then in each round exponentially decreasing the number of experiments, but granting them exponentially more resources.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_3",
+                    "text": "In contrast to other recent papers on this topic, the approach here does not rely on any specific model of the underlying learning curves and therefore makes fewer assumptions about the nature of the model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_4",
+                    "text": "The results seem to show that this approach can be highly effective, often providing several factors of speedup over sequential approaches.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_5",
+                    "text": "Overall I think this paper is a good contribution to the hyperparameter optimization literature.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_6",
+                    "text": "It\u2019s relatively simple to implement, and seems to be quite effective for many problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_7",
+                    "text": "It seems like a natural extension of the random search methodology to the case of early stopping.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_8",
+                    "text": "To me, it seems like Hyperband would be most useful on problems where a) random search itself is expected to perform well and b) the computational budget is sufficiently constrained so that squeezing out the absolute best performance is not feasible and near-optimal performance is sufficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_9",
+                    "text": "I would personally like to see the plots in Figure 3 run out far enough that the other methods have had time to converge in order to see what this gap between optimal and near-optimal really is (if there is one).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_10",
+                    "text": "I\u2019m not sure I agree with the use of random2x as a baseline.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_11",
+                    "text": "I can see why it\u2019s a useful comparison because it demonstrates the benefit of parallelism over sequential methods, but virtually all of these other methods also have parallel extensions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_12",
+                    "text": "I think if random2x is shown, then I would also like to see SMAC2x, Spearmint2x, TPE2x, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_6_s_13",
+                    "text": "I also think it would be worth seeing 3x, 10x, and so forth and how Hyperband fares against these baselines.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_10",
+            "type": "Human",
+            "liang_alpha_score": 0.0411,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_10_s_0",
+                    "text": "This paper discusses Hyperband, an extension of successive halving by Jamieson & Talwalkar (AISTATS 2016).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_1",
+                    "text": "Successive halving is a very nice algorithm that starts evaluating many configurations and repeatedly cuts off the current worst half to explore many configuration for a limited budget.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_2",
+                    "text": "Having read the paper for the question period and just rereading it again, I am now not entirely sure what its contribution is meant to be: the only improvement of Hyperband vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_3",
+                    "text": "successive halving is in the theoretical worst case bounds (not more than 5x worse than random search), but you can (a) trivially obtain that bound by using a fifth of your time for running random configurations to completion and (b) the theoretical analysis to show this is said to be beyond the scope of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_4",
+                    "text": "That makes me wonder whether the theoretical results are the contribution of this paper, or whether they are the subject of a different paper and the current paper is mostly an empirical study of the method?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_5",
+                    "text": "I hope to get a response by the authors and see this made clearer in an updated version of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_6",
+                    "text": "In terms of experiments, the paper fails to show a case where Hyperband actually performs better than the authors' previous algorithm successive halving with its most agressive setting of bracket b=4.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_7",
+                    "text": "Literally, in every figure, bracket b=4 is at least as good (and sometimes substantially better) than Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_8",
+                    "text": "That makes me think that in practice I would prefer successive halving with b=4 over Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_9",
+                    "text": "(And if I really want Hyperband's guarantee of not being more than 5x worse than random search I can run random search on a fifth of my machines.) \nThe experiments also compare to some Bayesian optimization methods, but not to the most relevant very closely related Multi-Task Bayesian Optimization methods that have been dominating effective methods for deep learning in that area in the last 3 years: \"Multi-Task Bayesian Optimization\" by Swersky, Snoek, and Adams (2013) already showed 5x speedups for deep learning by starting with smaller datasets, and there have been several follow-up papers showing even larger speedups.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_10",
+                    "text": "Given that this prominent work on multitask Bayesian optimization exists, I also think the introduction, which sells Hyperband as a very new approach to hyperparameter optimization is misleading.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_11",
+                    "text": "I would've much preferred a more down-to-earth pitch that says \"configuration evaluation\" has been becoming a very important feature in hyperparameter optimization, including Bayesian optimization, that sometimes yields very large speedups (this can be quantified by examples from existing papers) and this paper adds some much-needed theoretical understanding to this and demonstrates how important configuration evaluation is even in the simplest case of being used with random search.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_12",
+                    "text": "I think this could be done easily and locally by adding a paragraph to the intro.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_10_s_13",
+                    "text": "As another point regarding novelty, I think the authors should make clear that approaches for adaptively deciding how many resources to use for which evaluation have been studied for (at least) 23 years in the ML community -- see Maron & Moore, NIPS 1993: \"Hoeffding Races: Accelerating Model Selection Search for Classification and Function Approximation\" (",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_12",
+            "type": "Human",
+            "liang_alpha_score": 0.4059,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": 4
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_12_s_0",
+                    "text": "Given the authors' discussion of CVST, I had expected Hyperband to do much better, but their experiment does not show that: \n- Despite Hyperband being an anytime algorithm, the authors ran it much shorter than CVST and got consistently worse mean results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_1",
+                    "text": "Maybe not far worse, but no characteristics of the task are presented, so one might already get results within the error bars of CVST by picking a random configuration at no cost at all ...",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_2",
+                    "text": "Why not run Hyperband as long as CVST and then compare apples with apples?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_3",
+                    "text": "- Also, for this experiment, the authors ran Hyperband with a different \\eta than for all other experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_4",
+                    "text": "This begs the question: How much do you need to tune the method to work?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_12_s_5",
+                    "text": "What would be the result of using the same \\eta=4 as elsewhere?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_13",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_13_s_0",
+                    "text": "We thank the reviewers for providing thoughtful comments and feedback for our paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_1",
+                    "text": "Below please find our responses to these comments, grouped by theme.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_2",
+                    "text": "***Main Contribution***\n\nTo borrow the words of AnonReviewer1, the contribution of this paper is a \"very simple method [with] great empirical results for several deep learning tasks\u201d that is also endowed with theoretical guarantees.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_3",
+                    "text": "While we briefly allude to the theoretical properties of Hyperband in Section 3, a thorough theoretical treatment is beyond the scope of the paper (see the arXiv version for detailed theoretical analysis).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_4",
+                    "text": "We have updated the introduction to clarify our contributions in this work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_5",
+                    "text": "***Related Work***\n\nWe did not intend to suggest that optimizing configuration evaluation is a new idea and recognize that there is a long line of work in this area that stretches back many years.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_6",
+                    "text": "To address AnonReviewer1\u2019s concerns, we moved the related work to section 2, expanded on existing configuration evaluation approaches, and added further discussion of existing approaches that combine configuration selection and evaluation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_7",
+                    "text": "Also, as per the suggestion of AnonReviewer2, we have added a reference to Bergstra & Bengio 2012 for the random search baseline.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_8",
+                    "text": "***Parallelism***\n\nThe reviewers are correct that there are non-trivial design decisions in parallelizing Hyperband, and the updated version of the paper only talks about this topic as an interesting and important avenue of future research.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_9",
+                    "text": "***Worst Case Bound and Theoretical Properties***\n\n- \u201cIt's only [Hyperband\u2019s] worst-case analysis that makes no assumption [on the convergence behavior]\u201d\n\nHyperband is endowed with both worst-case and sample complexity guarantees, and neither of these results rely on any assumptions on the shape or rate of convergence of the validation error.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_10",
+                    "text": "In both cases, our only assumption is that the validation error eventually converges.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_11",
+                    "text": "- \u201conly improvement of Hyperband vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_12",
+                    "text": "successive halving is in the theoretical worst case bounds (not more than 5x worse than random search), but you can (a) trivially obtain that bound by using a fifth of your time for running random configurations to completion\u201d; \n\nHyperband crucially extends the previous SH work by addressing the n vs B/n problem that we discuss in Section 3.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_13",
+                    "text": "Indeed, our assumption-free complexity results for Hyperband match the oracle SH results up to a log factor (which we discuss further in the next paragraph).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_14",
+                    "text": "We also note that our current work also introduces a novel variant of SH amenable to the finite horizon, where the maximum budget per configuration is limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_15",
+                    "text": "As a further note regarding this log factor, Hyperband\u2019s guarantee actually shows that it is no worse than 5x the best SH bracket, in hindsight.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_16",
+                    "text": "If the best bracket is 50x faster than uniform allocation with random search, then overall, Hyperband is at least 10x faster than uniform allocation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_17",
+                    "text": "But we agree that the fall-back guarantee is somewhat pessimistic.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_18",
+                    "text": "Ideally, instead of looping over the different kinds of brackets, one would treat each bracket as a separate \u201cmeta-arm\u201d of an outerloop bandit algorithm so that we could claim something like \u201cthe sub-optimal brackets are only played a finite number of times.\u201d However, this remains as future work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_19",
+                    "text": "***Empirical Studies***\n\n- \u201cFigure 3 run out far enough that the other methods have had time to converge in order to see what this gap between optimal and near-optimal really is\u201d; \u201cif random2x is shown, then I would also like to see SMAC2x, Spearmint2x, TPE2x...it would be worth seeing 3x, 10x, and so forth.\u201d\n\nThe experiments in Section 4 are resource intensive and we chose our comparison set to be as informative as possible given the high cost of running these experiments (the total cost was over 10k in EC2 credits and the CNN experiments took over 10k GPU hours).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_20",
+                    "text": "That said, we agree that extending the results would be interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_21",
+                    "text": "To this end, we are currently running experiments to extend the chart for CIFAR-10 trained using CNN to twice the current x-axis range to bring all competitors closer to convergence.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_22",
+                    "text": "We will update the paper once the additional trials are complete.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_23",
+                    "text": "- \u201cThe experiments also compare to some Bayesian optimization methods, but not to the most relevant very closely related Multi-Task Bayesian Optimization\u201d\n\nWe did not compare to Multi-Task Bayesian Optimization for two main reasons: (1) the method mainly addresses the problem of transfer learning/meta-learning; and (2) in its simplest form, it may suffer from the \u201cn vs B/n\u201d problem since trying several subset sizes in conjunction exponentially increases the number of MTBO\u2019s own hyperparameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_24",
+                    "text": "Instead, we opted to use the early stopping method presented in Domhan et.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_25",
+                    "text": "2015 to get an idea of how combined configuration selection and configuration evaluation approaches would perform.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_26",
+                    "text": "We have however added a citation for MTBO in our related work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_27",
+                    "text": "- \u201cI am looking forward to seeing the details on these [CVST] experiments\u201d\n\nWe have added a comparison CVST to the updated paper (see Section 2 and also Appendix A.1).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_28",
+                    "text": "- \u201cbracket b=4 is at least as good (and sometimes substantially better) than Hyperband.\u201d \n\nFor the deep learning and kernel experiments studied in Section 4, bracket s=4 does indeed perform very well and one could conceivably just run SH with that particular point in the n vs B/n tradeoff.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_29",
+                    "text": "However, in the LeNet experiment discussed in Section 3, Figure 2 shows that bracket s=3 performed the best.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_30",
+                    "text": "In practice, if meta-data or previous experience suggests that a certain n vs B/n tradeoff is likely to work well in practice, one can exploit this information and simply run SH with that tradeoff.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_31",
+                    "text": "However, oftentimes, this a priori knowledge is not available, thus motivating the use of Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_13_s_32",
+                    "text": "Indeed, our empirical results demonstrate the efficacy of Hyperband in this standard setting where the choice of n vs B/n is unknown.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_14",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": 5,
+                "substance": 3,
+                "clarity": 3,
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_14_s_0",
+                    "text": "This was an interesting paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_1",
+                    "text": "The algorithm seems clear, the problem well-recognized, and the results are both strong and plausible.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_2",
+                    "text": "Approaches to hyperparameter optimization based on SMBO have struggled to make good use of convergence during training, and this paper presents a fresh look at a non-SMBO alternative (at least I thought it did, until one of the other reviewers pointed out how much overlap there is with the previously published successive halving algorithm - too bad!).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_3",
+                    "text": "Still, I'm excited to try it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_14_s_4",
+                    "text": "I'm cautiously optimistic that this simple alternative to SMBO may be the first advance to model search for the skeptical practitioner since the case for random search > grid search (",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_15",
+            "type": "Human",
+            "liang_alpha_score": 0.0411,
+            "aspect_scores": {
+                "originality": 4,
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": 4
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_15_s_0",
+                    "text": "This paper discusses Hyperband, an extension of successive halving by Jamieson & Talwalkar (AISTATS 2016).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_1",
+                    "text": "Successive halving is a very nice algorithm that starts evaluating many configurations and repeatedly cuts off the current worst half to explore many configuration for a limited budget.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_2",
+                    "text": "Having read the paper for the question period and just rereading it again, I am now not entirely sure what its contribution is meant to be: the only improvement of Hyperband vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_3",
+                    "text": "successive halving is in the theoretical worst case bounds (not more than 5x worse than random search), but you can (a) trivially obtain that bound by using a fifth of your time for running random configurations to completion and (b) the theoretical analysis to show this is said to be beyond the scope of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_4",
+                    "text": "That makes me wonder whether the theoretical results are the contribution of this paper, or whether they are the subject of a different paper and the current paper is mostly an empirical study of the method?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_5",
+                    "text": "I hope to get a response by the authors and see this made clearer in an updated version of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_6",
+                    "text": "In terms of experiments, the paper fails to show a case where Hyperband actually performs better than the authors' previous algorithm successive halving with its most agressive setting of bracket b=4.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_7",
+                    "text": "Literally, in every figure, bracket b=4 is at least as good (and sometimes substantially better) than Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_8",
+                    "text": "That makes me think that in practice I would prefer successive halving with b=4 over Hyperband.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_9",
+                    "text": "(And if I really want Hyperband's guarantee of not being more than 5x worse than random search I can run random search on a fifth of my machines.) \nThe experiments also compare to some Bayesian optimization methods, but not to the most relevant very closely related Multi-Task Bayesian Optimization methods that have been dominating effective methods for deep learning in that area in the last 3 years: \"Multi-Task Bayesian Optimization\" by Swersky, Snoek, and Adams (2013) already showed 5x speedups for deep learning by starting with smaller datasets, and there have been several follow-up papers showing even larger speedups.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_10",
+                    "text": "Given that this prominent work on multitask Bayesian optimization exists, I also think the introduction, which sells Hyperband as a very new approach to hyperparameter optimization is misleading.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_11",
+                    "text": "I would've much preferred a more down-to-earth pitch that says \"configuration evaluation\" has been becoming a very important feature in hyperparameter optimization, including Bayesian optimization, that sometimes yields very large speedups (this can be quantified by examples from existing papers) and this paper adds some much-needed theoretical understanding to this and demonstrates how important configuration evaluation is even in the simplest case of being used with random search.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_12",
+                    "text": "I think this could be done easily and locally by adding a paragraph to the intro.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_15_s_13",
+                    "text": "As another point regarding novelty, I think the authors should make clear that approaches for adaptively deciding how many resources to use for which evaluation have been studied for (at least) 23 years in the ML community -- see Maron & Moore, NIPS 1993: \"Hoeffding Races: Accelerating Model Selection Search for Classification and Function Approximation\" (",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_16",
+            "type": "Human",
+            "liang_alpha_score": 0.6658,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": 3,
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_16_s_0",
+                    "text": "This paper presents Hyperband, a method for hyperparameter optimization where the model is trained by gradient descent or some other iterative scheme.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_1",
+                    "text": "The paper builds on the successive halving + random search approach of Jamieson and Talwalkar and addresses the tradeoff between training fewer models for a longer amount of time, or many models for a shorter amount of time.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_2",
+                    "text": "Effectively, the idea is to perform multiple rounds of successive halving, starting from the most exploratory setting, and then in each round exponentially decreasing the number of experiments, but granting them exponentially more resources.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_3",
+                    "text": "In contrast to other recent papers on this topic, the approach here does not rely on any specific model of the underlying learning curves and therefore makes fewer assumptions about the nature of the model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_4",
+                    "text": "The results seem to show that this approach can be highly effective, often providing several factors of speedup over sequential approaches.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_5",
+                    "text": "Overall I think this paper is a good contribution to the hyperparameter optimization literature.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_6",
+                    "text": "It\u2019s relatively simple to implement, and seems to be quite effective for many problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_7",
+                    "text": "It seems like a natural extension of the random search methodology to the case of early stopping.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_8",
+                    "text": "To me, it seems like Hyperband would be most useful on problems where a) random search itself is expected to perform well and b) the computational budget is sufficiently constrained so that squeezing out the absolute best performance is not feasible and near-optimal performance is sufficient.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_9",
+                    "text": "I would personally like to see the plots in Figure 3 run out far enough that the other methods have had time to converge in order to see what this gap between optimal and near-optimal really is (if there is one).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_10",
+                    "text": "I\u2019m not sure I agree with the use of random2x as a baseline.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_11",
+                    "text": "I can see why it\u2019s a useful comparison because it demonstrates the benefit of parallelism over sequential methods, but virtually all of these other methods also have parallel extensions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_12",
+                    "text": "I think if random2x is shown, then I would also like to see SMAC2x, Spearmint2x, TPE2x, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_16_s_13",
+                    "text": "I also think it would be worth seeing 3x, 10x, and so forth and how Hyperband fares against these baselines.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_29bbba99",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_406dfd10"
+        },
+        {
+            "source": "b_019a5666",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_019a5666",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_019a5666",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_019a5666",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_019a5666",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_019a5666",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "sec_29bbba99",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_019a5666"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_36d06784",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_29bbba99",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36d06784"
+        },
+        {
+            "source": "b_81fa0923",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_81fa0923",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_81fa0923",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_169ab7de",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_81fa0923"
+        },
+        {
+            "source": "b_f5e6cc71",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_f5e6cc71",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_169ab7de",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f5e6cc71"
+        },
+        {
+            "source": "sec_169ab7de",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6e241f81"
+        },
+        {
+            "source": "b_09419f0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_09419f0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_09419f0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_09419f0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_09419f0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_09419f0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_169ab7de",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09419f0e"
+        },
+        {
+            "source": "b_5116b2e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_5116b2e7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_169ab7de",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5116b2e7"
+        },
+        {
+            "source": "b_23f28aca",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_23f28aca",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_23f28aca",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_169ab7de",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_23f28aca"
+        },
+        {
+            "source": "b_dc659157",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_cf146a31",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dc659157"
+        },
+        {
+            "source": "sec_cf146a31",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_67d4976e"
+        },
+        {
+            "source": "sec_cf146a31",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1dff89a1"
+        },
+        {
+            "source": "sec_5c8b6cb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a27be458"
+        },
+        {
+            "source": "sec_5c8b6cb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3a9b7ad8"
+        },
+        {
+            "source": "sec_5c8b6cb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_04601ca4"
+        },
+        {
+            "source": "sec_5c8b6cb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_de09b142"
+        },
+        {
+            "source": "sec_5c8b6cb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_968f286b"
+        },
+        {
+            "source": "sec_5c8b6cb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_19b71d46"
+        },
+        {
+            "source": "sec_6d9e33bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b947a9df"
+        },
+        {
+            "source": "sec_6d9e33bc",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_83d3c6ec"
+        },
+        {
+            "source": "b_c4361f97",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_c4361f97",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_5cec6f7b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c4361f97"
+        },
+        {
+            "source": "b_1d70dfa5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_5cec6f7b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d70dfa5"
+        },
+        {
+            "source": "sec_de590b91",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09fa332a"
+        },
+        {
+            "source": "b_59df7935",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_59df7935",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_59df7935",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_59df7935",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_70666782",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_59df7935"
+        },
+        {
+            "source": "b_d36cc75f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_d36cc75f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_70666782",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d36cc75f"
+        },
+        {
+            "source": "sec_8700fcff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ccfa3122"
+        },
+        {
+            "source": "sec_8700fcff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1617f52f"
+        },
+        {
+            "source": "sec_8700fcff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5275d405"
+        },
+        {
+            "source": "sec_8700fcff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_882847c7"
+        },
+        {
+            "source": "b_4741786f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_4741786f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_8700fcff",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4741786f"
+        },
+        {
+            "source": "b_339627b5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_339627b5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_5c4d1fb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_339627b5"
+        },
+        {
+            "source": "sec_5c4d1fb5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36bd42d3"
+        },
+        {
+            "source": "b_58fc0000",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_fe03bb80",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_58fc0000"
+        },
+        {
+            "source": "sec_05cbf326",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2300c98b"
+        },
+        {
+            "source": "sec_05cbf326",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1724e1ef"
+        },
+        {
+            "source": "sec_05cbf326",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6956078f"
+        },
+        {
+            "source": "sec_05cbf326",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f43a7f7b"
+        },
+        {
+            "source": "sec_274f4291",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aff48c8e"
+        },
+        {
+            "source": "b_e0635809",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_e0635809",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_f1b1c838",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e0635809"
+        },
+        {
+            "source": "sec_f1b1c838",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d8243a4"
+        },
+        {
+            "source": "b_3af57ecf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_f1b1c838",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3af57ecf"
+        },
+        {
+            "source": "sec_89cc53a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_140553ce"
+        },
+        {
+            "source": "sec_89cc53a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_470637b5"
+        },
+        {
+            "source": "b_307f9d9c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_89cc53a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_307f9d9c"
+        },
+        {
+            "source": "sec_c3503527",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c24edd4b"
+        }
+    ]
+}
