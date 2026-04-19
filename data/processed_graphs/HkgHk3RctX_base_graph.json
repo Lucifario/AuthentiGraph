@@ -1,0 +1,1677 @@
+{
+    "paper_metadata": {
+        "paper_id": "HkgHk3RctX",
+        "source": "OpenReview_ICLR_2019",
+        "year": "2019",
+        "decision": "Unknown",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_08a8ee86",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_5958468f",
+                        "type": "paragraph",
+                        "text": "Ranking a set of candidate items is a central task in machine learning and information retrieval. Many existing ranking systems are based on pointwise estimators, where the model assigns a score to each item in a candidate set and the resulting slate is obtained by sorting the list according to item scores (Liu et al., 2009) . Such models are usually trained from click-through data to optimize an appropriate loss function (Joachims, 2002) . This simple approach is computationally attractive as it only requires a sort operation over the candidate set at test (or serving) time, and can therefore scale to large problems. On the other hand, in terms of modeling, pointwise rankers cannot easily express dependencies between ranked items. In particular, the score of an item (e.g., its probability of being clicked) often depends on the other items in the slate and their joint placement. Such interactions between items can be especially dominant in the common case where display area is limited or when strong position bias is present, so that only a few highly ranked items get the user's attention. In this case it may be preferable, for example, to present a diverse set of items at the top positions of the slate in order to cover a wider range of user interests. A significant amount of work on learning-to-rank does consider interactions between ranked items when training the model. In pairwise approaches a classifier is trained to determine which item should be ranked first within a pair of items (e.g., Herbrich et al., 1999; Joachims, 2002; Burges et al., 2005) . Similarly, in listwise approaches the loss depends on the full permutation of items (e.g., Cao et al., 2007; Yue et al., 2007) . Although these losses consider inter-item dependencies, the ranking function itself is pointwise, so at inference time the model still assigns a score to each item which does not depend on scores of other items. There has been some work on trying to capture interactions between items in the ranking scores themselves (e.g., Qin et al., 2008; 2009; Zhu et al., 2014; Rosenfeld et al., 2014; Dokania et al., 2014) . Such approaches can, for example, encourage a pair of items to appear next to (or far from) each other in the resulting ranking. Approaches of this type often assume that the relationship between items takes a simple form (e.g., submodular) in order to obtain tractable inference and learning algorithms. Unfortunately, this comes at the expense of the model's expressive power. In this paper, we present a general, scalable approach to ranking, which naturally accounts for high-order interactions. In particular, we apply a sequence-to-sequence (seq2seq) model (Sutskever et al., 2014) to the ranking task, where the input is the list of candidate items and the output is the resulting ordering. Since the output sequence corresponds to ranked items on the slate, we call this model sequence-to-slate (seq2slate). The order in which the input is processed can significantly affect the performance of such models (Vinyals et al., 2016) . For this reason, we often assume the availability of a base (or \"production\") ranker with which the input sequence is ordered (e.g., a simple pointwise method that ignores the interactions we seek to model), and view the output of our model as a re-ranking of the items.",
+                        "extracted_citations": [
+                            "Citation_b21",
+                            "Citation_b16",
+                            "Citation_b13",
+                            "Citation_b16",
+                            "Citation_b6",
+                            "Citation_b7",
+                            "Citation_b46",
+                            "Citation_b28",
+                            "Citation_b21",
+                            "Citation_b48",
+                            "Citation_b31",
+                            "Citation_b8",
+                            "Citation_b34",
+                            "Citation_b38"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fe753972",
+                        "type": "paragraph",
+                        "text": "To address the seq2seq problem, we build on the recent success of recurrent neural networks (RNNs) in a wide range of applications (e.g., Sutskever et al., 2014) . This allows us to use a deep model to capture rich dependencies between ranked items, while keeping the computational cost of inference manageable. More specifically, we use pointer networks, which are seq2seq models with an attention mechanism for pointing at positions in the input (Vinyals et al., 2015b) . We show how to train the network end-to-end to directly optimize several commonly used ranking measures. To this end, we adapt RNN training to use weak supervision in the form of click-through data obtained from logs, instead of relying on ground-truth rankings, which are much more expensive to obtain. Finally, we demonstrate the usefulness of the proposed approach in a number of learning-to-rank benchmarks and in a large-scale, real-world recommendeation system.",
+                        "extracted_citations": [
+                            "Citation_b34"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ad2e5912",
+                "title": "RANKING AND SLATE OPTIMIZATION AS SEQUENCE PREDICTION",
+                "blocks": [
+                    {
+                        "block_id": "b_7cdc7e7d",
+                        "type": "paragraph",
+                        "text": "The ranking problem is that of computing a ranking of a set of items (or ordered list or slate) given some query or context. We formalize the problem as follows. Assume a set of n items, each represented by a feature vector x i \u2208 R m (which may depend on a query or context). Let \u03c0 \u2208 \u03a0 denote a permutation of the items, where each \u03c0 j \u2208 {1, . . . , n} denotes the index of the item in position j. Our goal is to predict the output ranking \u03c0 given the input items x. For instance, given a specific user query, we might want to return an ordered set of music recommendations from a set of candidates that maximizes some measure of user engagement (e.g., number of tracks played).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6462afea",
+                        "type": "paragraph",
+                        "text": "In the seq2seq framework, the probability of an output permutation, or slate, given the inputs is expressed as a product of conditional probabilities according to the chain rule:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2f8db8fa",
+                        "type": "paragraph",
+                        "text": "This expression is completely general and does not make any conditional independence assumptions.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_33ab7cd9",
+                        "type": "paragraph",
+                        "text": "In our case, the conditional p(\u03c0 j |\u03c0 <j , x) \u2208 \u2206 n (a point in the n-dimensional simplex) models the probability of any item being placed at the j'th position in the ranking given the items already placed at previous positions. Therefore, this conditional exactly captures all high-order dependencies between items in the ranked list, including those due to diversity, similarity or other interactions. Our setting is somewhat different than a standard seq2seq setting in that the output vocabulary is not fixed. In particular, the same index (position) is populated by different items in different instances (queries). Indeed, the vocabulary size n itself may vary per instance in the common case where the number of items to rank can change. This is precisely the problem addressed by pointer networks, which we review next.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_152d0714",
+                "title": "POINTER-NETWORK ARCHITECTURE FOR RANKING",
+                "blocks": [
+                    {
+                        "block_id": "b_ce14040c",
+                        "type": "paragraph",
+                        "text": "We employ the pointer-network architecture of Vinyals et al. (2015b) to model the conditional p(\u03c0 j |\u03c0 <j , x). A pointer network uses non-parametric softmax modules, akin to the attention mechanism of Bahdanau et al. (2015) , and learns to point to items in its input sequence rather than predicting an index from a fixed-sized vocabulary. Our seq2slate model, illustrated in Fig. 1 , consists of two recurrent neural networks (RNNs): an encoder and a decoder, both of which use Long Short-term Memory (LSTM) cells (Hochreiter and Schmidhuber, 1997) . At each encoding step i \u2264 n, the encoder RNN reads the input vector x i and outputs a d-dimensional vector e i , thus transforming the input sequence {x i } n i=1 into a sequence of latent memory states {e i } n i=1 . At each decoding step j, the decoder RNN outputs a d-dimensional vector d j which is used as a query in our attention function. The attention function takes as input the query d j \u2208 R d and the set of latent memory states computed by the encoder {e i } n i=1 and produces a probability distribution over the next item to include in the output sequence as follows:",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_531e9635",
+                        "type": "paragraph",
+                        "text": "where W enc , W dec \u2208 R d\u00d7d and v \u2208 R d are learned parameters in our network, denoted collectively by parameter vector \u03b8. The probability p j i = p \u03b8 (\u03c0 j = i|\u03c0 <j , x), is obtained via a softmax over the remaining items and represents the degree to which the model points to input i at decoding step j. To output a permutation, the p j i are set to 0 for items i that already appear in the slate. Once the next item \u03c0 j is selected, typically greedily or by sampling (see below), its embedding x \u03c0j is fed as input to the next decoder step. The input of the first decoder step is a learned d-dimensional vector, denoted as go in Fig. 1 . Importantly, p \u03b8 (\u03c0|x) is differentiable for ant fixed permutation \u03c0 which allows gradient-based learning (see Section 3). We note the following. (i) The model makes no explicit assumptions about the type of interactions between items. If the learned conditional in Eq. ( 2 ) is close to the true conditional in Eq. ( 1 ), then the model can capture rich interactions-including diversity, similarity or others. We demonstrate this flexibility in our experiments (Section 4). (ii) x can represent either raw inputs or embeddings thereof, which can be learned together with the sequence model. (iii) The computational cost of inference, dominated by the sequential decoding procedure, is O(n 2 ), which is standard in seq2seq models with attention. We also consider a computationally cheaper single-step decoder with linear cost O(n), which outputs a single vector p 1 , from which we obtain \u03c0 by sorting the values (similarly to pointwise ranking).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f05d82cf",
+                "title": "TRAINING WITH CLICK-THROUGH DATA",
+                "blocks": [
+                    {
+                        "block_id": "b_c1abbf33",
+                        "type": "paragraph",
+                        "text": "We now turn to the task of training the seq2slate model from data. A typical approach to learning in ranking systems is to run an existing ranker \"in the wild\" and log click-through data, which are then used to train an improved ranking model. This type of training data is relatively inexpensive to obtain, in contrast to human-curated labels such as relevance scores, ratings, or rankings (Joachims, 2002) . Formally, each training example consists of a sequence of items {x 1 , . . . , x n } and binary labels (y 1 , . . . , y n ), with y i \u2208 {0, 1}, representing user feedback (e.g., click/no-click). Our approach easily extends to more informative feedback, such as the level of user engagement with the chosen item (e.g., time spent), but to simplify the presentation we focus on the binary case. Our goal is to learn the parameters \u03b8 of p \u03b8 (\u03c0 j |\u03c0 <j , x) (Eq. ( 2 )) such that permutations \u03c0 corresponding to \"good\" rankings are assigned high probabilities. Various performance measures R(\u03c0, y) can be used to evaluate the quality of a permutation \u03c0 given the labels y, for example, mean average precision (MAP), precision at k, or normalized discounted cumulative gain at k (NDCG@k). Generally speaking, permutations where the positive labels rank higher are considered better. In the standard seq2seq setting, models are trained to maximize the likelihood of a target sequence of tokens given the input, which can be done by maximizing the likelihood of each target token given the previous target tokens using Eq. ( 1 ). During training, the model is typically fed the ground-truth tokens as inputs to the next prediction step, an approach known as teacher forcing (Williams and Zipser, 1989) . Unfortunately, this approach cannot be applied in our setting since we only have access to weak supervision in the form of labels y (e.g clicks), rather than ground-truth permutations. Instead, we show how the seq2slate model can be trained directly from the labels y.",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b42"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7c221261",
+                "title": "TRAINING USING REINFORCE",
+                "blocks": [
+                    {
+                        "block_id": "b_3a4d6f22",
+                        "type": "paragraph",
+                        "text": "One potential approach, which has been applied successfully in related tasks (Bello et al., 2017; Zhong et al., 2017) , is to use reinforcement learning (RL) to directly optimize for the ranking measure R(\u03c0, y). In this setup, the objective is to maximize the expected ranking metric obtained by sequences sampled from our model: E \u03c0\u223cp \u03b8 (.|x) [R(\u03c0, y)]. One can use policy gradients and stochastic gradient ascent to optimize \u03b8. The gradient is formulated using the popular REINFORCE update (Williams, 1992) and can be approximated via Monte-Carlo sampling as follows:",
+                        "extracted_citations": [
+                            "Citation_b3",
+                            "Citation_b47",
+                            "Citation_b41"
+                        ]
+                    },
+                    {
+                        "block_id": "b_98465825",
+                        "type": "paragraph",
+                        "text": "where k indexes ranking instances in a batch of size B, \u03c0 k are permutations drawn from the model p \u03b8 and b(x) denotes a baseline function that estimates the expected rewards to reduce the variance of the gradients.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_93e123e2",
+                "title": "SUPERVISED TRAINING",
+                "blocks": [
+                    {
+                        "block_id": "b_014f4ba8",
+                        "type": "paragraph",
+                        "text": "RL, however, is known to be a challenging optimization problem and can suffer from sample inefficiency and difficult credit assignment. As an alternative, we propose supervised learning using the labels y. In particular, rather than waiting until the end of the output sequence (as in RL), we wish to give feedback to the model at each decoder step. Consider the first step, and recall that the model assigns a score s i to each item in the input. We define a per-step loss (s, y) which essentially acts as a multi-label classification loss with labels y as ground truth. Two natural, simple choices for are cross-entropy loss and hinge loss:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_af55ee5f",
+                        "type": "paragraph",
+                        "text": "hinge (s, y) = max{0, 1min i:yi=1",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6c02152d",
+                        "type": "paragraph",
+                        "text": "where \u0177i = y i / j y j , and p i is a softmax of s, similar to Eq. ( 2 ). Intuitively, with cross-entropy loss we try to assign high probabilities to positive labels (see also Kurata et al., 2016) , while hinge loss is minimized when scores of items with positive labels are higher than scores of those with negative labels. Notice that both losses are convex functions of the scores s. To improve convergence, we consider a smooth version of the hinge-loss where the maximum and minimum are replaced by their smooth counterparts: smooth-max(s; \u03b3) = 1 \u03b3 log i e \u03b3si (and smooth minimum is defined similarly, using min i (s i ) =max i (-s i )).",
+                        "extracted_citations": [
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6458e0eb",
+                        "type": "paragraph",
+                        "text": "If we simply apply a per-step loss from Eq. ( 4 ) to all steps of the output sequence while reusing the labels y at each step, then the loss is invariant to the actual output permutations (e.g., predicting a positive item at the beginning of the sequence has the same cost as predicting it at the end). Instead, we let the loss at each decoding step j depend on the items already chosen, so no further loss is incurred after a label is predicted correctly. In particular, for a fixed permutation \u03c0, define the sequence loss:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_17911e91",
+                        "type": "paragraph",
+                        "text": "where S = {s j } n j=1 , and \u03c0<j (s j , y) depends only on the indices in s j and y which are not in the prefix permutation \u03c0 <j = (\u03c0 1 , . . . , \u03c0 j-1 ) (see Eq. ( 4 )). Including a per-step weight w j can encourage better performance earlier in the sequence (e.g., w j = 1/ log(j + 1)). Furthermore, if optimizing for a particular slate size k is desired, one can restrict this loss to just the first k output steps.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0a251170",
+                "title": "DECODING POLICIES DURING TRAINING",
+                "blocks": [
+                    {
+                        "block_id": "b_bad57613",
+                        "type": "paragraph",
+                        "text": "Since teacher-forcing is not an option, we resort to feeding the model its own previous predictions, as in Bengio et al. (2015) ; Ranzato et al. (2016) . In this case, the permutation \u03c0 is not fixed, but rather depends on the scores S. Specifically, we consider two policies for producing a permutation during training, sampling and greedy decoding, and introduce their corresponding losses.",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b30"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3cfed6d7",
+                "title": "Greedy policy",
+                "blocks": [
+                    {
+                        "block_id": "b_6e936d51",
+                        "type": "paragraph",
+                        "text": "The greedy policy consists of selecting the item that maximizes p \u03b8 (\u2022|\u03c0 <j , x) at every time step j. The resulting permutation \u03c0 * then satisfies \u03c0 * j = argmax i p \u03b8 (\u03c0 j = i|\u03c0 * <j ) and our loss becomes L \u03c0 * . The greedy policy loss is not continuous everywhere since a small change in the scores s may result in a jump between permutations, and therefore L \u03c0 . Specifically, the loss is non-differentiable when any s j has multiple maximizing arguments. Outside this measure-zero subspace, the loss is continuous (almost everywhere), and the gradient is well-defined. Sampling policy The sampling policy consists of drawing each \u03c0 j from p \u03b8 (\u2022|\u03c0 <j , x). The corresponding loss E[L] = \u03c0 p \u03b8 (\u03c0)L \u03c0 (\u03b8) is differentiable everywhere since both p \u03b8 (\u03c0) and L \u03c0 (\u03b8) are differentiable for any permutation \u03c0 (See appendix for a direct derivation of E[L] as a function of S). In this case, the gradient is formulated as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_07c41d61",
+                        "type": "paragraph",
+                        "text": "which can be approximated by:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ad70873f",
+                        "type": "paragraph",
+                        "text": "where b(x k ) is a baseline that approximates L \u03c0 k (\u03b8). Applying stochastic gradient descent intuitively decreases both the loss of any sample (right term) but also the probability of drawing samples with high losses (left term). Notice that our gradient calculation differs from scheduled sampling (Bengio et al., 2015) which instead computes the loss of the sampled sequences (right term) but ignores the probability of sampling high loss sequences (left term). We found it helpful to include both terms, which may apply more generally to training of sequence-to-sequence models (Bengio et al., 2015; Goyal et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b4",
+                            "Citation_b11"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9450de88",
+                        "type": "paragraph",
+                        "text": "For both training policies, we minimize the loss via stochastic gradient descent over mini-batches in an end-to-end fashion.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_81985d16",
+                "title": "EXPERIMENTAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_e0b9274c",
+                        "type": "paragraph",
+                        "text": "We evaluate the performance of our seq2slate model on a collection of ranking tasks. In Section 4.1 we use learning-to-rank benchmark data to study the behavior of the model. We then apply our approach to a large-scale commercial recommendation system and report the results in Section 4.2. Implementation Details We set hyperparameters of our model to values inspired by the literature. All experiments use mini-batches of 128 training examples and LSTM cells with 128 hidden units. We train our models with the Adam optimizer (Kingma and Ba, 2014) and an initial learning rate of 0.0003 decayed every 1000 steps by a factor of 0.96. Network parameters are initialized uniformly at random in [-0.1, 0.1]. To improve generalization, we regularize the model by using dropout with probability of dropping p dropout = 0.1 and L2 regularization with a penalty coefficient \u03bb = 0.0003. Unless specified otherwise, all results use supervised training with cross-entropy loss xent and the sampling policy. At inference time, we report metrics for the greedy policy. We use an exponential moving average with a decay rate of 0.99 as the baseline b(x) in Eq. (3) and Eq. ( 6 ). When training the seq2slate model with REINFORCE, we use R = NDGC@10 as the reward function and do not regularize the model. We also considered a bidirectional encoder RNN (Schuster and Paliwal, 1997) but found that it did not lead to significant improvements in our experiments.",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b33"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7f6f1956",
+                "title": "LEARNING-TO-RANK BENCHMARKS",
+                "blocks": [
+                    {
+                        "block_id": "b_c28202bc",
+                        "type": "paragraph",
+                        "text": "To understand the behavior of the proposed model, we conduct experiments using two learning-torank datasets. We use two of the largest publicly available benchmarks: the Yahoo Learning to Rank Challenge data (set 1), 1 and the Web30k dataset. We adapt the procedure proposed by Joachims et al. (2017) to generate click data. The original procedure is as follows: first, a base ranker is trained from the raw data. We select this base ranker by training all models in the RankLib package, 3 and selecting the one with the best performance on each data set (MART for Yahoo and LambdaMART for Web30k). We generate an item ranking using the base model, which is then used to generate training data by simulating a user \"cascade\" model: a user observes each item with decaying probability 1/i \u03b7 , where i is the base rank of the item and \u03b7 is a parameter of the generative model. This simulates a noisy sequential scan. An observed item is clicked if its ground-truth relevance score is above a threshold (relevant: {2, 3, 4}, irrelevant: {0, 1}), otherwise no click is generated.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    },
+                    {
+                        "block_id": "b_54e556a0",
+                        "type": "paragraph",
+                        "text": "To introduce high-order interactions, we augment the above procedure as follows, creating a generative process dubbed diverse-clicks. When observing a relevant item, the user will only click if it is not too similar to previously clicked items (i.e, diverse enough), thus reducing the total number of clicks.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a862fdaa",
+                        "type": "paragraph",
+                        "text": "Similarity is defined as being in the smallest q percentile (i.e., q = 0.5 is the median) of Euclidean distances between pairs of feature vectors within the same ranking instance:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a413de9f",
+                        "type": "paragraph",
+                        "text": "We use \u03b7 = 0 (no decay, since clicks are sparse anyway due to the diversity term) and q = 0.5. This modification to the generative model is essential for our purpose as the original data does not contain explicit inter-item dependencies. We also discuss variations of this model below.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cc9792b9",
+                        "type": "paragraph",
+                        "text": "Using the generated training data, we train both our seq2slate model and baseline rankers from the RankLib package: AdaRank (Xu and Li, 2007) , Coordinate Ascent (Metzler and Croft, 2007) , LambdaMART (Wu et al., 2010) , ListNet (Cao et al., 2007) , MART (Friedman, 2001) , Random Forests (Breiman, 2001) , RankBoost (Freund et al., 2003) , RankNet (Burges et al., 2005) . Some of these baselines use deep neural networks (e.g., RankNet, ListNet), so they are strong state-ofthe-art models with comparable complexity to seq2slate. The results in Table 1 show that seq2slate significantly outperforms all the baselines, suggesting that it can better capture and exploit the dependencies between items in the data.",
+                        "extracted_citations": [
+                            "Citation_b45",
+                            "Citation_b23",
+                            "Citation_b44",
+                            "Citation_b7",
+                            "Citation_b10",
+                            "Citation_b5",
+                            "Citation_b9",
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4d53308b",
+                        "type": "paragraph",
+                        "text": "To better understand the behavior of the model, we visualize the probabilities of the attention from Eq. ( 2 ) for one of the test instances in Fig. 2 . Interestingly, the model produces slates that are close to the input ranking, but with some items demoted to lower positions, presumably due to the interactions with previous items. We next consider several variations of the generative model and of the seq2slate model itself. Results are reported in Table 2 . The rank-gain metric per example is computed by summing the positions change of all positive labels in the re-ranking, and this is averaged over all examples (queries).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_84062dc4",
+                "title": "Comparison of training variants",
+                "blocks": [
+                    {
+                        "block_id": "b_5f22f352",
+                        "type": "paragraph",
+                        "text": "In Table 2 , we compare the different training variants outlined in Section 3, namely cross entropy with the greedy or sampling policy, a smooth hinge loss with \u03b3 = 1.0, and REINFORCE. We find that supervised learning with cross entropy generally performs best, with the smooth hinge loss doing slightly worse. Our weakly supervised training methods have positive rank gain on all datasets, meaning they improve over the base ranker. Results from Table 3 : Performance compared to a competitive base production ranker on real data.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_37f4dda3",
+                        "type": "paragraph",
+                        "text": "One-step decoding We compare seq2slate to the model which uses a single decoding step, referred to as one-step decoder (see Section 2). In Table 2 we see that this model has comparable performance to the sequential decoder. This suggests that when inference time is crucial, as in many real-world systems, one might prefer the faster single-shot option. One possible explanation for the comparable performance of the one-step decoder is that the interactions in our generated data are rather simple and can be effectively learned by the encoder. By contrast, in Section 4.2 we show that on more complex real-world data, sequential decoding can perform significantly better.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9ae2706d",
+                        "type": "paragraph",
+                        "text": "Sensitivity to input order Previous work suggests that the performance of seq2seq models are often sensitive to the order in which the input is processed (Vinyals et al., 2016; Nam et al., 2017) . To test this we consider the use of seq2slate without relying on the base ranker to order the input, but instead items are fed to the model in random order. The results in Table 2 (see shuffled data) show that the performance is indeed significantly worse in this case, which is consistent with previous studies. It suggests that reranking is an easier task than ranking from scratch.",
+                        "extracted_citations": [
+                            "Citation_b38",
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_35346b55",
+                        "type": "paragraph",
+                        "text": "Adaptivity to the type of interaction To demonstrate the flexibility of seq2slate, we generate data using a variant of the diverse-clicks model above. In the similar-clicks model, the user also clicks on observed irrelevant items if they are similar to previously clicked items (increasing the number of total clicks). As above, we use the pairwise distances in feature space d ij to determine similarity. For this model we use q = 0.5, and \u03b7 = 0.3 for Web30k, \u03b7 = 0.1 for Yahoo, to keep the proportion of positive labels similar. The results in the appendix (see Table 4 ) show that seq2slate has comparable performance to the baseline rankers, with slightly better performance on the harder Web30k data. This demonstrates that our model can adapt to various types of interactions in the data.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6a73db04",
+                "title": "REAL-WORLD DATA",
+                "blocks": [
+                    {
+                        "block_id": "b_1fa5e6db",
+                        "type": "paragraph",
+                        "text": "We also apply seq2slate to a ranking problem from a large-scale commercial recommendation system. We train the model using massive click-through logs (comprising roughly O(10 7 ) instances) with cross-entropy loss, the greedy policy, L2-regularization and dropout. The data has item sets of varying size, with an average n of 10.24 items per example. We learn embeddings of the raw inputs as part of training. Table 3 shows the performance of seq2slate and the one-step decoder compared to the production base ranker on test data (of roughly the same size as the training data). Significant gains are observed in all performance metrics, with sequential decoding outperforming the one-step decoder. This suggests that sequential decoding may more faithfully capture complex dependencies between the items. Finally, we let the learned seq2slate model run in a live experiment (A/B testing). We compute the click-through rate (CTR) in each position (#clicks/#examples) for seq2slate. The production base ranker serves traffic outside the experiment, and we compute CTR per position for this traffic as well. Fig. 3 shows the difference in CTR per position, indicating that seq2slate has significantly higher CTR in the top positions. This suggests that seq2slate indeed places items that are likely to be chosen higher in the ranking.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2cd46bf2",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_c8bb1cae",
+                        "type": "paragraph",
+                        "text": "In this section we discuss additional related work. Our work builds on the recent impressive success of seq2seq models in complex prediction tasks, including machine translation (Sutskever et al., 2014; Bahdanau et al., 2015) , parsing (Vinyals et al., 2015a) , combinatorial optimization (Vinyals et al., 2015b; Bello et al., 2017) , multi-label classification (Wang et al., 2016; Nam et al., 2017) , and others.",
+                        "extracted_citations": [
+                            "Citation_b34",
+                            "Citation_b1",
+                            "Citation_b3",
+                            "Citation_b40",
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9674c87e",
+                        "type": "paragraph",
+                        "text": "Our work differs in that we explicitly target the ranking task, which requires a novel approach to training seq2seq models from weak feedback (click-through data).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ff0caa50",
+                        "type": "paragraph",
+                        "text": "Most of the work on ranking mentioned above uses shallow representations. However, in recent years deep models have been used for information retrieval, focusing on embedding queries, documents and query-document pairs (Huang et al., 2013; Guo et al., 2016; Palangi et al., 2016; Wang and Klabjan, 2017; Pang et al., 2017) (see also recent survey by Mitra and Craswell (2017) ). Rather than embedding individual items, in seq2slate a representation of the entire slate of items is learned and encoded in the RNN state. Moreover, learning the embeddings (x) can be easily incorporated into the training of the sequence model to optimize both simultaneously end-to-end. Closest to ours is the recent work of Ai et al. (2018) , where an RNN is used to encode a set of items for re-ranking. Their approach uses a single decoding step with attention, similar to our one-step decoder. In contrast, we use sequential decoding, which we find crucial in certain applications (see Section 4.2). Another important difference is that their training formulation assumes availability of full rankings or relevance scores, while we focus on learning from cheap click-through data. Finally, Santa Cruz et al. (2017) recently proposed an elegant framework for learning permutations based on the so called Sinkhorn operator. Their approach uses a continuous relaxation of permutation matrices (i.e., the set of doubly-stochastic matrices). Later, Mena et al. (2018) combined this with a Gumbel softmax distribution to enable efficient learning. However, this approach is focused on reconstruction of scrambled objects, and it is not obvious how to extend it to our ranking setting, where no ground-truth permutation is available.",
+                        "extracted_citations": [
+                            "Citation_b14",
+                            "Citation_b12",
+                            "Citation_b26",
+                            "Citation_b39",
+                            "Citation_b27",
+                            "Citation_b24",
+                            "Citation_b0",
+                            "Citation_b32",
+                            "Citation_b22"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fb0ec971",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_0ed4bca2",
+                        "type": "paragraph",
+                        "text": "We presented a novel seq2slate approach to ranking sets of items. We found the formalism of pointer-networks particularly suitable for this setting. We addressed the challenge of training the model from weak user feedback to improve the ranking quality. Our experiments show that the proposed approach is highly scalable and can deliver significant improvements in ranking results. Our work can be extended in several directions. In terms of architecture, we aim to explore the Transformer network (Vaswani et al., 2017) in place of the RNN. Several variants can potentially improve the performance of our model, including beam-search inference (Wiseman and Rush, 2016) , and training with Actor-Critic (Bahdanau et al., 2017) or SeaRNN (Leblond et al., 2018 ) and it will be interesting to study their performance in the ranking setting. Finally, an interesting future work direction will be to study off-policy correction (Joachims et al., 2018) Since the terms are continuous (and smooth) in S for all j and \u03c0 <j , so is the entire function.",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b43",
+                            "Citation_b2",
+                            "Citation_b20",
+                            "Citation_b15"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_37773c33",
+                "title": "B ADDITIONAL EXPERIMENTAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_e79d00be",
+                        "type": "paragraph",
+                        "text": "Ranker Yahoo Web30k MAP NDCG@5 NDCG@10 MAP NDCG@5 NDCG@10 seq2slate 0.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Learning a deep listwise context model for ranking refinement Qingyao Ai Keping Bi Jiafeng Guo W Bruce Croft SIGIR 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Neural machine translation by jointly learning to align and translate Dzmitry Bahdanau Kyunghyun Cho Yoshua Bengio Proceedings of ICLR ICLR 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "An actor-critic algorithm for sequence prediction Dzmitry Bahdanau Philemon Brakel Kelvin Xu Anirudh Goyal Ryan Lowe Joelle Pineau Aaron Courville Yoshua Bengio ICLR 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Neural combinatorial optimization with reinforcement learning Irwan Bello Hieu Pham Quoc V Le Mohammad Norouzi Samy Bengio ICLR 2017 -Workshop Track 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Scheduled sampling for sequence prediction with recurrent neural networks Samy Bengio Oriol Vinyals Navdeep Jaitly Noam Shazeer NIPS 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Random forests Leo Breiman Machine learning 45 1 2001",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Learning to rank using gradient descent Chris Burges Tal Shaked Erin Renshaw Ari Lazier Matt Deeds Nicole Hamilton Greg Hullender Proceedings of the 22nd international conference on Machine learning the 22nd international conference on Machine learning 2005",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Learning to rank: from pairwise approach to listwise approach Zhe Cao Tao Qin Tie-Yan Liu Ming-Feng Tsai Hang Li Proceedings of the 24th international conference on Machine learning the 24th international conference on Machine learning ACM 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Learning to rank using high-order information Puneet Kumar Dokania Aseem Behl M Pawan Jawahar Kumar European Conference on Computer Vision Springer 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "An efficient boosting algorithm for combining preferences Yoav Freund Raj Iyer Robert E Schapire Yoram Singer Journal of machine learning research 4 Nov. 2003",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Greedy function approximation: a gradient boosting machine Jerome H Friedman Annals of statistics 2001",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Professor forcing: A new algorithm for training recurrent networks Anirudh Goyal Alex Lamb Ying Zhang Saizheng Zhang Aaron C Courville Yoshua Bengio Advances in Neural Information Processing Systems 29: Annual Conference on Neural Information Processing Systems Barcelona, Spain 2016. December 5-10, 2016. 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "A deep relevance matching model for ad-hoc retrieval Jiafeng Guo Yixing Fan Qingyao Ai W Bruce Croft International Conference on Information and Knowledge Management (CIKM) 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Support vector learning for ordinal regression Ralf Herbrich Thore Graepel Klaus Obermayer ICANN 1999",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Learning deep structured semantic models for web search using clickthrough data Sepp Hochreiter Jurgen Schmidhuber ; Po-Sen Xiaodong Huang Jianfeng He Li Gao Alex Deng Larry Acero Heck Proceedings of the 22nd ACM international conference on Conference on information & knowledge management the 22nd ACM international conference on Conference on information & knowledge management ACM 1997. 2013 Long short-term memory",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Deep learning with logged bandit feedback T Joachims A Swaminathan M De Rijke International Conference on Learning Representations (ICLR) 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Optimizing search engines using clickthrough data Thorsten Joachims Proceedings of the eighth ACM SIGKDD international conference on Knowledge discovery and data mining the eighth ACM SIGKDD international conference on Knowledge discovery and data mining ACM 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Unbiased learning-to-rank with biased feedback Thorsten Joachims Adith Swaminathan Tobias Schnabel Proceedings of the Tenth ACM International Conference on Web Search and Data Mining the Tenth ACM International Conference on Web Search and Data Mining ACM 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Adam: A method for stochastic optimization Diederik Kingma Jimmy Ba ICLR 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Improved neural network-based multi-label classification with better initialization leveraging label co-occurrence Gakuto Kurata Bing Xiang Bowen Zhou ACL 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "SEARNN: Training rnns with global-local losses R\u00e9mi Leblond Jean-Baptiste Alayrac Anton Osokin Simon Lacoste-Julien ICLR 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Learning to rank for information retrieval Tie-Yan Liu Foundations and Trends R in Information Retrieval 3 3 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Learning latent permutations with gumbel-sinkhorn networks Gonzalo Mena David Belanger Scott Linderman Jasper Snoek International Conference on Learning Representations (ICLR) 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Linear feature-based models for information retrieval Donald Metzler Bruce Croft Information Retrieval 10 3 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Mitra Bhaskar Nick Craswell arXiv:1705.01509 Neural models for information retrieval 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Maximizing subset accuracy with recurrent neural networks in multi-label classification Jinseok Nam Eneldo Loza Menc\u00eda Hyunwoo J Kim Johannes F\u00fcrnkranz Advances in Neural Information Processing Systems 30 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Deep sentence embedding using long short-term memory networks: Analysis and application to information retrieval H Palangi L Deng Y Shen J Gao X He J Chen X Song R Ward IEEE/ACM Transactions on Audio, Speech, and Language Processing 24 4 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Deeprank: A new deep architecture for relevance ranking in information retrieval Liang Pang Yanyan Lan Jiafeng Guo Jun Xu Jingfang Xu Xueqi Cheng Proceedings of the 2017 ACM on Conference on Information and Knowledge Management, CIKM '17 the 2017 ACM on Conference on Information and Knowledge Management, CIKM '17 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Learning to rank relational objects and its application to web search Tao Qin Tie-Yan Liu Xu-Dong Zhang De-Sheng Wang Wen-Ying Xiong Hang Li Proceedings of WWW WWW ACM 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Global ranking using continuous conditional random fields Tao Qin Tie-Yan Liu Xu-Dong Zhang De-Sheng Wang Hang Li Advances in neural information processing systems 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Sequence level training with recurrent neural networks Marcaurelio Ranzato Sumit Chopra Michael Auli Wojciech Zaremba Proceedings of ICLR ICLR 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Learning structured models with the auc loss and its generalizations Nir Rosenfeld Ofer Meshi Danny Tarlow Amir Globerson Artificial Intelligence and Statistics 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Visual permutation learning Rodrigo Santa Cruz Basura Fernando Anoop Cherian Stephen Gould CVPR 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Bidirectional recurrent neural networks M Schuster K K Paliwal 10.1109/78.650093 Trans. Sig. Proc 45 11 1997",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "Sequence to sequence learning with neural networks Ilya Sutskever Oriol Vinyals Quoc V Le NIPS 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Attention is all you need Ashish Vaswani Noam Shazeer Niki Parmar Jakob Uszkoreit Llion Jones Aidan N Gomez \u0141 Ukasz Kaiser Illia Polosukhin Advances in Neural Information Processing Systems 30 Curran Associates, Inc 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b36",
+                "raw_text": "Grammar as a foreign language O Vinyals L Kaiser T Koo S Petrov I Sutskever G Hinton NIPS 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b37",
+                "raw_text": "Pointer networks Oriol Vinyals Meire Fortunato Navdeep Jaitly NIPS 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b38",
+                "raw_text": "Order matters: Sequence to sequence for sets Oriol Vinyals Samy Bengio Manjunath Kudlur International Conference on Learning Representations (ICLR) 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b39",
+                "raw_text": "An attention-based deep net for learning to rank Baiyang Wang Diego Klabjan arXiv:1702.06106 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b40",
+                "raw_text": "CNN-RNN: A unified framework for multi-label image classification Jiang Wang Yi Yang Junhua Mao Zhiheng Huang Chang Huang Wei Xu Computer Vision and Pattern Recognition (CVPR), 2016 IEEE Conference on IEEE 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b41",
+                "raw_text": "Simple statistical gradient following algorithms for connectionnist reinforcement learning Ronald Williams Machine Learning 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b42",
+                "raw_text": "A learning algorithm for continually running fully recurrent neural networks Ronald J Williams David Zipser 10.1162/neco.1989.1.2.270 Neural Comput 0899-7667 1 2 June 1989",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b43",
+                "raw_text": "Sequence-to-sequence learning as beam-search optimization Sam Wiseman Alexander M Rush ACL 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b44",
+                "raw_text": "Adapting boosting for information retrieval measures Qiang Wu J C Christopher Krysta M Burges Jianfeng Svore Gao Information Retrieval 13 3 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b45",
+                "raw_text": "Adarank: a boosting algorithm for information retrieval Jun Xu Hang Li Proceedings of the 30th annual international ACM SIGIR conference on Research and development in information retrieval the 30th annual international ACM SIGIR conference on Research and development in information retrieval ACM 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b46",
+                "raw_text": "A support vector method for optimizing average precision Yisong Yue Thomas Finley Filip Radlinski Thorsten Joachims Proceedings of SIGIR SIGIR ACM 2007",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b47",
+                "raw_text": "Seq2sql: Generating structured queries from natural language using reinforcement learning Victor Zhong Caiming Xiong Richard Socher arXiv:1709.00103 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b48",
+                "raw_text": "Learning for search result diversification Yadong Zhu Yanyan Lan Jiafeng Guo Xueqi Cheng Shuzi Niu Proceedings of SIGIR SIGIR ACM 2014",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0057,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "If the stated revisions are incorporated into the paper, it will be a substantially stronger version.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "I'm leaning towards accepting the revised version -- all my concerns are addressed by the authors' comments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "---\nThe paper uses a Seq2Seq network to re-rank candidate items in an information retrieval task so as to account for inter-item dependencies in a weakly supervised manner.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The gain from using such a re-ranker is demonstrated using synthetic experiments as well as a real-world experiment on live traffic to a recommender system.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Paragraph below eqn2: for *any* fixed permutation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Figure1 and notation indicates that, at each step of decoding, the selected input x_j is fed to the decoder.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "The text suggests the embedding of the input e_j is fed to the decoder (which is consistent with \"go\" being a d-dimensional vector, rather than the dimensionality of x).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "Single step decoder with linear cost: Is there a missing footnote?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "If not, why call it p^1?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Simpler notation to just call it p.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "Eqn7: Role of baseline.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "In REINFORCE, b(x) is typically action-independent (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "approximating the state value function induced by the current policy).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "L_pi(theta) is action dependent (depends on the permutation sampled from P_theta).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "So, I'm unclear about the correctness of Eqn7 (does it yield an unbiased policy gradient?)\n\nEqn5: Expected some discussion about the mismatch between training loss (per-step cross entropy) vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "testing loss (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "Does a suitable choice of w_j allow us to recover standard listwise metrics (that capture interactions, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "Expt implementation: Why was REINFORCE optimizing NDCG@10 not regularized?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "Expt cascade click model: Expected an even simpler experiment to begin with; [Is the Seq2Slate model expressive enough to capture listwise metrics?] Since the relevances are available, we can check if Seq2Slate trained to the relevance labels yields NDCG performance comparable to LambdaMART, and whether it can optimize metrics like ERR.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "Table1: On the test set, is NDCG&MAP being computed w.r.t the ground truth relevances?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "So, is the claim that Seq2Slate is more robust when clicks are noisy in a one-sided way (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "relevant items may not receive clicks)?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "Not clear how much of this benefit comes from a more expressive model to predict relevances (see suggested expt above) vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "Seq2Slate from clicks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "NDCG & MAP definitely don't account for inter-item dependencies, so unclear what is being tested in this experiment.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "For diverse-clicks, eta=0 while for similar-clicks, eta>0 (in a dataset dependent way).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_26",
+                    "text": "Can expt numbers for the 3 choices of eta be added to the appendix?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_27",
+                    "text": "[Seems like cherry-picking otherwise]\n\nCan Ai et al, 2018 be benchmarked on the current expt setup?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_28",
+                    "text": "Is it identical to the single-step decoder proposed in the paper?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_29",
+                    "text": "Comment: Would be more accurate to call seq2slate a re-ranker throughout the text (in the abstract and intro, the claim is seq2slate is a ranker).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_30",
+                    "text": "Expected to see training time and inference time numbers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_31",
+                    "text": "Since Seq2Slate does extra computation on top of, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_32",
+                    "text": "LambdaMART, it is useful to know how scalable it can be during training, and when the extra perf is worth the O(n^2) or O(n) [for single-step decoding] during inference.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_33",
+                    "text": "General comments:\nClarity: The paper is well written and easy to follow.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_34",
+                    "text": "There are a few notation choices that can be improved/clarified.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_35",
+                    "text": "Originality: This work seems closely related to Ai et al, SIGIR 2018.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_36",
+                    "text": "Going from a single-shot decoding to sequential decoding is an incremental step; the real-world experiment seemed the most novel and compelling contribution (however, it is unclear how one can reproduce it).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_37",
+                    "text": "Significance: The paper addresses a significant real-world problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_38",
+                    "text": "Many high-impact applications of ranking rely on being able to model inter-dependencies well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_39",
+                    "text": "Quality: The paper has interesting contributions, but can be substantially stronger (see some of the specific comments above).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_40",
+                    "text": "For instance, A careful study of the computational vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_41",
+                    "text": "performance trade-off, fine-grained comparison of different decoding architectures, better understanding of which architectural choices allow us to model any arbitrary ranking metric more effectively vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_42",
+                    "text": "which ones are more robust to click noise vs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_43",
+                    "text": "which ones capture inter-item dependencies.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The authors consider the problem of re-ranking an initial ranker that doesn\u2019t consider interactions between items (e.g., a point-wise ranker) with a pointer-network approach that considers these interactions when re-ordering the input ranking.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "Notably, this is performed during decoding as opposed to {pairwise, list-wise} learning to rank approaches that consider interactions during training, but emit an item-wise score during inference.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Operationally in practice, this has to be trained from click-through data for which the authors consider both a RL approach (Reinforce) and supervised training (a sequence-level hinge loss function) and decoded either with a single-step greedy policy or a sampling procedure.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "Experiments are conducted on learning-to-rank benchmarks where interactions are introduced to test the validity of the method and on a real-world, large-scale recommendation engine \u2014 showing solid improvements in both cases.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "From a high-level perspective, the methodological innovation (a pointer-network trained on sequence loss from logged data), setting (re-ranking a slate to consider interactions), and empirical analyses are largely \u2018incremental\u2019 \u2014 although I think non-trivial to put together and the paper itself is well-written and fairly convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "In framing the paper this way, I would have expected some comparison to sub-modular methods on the \u2018diverse-clicks\u2019 generated data for completeness, although I would be surprised if the Seq2Slate method doesn\u2019t perform better (but all the more reason to conduct).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "In addition to reporting how to resolve some of the details of applying this, the most interesting results may very well be the real-world experiments as the result improvements are fairly impressive (such that I intend to play with this myself).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Thus, as the focus is on details and empirical results over methodological innovation, this paper reads a bit like an industry-track paper \u2014 but I find the results interesting overall and am marginally inclined to accept.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "Evaluating the paper along the requested dimensions:\n\n= Quality: The paper clearly states its motivation, proposes a model, discusses practical issues, and provides convincing experiments (given the constraints of proprietary data, etc.).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "I didn\u2019t observe any technical flaws and everything was relatively self-contained and easy to read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "I could think of a few more experiments regarding submodular-based models, possibly different settings of the \u2018diverse-click\u2019 data for a sensitivity analysis, and a more direct comparison to [Ai, et al., SIGIR18], but this isn\u2019t required to make the results sufficiently convincing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "(6/10)\n\n= Clarity: The paper is very clearly written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "(7/10)\n\n= Originality: This is the weakest aspect of the paper from a methodological perspective.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "It is a fairly straightforward application of pointer-networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "Even the path forward is fairly straightforward as outlined in the conclusion.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "One additional pointer that is methodologically similar, but for \u2018discrete choice\u2019 as opposed to re-ranking is [Mottini & Acuna-Agost, Deep Choice Model Using Pointer Networks for Airline Itinerary Prediction; KDD17] (which honestly, is probably a better venue for this specific work).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "Non-trivial and complete, but not particularly innovative.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "(5/10)\n\n= Significance: Methodologically, probably will influence some work regarding re-ranking methodologically.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "From a practical perspective, seems very promising.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "A few more experiments would make this case stronger, but has real-world data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "(6/10)\n\n=== Pros ===\n+ extends a widely used model (pointer-networks) to the re-ranking setting\n+ discusses practical issues in getting this to work at scale\n+ shows that it works in a real-world setting \n+ contextualization within existing research shows good understanding of related work\n\n=== Cons ===\n- is a fairly direct application of pointer-networks with the innovation being in the details (i.e., is more of an \u2018industry\u2019 paper)\n- additional experiments around \u2018diverse-clicks\u2019 settings (to see how smooth the performance curve) and submodular comparisons may have been interesting\n\nIn summary, I think there is room for improvement (some outlined in the conclusion), but is an interesting finding with promise that I plan to try myself.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "Thus, I lean toward an accept.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.5007,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper formulates the re-ranking problem as a sequence generation task and tackles it with the pointer-network architecture.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The paper formulates the problem clearly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The proposed model is trained on click-through log and outputs a ranking list of candidate items.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "The authors discuss two different potential approaches to train the model and conduct synthetic experiments as well as a real-world live experiment.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "The model also ran in a live experiment (A/B testing).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Some issues I concern about:\n\nIn Equation 7,  why do the authors introduce the baseline function into supervised learning?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "I guess this is due to the advantage function in REINFORCE.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "But the authors should state the reason and correctness of this derivation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "In Section 4, implementation details part:\n\u201cR=NDGC@10\u201d should be \u201cR=NDCG@10\u201d, (and maybe the authors could give a citation for each metric).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "\u201cbaseline b(x) in Eq(3) and Eq(6)\u201d should be \u201cbaseline b(x) in Eq(3) and Eq(7)\u201d, and why do the authors use the same baseline function for REINFORCE and supervised learning?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "Can the author specify why Seq2Slate with REINFORCE is not regularized while all other models are trained with L2- regularization?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "In Section 4.1,  I think the authors can give a direct comparison between their models and [Ai, et al., SIGIR18].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "Compared with [Ai, et al., SIGIR18], where the authors use more metrics (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "Expected Reciprocal Rank), there are fewer metrics used in this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Especially, I want to see the performance of Seq2Slate with REINFORCE (reward as NDCG) on other metrics.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "In Section 4.2:\nWhy the authors do not conduct real-world data experiments on Seq2Slate with REINFORCE?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "I am wondering whether the time complexity of REINFORCE is too high for experiments on large scale datasets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "[Important] The authors stated that their model is sensitive to input order.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "However, it seems that they do not specify the input order of training sequences in Section 4.1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "Is the order fixed?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "And in my opinion, the robustness of the model can be improved by shuffling the input sequence during the training stage, just like data augmentation in computer vision.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "I suggest the authors conduct the extended experiments.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "General comments:\n\nQuality (6/10): The paper uses the Seq2Seq architecture for the learning-to-ranking task, which is self-contained and has no obvious flaws.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_23",
+                    "text": "Experiments could be more perfect, especially, the author can add more metrics.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_24",
+                    "text": "The authors also give a comparison of their proposed training variants along with a detailed analysis of how their models can adapt to different types of data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_25",
+                    "text": "In addition, a live experiment (A/B testing) is conducted.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_26",
+                    "text": "Clarity (6/10): The paper is well written in general, some typos shall be fixed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_27",
+                    "text": "Significance (6/10): The authors validated their model on both synthetic data (based on two learning to rank benchmark datasets) and real-world data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_28",
+                    "text": "I think the authors can use more metrics besides MAP and NDCG.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_29",
+                    "text": "Originality (5/10): The paper can be regarded as an adaption of the Seq2Seq framework with pointer networks on learning-to-rank tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_30",
+                    "text": "Although the authors give an analysis on why the traditional training approach (teacher forcing) cannot be applied to their tasks and give two alternative approaches, this paper stills seems to a direct application with minor innovation on training approaches and loss functions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_31",
+                    "text": "In summary, I think this is a good paper addressing the (re)ranking problem with pointer networks, but it is more suitable for conferences focusing on application and industry like SIGIR or KDD instead of the deep learning conference ICLR.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b46"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b48"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "b_5958468f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "sec_08a8ee86",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5958468f"
+        },
+        {
+            "source": "b_fe753972",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "sec_08a8ee86",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fe753972"
+        },
+        {
+            "source": "sec_ad2e5912",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7cdc7e7d"
+        },
+        {
+            "source": "sec_ad2e5912",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6462afea"
+        },
+        {
+            "source": "sec_ad2e5912",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2f8db8fa"
+        },
+        {
+            "source": "sec_ad2e5912",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_33ab7cd9"
+        },
+        {
+            "source": "b_ce14040c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_ce14040c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_152d0714",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ce14040c"
+        },
+        {
+            "source": "sec_152d0714",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_531e9635"
+        },
+        {
+            "source": "b_c1abbf33",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_c1abbf33",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b42"
+        },
+        {
+            "source": "sec_f05d82cf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c1abbf33"
+        },
+        {
+            "source": "b_3a4d6f22",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_3a4d6f22",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b47"
+        },
+        {
+            "source": "b_3a4d6f22",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b41"
+        },
+        {
+            "source": "sec_7c221261",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3a4d6f22"
+        },
+        {
+            "source": "sec_7c221261",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_98465825"
+        },
+        {
+            "source": "sec_93e123e2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_014f4ba8"
+        },
+        {
+            "source": "sec_93e123e2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_af55ee5f"
+        },
+        {
+            "source": "b_6c02152d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_93e123e2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6c02152d"
+        },
+        {
+            "source": "sec_93e123e2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6458e0eb"
+        },
+        {
+            "source": "sec_93e123e2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_17911e91"
+        },
+        {
+            "source": "b_bad57613",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_bad57613",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_0a251170",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bad57613"
+        },
+        {
+            "source": "sec_3cfed6d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6e936d51"
+        },
+        {
+            "source": "sec_3cfed6d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_07c41d61"
+        },
+        {
+            "source": "b_ad70873f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_ad70873f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_ad70873f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "sec_3cfed6d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ad70873f"
+        },
+        {
+            "source": "sec_3cfed6d7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9450de88"
+        },
+        {
+            "source": "b_e0b9274c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_e0b9274c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "sec_81985d16",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e0b9274c"
+        },
+        {
+            "source": "b_c28202bc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_7f6f1956",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c28202bc"
+        },
+        {
+            "source": "sec_7f6f1956",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_54e556a0"
+        },
+        {
+            "source": "sec_7f6f1956",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a862fdaa"
+        },
+        {
+            "source": "sec_7f6f1956",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a413de9f"
+        },
+        {
+            "source": "b_cc9792b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b45"
+        },
+        {
+            "source": "b_cc9792b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_cc9792b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b44"
+        },
+        {
+            "source": "b_cc9792b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_cc9792b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_cc9792b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_cc9792b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_cc9792b9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_7f6f1956",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cc9792b9"
+        },
+        {
+            "source": "sec_7f6f1956",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4d53308b"
+        },
+        {
+            "source": "sec_84062dc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5f22f352"
+        },
+        {
+            "source": "sec_84062dc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_37f4dda3"
+        },
+        {
+            "source": "b_9ae2706d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b38"
+        },
+        {
+            "source": "b_9ae2706d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_84062dc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9ae2706d"
+        },
+        {
+            "source": "sec_84062dc4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_35346b55"
+        },
+        {
+            "source": "sec_6a73db04",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1fa5e6db"
+        },
+        {
+            "source": "b_c8bb1cae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "b_c8bb1cae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_c8bb1cae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_c8bb1cae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b40"
+        },
+        {
+            "source": "b_c8bb1cae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_2cd46bf2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c8bb1cae"
+        },
+        {
+            "source": "sec_2cd46bf2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9674c87e"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b39"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_ff0caa50",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_2cd46bf2",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ff0caa50"
+        },
+        {
+            "source": "b_0ed4bca2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_0ed4bca2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b43"
+        },
+        {
+            "source": "b_0ed4bca2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_0ed4bca2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_0ed4bca2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_fb0ec971",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ed4bca2"
+        },
+        {
+            "source": "sec_37773c33",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e79d00be"
+        }
+    ]
+}

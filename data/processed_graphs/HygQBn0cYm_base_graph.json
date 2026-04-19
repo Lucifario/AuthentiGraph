@@ -1,0 +1,1994 @@
+{
+    "paper_metadata": {
+        "paper_id": "HygQBn0cYm",
+        "source": "OpenReview_ICLR_2019",
+        "year": "2019",
+        "decision": "Unknown",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_8723ce16",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_218a51c5",
+                        "type": "paragraph",
+                        "text": "In recent years, model-free reinforcement learning methods using deep neural network controllers have proven effective on a wide range of tasks, from playing video or text-based games (Mnih et al., 2015; 2016; Narasimhan et al., 2015) to learning algorithms (Zaremba et al., 2015) and complex locomotion tasks (Lillicrap et al., 2015; Zhang et al., 2015) . However, these methods often require a large number of interactions with the environment in order to learn. While this is not a problem if the environment is simulated, it can limit the application of these methods in realistic environments where interactions with the environment are slow, expensive or potentially dangerous. Building a simulator where the agent can safely try out policies without facing real consequences can mitigate this problem, but requires human engineering effort which increases with the complexity of the environment being modeled.",
+                        "extracted_citations": [
+                            "Citation_b25",
+                            "Citation_b28",
+                            "Citation_b45",
+                            "Citation_b23",
+                            "Citation_b46"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ae4d883a",
+                        "type": "paragraph",
+                        "text": "Model-based reinforcement learning approaches try to learn a model of the environment dynamics, and then use this model to plan actions or train a parameterized policy. A common setting is where an agent alternates between collecting experience by executing actions using its current policy or dynamics model, and then using these experiences to improve its dynamics model. This approach has been shown empirically to significantly reduce the required number of environment interactions needed to obtain an effective policy or planner (Atkeson & Santamaria, 1997; Deisenroth & Rasmussen, 2011; Nagabandi et al., 2017; Chua et al., 2018) . Despite these improvements in sample complexity, there exist settings where even a single poor action executed by an agent in a real environment can have consequences which are not acceptable. At the same time, with data collection becoming increasingly inexpensive, there are many settings where observational data of an environment is abundant. This suggests a need for algorithms which can learn policies primarily from observational data, which can then perform well in a real environment. Autonomous driving is an example of such a setting: on one hand, trajectories of human drivers can be easily collected using traffic cameras (Halkias & Colyar, 2006) , resulting in an abundance of observational data; on the other hand, learning through interaction with the real environment is not a viable solution.",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b7",
+                            "Citation_b27",
+                            "Citation_b6",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e74fabcf",
+                        "type": "paragraph",
+                        "text": "However, learning policies from purely observational data is challenging because the data may only cover a small region of the space over which it is defined. If the observational data consists of stateaction pairs produced by an expert, one option is to use imitation learning (Pomerleau, 1991) . However, this is well-known to suffer from a mismatch between the states seen at training and execution time (Ross & Bagnell, 2010) . Another option is to learn a dynamics model from observational data, and then use it to train a policy (Nguyen & Widrow, 1989) . However, the dynamics model may make arbitrary predictions outside the domain it was trained on, which may wrongly be associated with low cost (or high reward) as shown in Figure 1 . The policy network may then exploit these errors in the dynamics model and produce actions which lead to wrongly optimistic states. In the interactive setting, this problem is naturally self-correcting, since states where the model predictions are wrongly optimistic will be more likely to be experienced, and thus will correct the dynamics model. However, the problem persists if the dataset of environment interactions which the model is trained on is fixed.",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b36",
+                            "Citation_b30"
+                        ]
+                    },
+                    {
+                        "block_id": "b_85e52877",
+                        "type": "paragraph",
+                        "text": "In this work, we propose to train a policy while explicitly penalizing the mismatch between the distribution of trajectories it induces and the one reflected in the training data. We use a learned dynamics model which is unrolled for multiple time steps, and train a policy network to minimize a differentiable cost over this rolled-out trajectory. This cost contains two terms: a policy cost which represents the objective the policy seeks to optimize, and an uncertainty cost which represents its divergence from the states it is trained on. We measure this second cost by using the uncertainty of the dynamics model about its own predictions, calculated using dropout. We apply our approach in the context of learning policies to drive an autonomous car in dense traffic, using a large-scale dataset of real-world driving trajectories which we also adapt into an environment for testing learned policies 1 . We show that model-based control using this additional uncertainty regularizer substantially outperforms unregularized control, and enables learning good driving policies using only observational data with no environment interaction or additional labeling by an expert. We also show how to effectively leverage an action-conditional stochastic forward model using a modified posterior distribution, which encourages the model to maintain sensitivity to input actions.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_be1bfc6d",
+                "title": "MODEL-PREDICTIVE POLICY LEARNING WITH UNCERTAINTY REGULARIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_3709f4ce",
+                        "type": "paragraph",
+                        "text": "We assume we are given a dataset of observational data which consists of state-action pairs D = {(s t , a t )} t . We first describe our general approach, which consists of two steps: learning an actionconditional dynamics model using the collected observational data, and then using this model to train a fast, feedforward policy network which minimizes both a policy cost and an uncertainty cost.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3fbd8b72",
+                "title": "ACTION-CONDITIONAL FORWARD MODEL",
+                "blocks": [
+                    {
+                        "block_id": "b_60943444",
+                        "type": "paragraph",
+                        "text": "In this work, we consider recent approaches for stochastic prediction based on Variational Autoencoders (Kingma & Welling, 2013; Babaeizadeh et al., 2017; Denton & Fergus, 2018) . The stochastic model f \u03b8 (s 1:t , a t , z t ) takes as input a sequence of observed or previously predicted states s 1:t , an action a t , and a latent variable z t which represents the information about the next state s t+1 which is not a deterministic function of the input. During training, latent variables are sampled from a distribution whose parameters are output by a posterior network q \u03c6 (s 1:t , s t+1 ) conditioned on the past inputs and true targets. This network is trained jointly with the rest of the model using the reparameterization trick, and a term is included in the loss to minimize the KL divergence between the posterior distribution and a fixed prior p(z), which in our case is an isotropic Gaussian.",
+                        "extracted_citations": [
+                            "Citation_b21",
+                            "Citation_b2",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b60a8699",
+                        "type": "paragraph",
+                        "text": "The per-sample loss used for training the stochastic model is given by:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f76204a6",
+                        "type": "paragraph",
+                        "text": "After training, different future predictions for a given sequence of frames can be generated by sampling different latent variables from the prior distribution.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b82dcf46",
+                        "type": "paragraph",
+                        "text": "Recent models for stochastic video prediction (Babaeizadeh et al., 2017; Denton & Fergus, 2018) do not use their model for planning or training a policy network, and parameterize the posterior distribution over latent variables using a diagonal Gaussian. In our case, we are training an actionconditional video prediction model which we will later use to train a policy. This leads to an additional requirement: it is important for the prediction model to accurately respond to input actions, and not use the latent variables to encode factors of variation in the outputs which are due to the actions. To this end we propose to use a mixture of two Gaussians, with one component fixed to the prior, as our posterior distribution:",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fdc9842f",
+                        "type": "paragraph",
+                        "text": "This can be seen as applying a form of global dropout to the latent variables at training time 2 , and forces the prediction model to extract as much information as possible from the input states and actions by making the latent variable independent of the output with some probability. In our experiments we will refer to this parameterization as z-dropout.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f20e7b3f",
+                "title": "TRAINING A POLICY NETWORK WITH UNCERTAINTY MINIMIZATION",
+                "blocks": [
+                    {
+                        "block_id": "b_19dba469",
+                        "type": "paragraph",
+                        "text": "Once the forward model is trained, we use it to train a parameterized policy network \u03c0 \u03c8 , which we assume to be stochastic. We first sample an initial state sequence s 1:t from the training set, unroll the forward model over T time steps, and backpropagate gradients of a differentiable objective function with respect to the parameters of the policy network (shown in Figure 2 ). During this process the weights of the forward model are fixed, and only the weights of the policy network are optimized. This objective function contains two terms: a policy cost C, which reflects the underlying objective the policy is trying to learn, and an uncertainty cost U , which reflects how close the predicted state induced by the policy network is to the manifold which the data D is drawn from.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ee9d4c26",
+                        "type": "paragraph",
+                        "text": "Training the policy using a stochastic forward model involves solving the following problem, where latent variables are sampled from the prior and input into the forward model at every time step:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_04fa112d",
+                        "type": "paragraph",
+                        "text": "The uncertainty cost U is applied to states predicted by the forward model, and could reflect any measure of their likelihood under the distribution the training data is drawn from. We propose here a general form based on the uncertainty of the dynamics model, which is calculated using dropout. it was trained on), it will have low uncertainty about its prediction. If it is given a state-action pair which is outside this distribution, it will have high uncertainty.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_12191ab9",
+                        "type": "paragraph",
+                        "text": "Dropout (Hinton et al., 2012; Srivastava et al., 2014) is a regularization technique which consists of randomly setting hidden units in a neural network to zero with some probability. The work of (Gal & Ghahramani, 2016) showed that estimates of the neural network's uncertainty for a given input can be obtained by calculating the covariance of its outputs taken over multiple dropout masks. We note that this uncertainty estimate is the composition of differentiable functions: each of the models induced by applying a different dropout mask is differentiable, as is the covariance operator. Furthermore, we can summarize the covariance matrix by taking its trace (which is equal to the sum of its eigenvalues, or equivalently the sum of the variances of the outputs across each dimension), which is also a differentiable operation. This provides a scalar estimate of uncertainty which is differentiable with respect to the input.",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b42",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_3d98e484",
+                        "type": "paragraph",
+                        "text": "More precisely, let f \u03b81 , ..., f \u03b8 K denote our prediction model with K different dropout masks applied to its hidden units (this can also be viewed as changing its weights). We define our scalar measure of uncertainty U as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6f82981c",
+                        "type": "paragraph",
+                        "text": "where d is the dimensionality of the output. Minimizing this quantity with respect to actions encourages the policy network to produce actions which, when plugged into the forward model, will produce predictions which the forward model is confident about 3 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9fc113b6",
+                        "type": "paragraph",
+                        "text": "A simple way to define U given an initial sequence of states s 1:t from D would be to set U (\u015d t+k ) = \u015dt+k -s t+k 2 , which would encourage the policy network to output actions which lead to a similar trajectory as the one observed in the dataset. This leads to a set of states which the model is presumably confident about, but may not be a trajectory which also satisfies the policy cost C unless the dataset D consists of expert trajectories. If this is the case, setting C(\u015d t+i ) = U (\u015d t+i ) = 1 2 \u015dt+k -s t+k 2 gives a model-based imitation learning objective which simultaneously optimizes the policy cost and the uncertainty cost. The problem then becomes:  \u015dt+i -s t+i 2 , such that:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_acc37139",
+                        "type": "paragraph",
+                        "text": "We call the first approach MPUR , for Model-Predictive Policy with Uncertainty Regularization, and the second MPER , for Model-Predictive Policy with Expert Regularization. A key feature of both approaches is that we optimize the objective over T time steps, which is made possible by our learned dynamics model. This means that the actions will receive gradients from multiple time steps ahead, which will penalize actions which lead to large divergences from the training manifold further into the future, even if they only cause a small divergence at the next time step.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_43c4f82b",
+                "title": "RELATIONSHIP TO BAYESIAN NEURAL NETWORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_771e3286",
+                        "type": "paragraph",
+                        "text": "Our MPUR approach can be viewed as training a Bayesian neural network (BNN) (Neal, 1995) with latent variables using variational inference (Jordan et al., 1999; Kingma & Welling, 2013) . The distribution over model predictions for s t+1 is given by:",
+                        "extracted_citations": [
+                            "Citation_b29",
+                            "Citation_b18",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ca8e8563",
+                        "type": "paragraph",
+                        "text": "The distribution p(\u03b8, z|D) reflects the posterior over model weights and latent variables given the data, and is intractable to evaluate. We instead approximate it with the variational distribution q parameterized by \u03b7 = {\u03c6, \u03b8 * }:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_feb03694",
+                        "type": "paragraph",
+                        "text": "Here q \u03c6 represents a distribution over latent variables represented using a posterior network with parameters \u03c6, which could be a diagonal Gaussian or the mixture distribution described in Section 2.1. The distribution q \u03b8 * is the dropout approximating distribution over forward model parameters described in (Gal & Ghahramani, 2016) , a mixture of two Gaussians with one mean fixed at zero. We show in Appendix B that training the stochastic forward model with dropout by minimizing the loss function in Equation 1 is approximately minimizing the Kullback-Leibler divergence between this approximate posterior and the true posterior. Once the forward model is trained, for a given input we can obtain an approximate distribution over outputs p(\u015d t+1 |s 1:t , a) induced by the approximate posterior by sampling different latent variables and dropout masks. We now show that the covariance of the outputs \u015dt+1 can be decomposed into a sum of two covariance matrices which represent the aleatoric and epistemic uncertainty, using a similar approach as (Depeweg et al., 2018) . Using the conditional covariance formula we can write:",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_118b8f43",
+                        "type": "paragraph",
+                        "text": "The first term is the covariance of the random vector E z [\u015d t+1 |s 1:t , a, \u03b8] when \u03b8 \u223c q \u03b8 * (\u03b8). This term ignores any contribution to the variance from z and only considers the effect of \u03b8. As such it represents the epistemic uncertainty. The second term represents the covariance of the predictions obtained by sampling different latent variables z \u223c p(z) averaged over different dropout masks, and ignores any contribution to the variance from \u03b8. As such it represents the aleatoric uncertainty. Our uncertainty penalty explicitly penalizes the trace of the first matrix where the expectation over z is approximated by a single sample from the prior. Note also that the covariance matrix corresponding to the aleatoric uncertainty will change depending on the inputs. This allows our approach to handle heteroscedastic environments, where the aleatoric uncertainty will vary for different inputs.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_216eb996",
+                "title": "DATASET AND PLANNING ENVIRONMENT",
+                "blocks": [
+                    {
+                        "block_id": "b_a39c67b6",
+                        "type": "paragraph",
+                        "text": "We apply our approach to learn driving policies using a large-scale dataset of driving videos taken from traffic cameras. The Next Generation Simulation program's Interstate 80 (NGSIM I-80) dataset (Halkias & Colyar, 2006 ) consists of 45 minutes of recordings from traffic cameras mounted over a stretch of highway. The driver behavior is complex and includes sudden accelerations, lane changes and merges which are difficult to predict; as such the dataset has high environment (or aleatoric) uncertainty. After recording, a viewpoint transformation is applied to rectify the perspective, and vehicles are identified and tracked throughout the video. This yields a total 5596 car trajectories, which we split into training (80%), validation (10%) and testing sets (10%). In all, the dataset contains approximately 2 million transitions.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9052853c",
+                        "type": "paragraph",
+                        "text": "We then applied additional preprocessing to obtain a state and action representation (s t , a t ) for each car at each time step, suitable for learning an action-conditional predictive model. Our state representation s t consists of two components: an image i t representing the neighborhood of the car, and a vector u t representing its current position and velocity. The images i t are centered around the ego car and encode both the lane emplacements and the locations of other cars. Each image has 3 channels: the first (red) encodes the lane markings, the second (green) encodes the locations of neighboring cars, which are represented as rectangles reflecting the dimensions of each car, and the third channel (blue) represents the ego car, also scaled to the correct dimensions. This is summarized in Figure 4 . The action a t at a given time step consists of a 2-dimensional vector representing the acceleration/braking of the car and its change in steering angle. We also define two cost functions which together make up the policy cost: a proximity cost which reflects how close the ego car is to neighboring cars, and a lane cost which reflects how much the ego car overlaps with lane markings. These are represented as a cost vector at each timestep, c t = (C proximity (s t ), C lane (s t )). Full details can be found in Appendix A.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2685b369",
+                        "type": "paragraph",
+                        "text": "We also adapted this dataset to be used as an environment to evaluate learned policies, with the same interface as OpenAI Gym (Brockman et al., 2016) . Choosing a policy for neighboring cars is challenging due to a cold-start problem: to accurately evaluate a learned policy, the other cars would need to follow human-like policies which would realistically react to the controlled car, which are not available. We take the approach of letting all the other cars in the environment follow their trajectories from the dataset, while a single car is controlled by the policy we seek to evaluate. This approach avoids hand-designing a policy for the neighboring cars which would likely not reflect the diverse nature of human driving. The limitation is that the neighboring cars do not react to the controlled car, which likely makes the problem more difficult as they do not try to avoid collisions.",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_13767fef",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_369a53c3",
+                        "type": "paragraph",
+                        "text": "A number of authors have explored the use of learned, action-conditional forward models which are then used for planning, starting with classic works in the 90's (Nguyen & Widrow, 1990; Schmidhuber, 1990; Jordan & Rumelhart, 1992) , and more recently in the context of video games (Oh et al., 2015; Pascanu et al., 2017; Weber et al., 2017) , robotics and continous control (Finn et al., 2016; Agrawal et al., 2016; Nagabandi et al., 2017; Srinivas et al., 2018) . Our approach to learning policies by backpropagating through a learned forward model is related to the early work of (Nguyen & Widrow, 1989) in the deterministic case, and the SVG framework of (Heess et al., 2015) in the stochastic case. However, neither of these approaches incorporates a term penalizing the uncertainty of the forward model when training the policy network.",
+                        "extracted_citations": [
+                            "Citation_b31",
+                            "Citation_b39",
+                            "Citation_b17",
+                            "Citation_b32",
+                            "Citation_b34",
+                            "Citation_b43",
+                            "Citation_b12",
+                            "Citation_b0",
+                            "Citation_b27",
+                            "Citation_b41",
+                            "Citation_b30",
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_11974780",
+                        "type": "paragraph",
+                        "text": "The works of (McAllister & Rasmussen, 2016; Chua et al., 2018 ) also used model uncertainty estimates calculated using dropout in the context of model-based reinforcement learning, but used them for sampling trajectories during the forward prediction step. Namely, they applied different dropout masks to simulate different state trajectories which reflect the distribution over plausible models, which were then averaged to produce a cost estimate used to select an action.",
+                        "extracted_citations": [
+                            "Citation_b24",
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_860ef403",
+                        "type": "paragraph",
+                        "text": "Our model uncertainty penalty is related to the cost used in (Kahn et al., 2017) , who used dropout and model ensembling to compute uncertainty estimates for a binary action-conditional collision detector for a flying drone. These estimates were then used to select actions out of a predefined set which yielded a good tradeoff between speed, predicted chance of collision and uncertainty about the prediction. In our work, we apply uncertainty estimates to the predicted high-dimensional states of a forward model at every time step, summarize them into a scalar, and backpropagate gradients through the unrolled forward model to then train a policy network by gradient descent.",
+                        "extracted_citations": [
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_22028584",
+                        "type": "paragraph",
+                        "text": "The work of (Depeweg et al., 2018 ) also proposed adding an uncertainty penalty when training paramaterized policies, but did so in the context of BNNs trained using \u03b1-divergences applied in low-dimensional settings, whereas we use variational autoencoders combined with dropout for high-dimensional video prediction. \u03b1-BNNs can yield better uncertainty estimates than variational inference-based methods, which can underestimate model uncertainty by fitting to a local mode of the exact posterior (Depeweg et al., 2016; Li & Gal, 2017) . However, they also require computing multiple samples from the distribution over model weights when training the forward model, which increases memory requirements and limits scalability to high-dimensional settings such as the ones we consider here.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2c26ad55",
+                        "type": "paragraph",
+                        "text": "The problem of covariate shift when executing a policy learned from observational data has been well-recognized in imitation learning (Pomerleau, 1991; Ross & Bagnell, 2010) . The work of (Ross et al., 2011) proposed a method to efficiently use expert feedback (if available) to correct this shift, which has also been applied in the context of autonomous driving (Zhang & Cho, 2016) . Our approach also addresses covariate shift, but does so without querying an expert.",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b36",
+                            "Citation_b37",
+                            "Citation_b47"
+                        ]
+                    },
+                    {
+                        "block_id": "b_51f3da57",
+                        "type": "paragraph",
+                        "text": "Our MPER approach is related to the work of (Englert et al., 2013) , who also performed imitation learning at the level of trajectories rather than individual actions. They did so in low-dimensional settings using Gaussian Processes, whereas our method uses an unrolled neural network representing the environment dynamics which can be applied to high-dimensional state representations. The work of (Baram et al., 2017 ) also used a neural network dynamics model in the context of imitation learning, but did so in the interactive setting to minimize a loss produced by a discriminator network.",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c0874c67",
+                        "type": "paragraph",
+                        "text": "Several works have used deep learning models for autonomous driving, either to learn policies through imitation learning (Pomerleau, 1991; LeCun et al., 2006; Bojarski et al., 2016; Pan et al., 2017) or for modeling vehicle dynamics (Williams et al., 2017) . These works focused on lane following or avoiding static obstacles in visually rich environments and did not consider settings with dense moving traffic. The work of (Sadigh et al., 2016) developed a model of the interactions between the two drivers which was then used to plan actions in simple settings, using symbolic state representations. In our work, we consider the problem of learning driving policies in dense traffic, using high-dimensional state representations which reflect the neighborhood of the ego car.",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b22",
+                            "Citation_b4",
+                            "Citation_b33",
+                            "Citation_b44"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_8474f25d",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_2e6f1720",
+                        "type": "paragraph",
+                        "text": "We now report experimental results. We designed a deterministic and stochastic forward model to model the state and action representations described in Section 3, using convolutional layers to process the images i t and fully-connected layers to process the vectors u t and actions a t . All model details can be found in Appendix C and training details can be found in Appendix D. Code and additional video results for the model predictions and learned policies can be found at the following URL: https://sites.google.com/view/model-predictive-driving/home.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1b7c9848",
+                "title": "PREDICTION RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_6b3d042e",
+                        "type": "paragraph",
+                        "text": "We first generated predictions using both deterministic and stochastic forward models, shown in Figure 5 . The deterministic model produces predictions which become increasingly blurry, while the stochastic model produces predictions which stay sharp far into the future. By sampling different sequences of latent variables, different future scenarios are generated. Note that the two sequences generated by the stochastic model are different from the ground truth future which occurs in the dataset. This is normal as the future observed in the dataset is only one of many possible ones. Additional video generations can be viewed at the URL.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e488d50f",
+                "title": "Human",
+                "blocks": [
+                    {
+                        "block_id": "b_3361202a",
+                        "type": "paragraph",
+                        "text": "The human trajectories observed in the testing set, which are all collision-free. No action A policy which outputs an action of zero, maintaining constant speed and direction. 1-step IL A policy network trained with single-step imitation learning.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c11df54e",
+                "title": "SVG",
+                "blocks": [
+                    {
+                        "block_id": "b_3b3d21f1",
+                        "type": "paragraph",
+                        "text": "A policy network trained with stochastic value gradients. This is the same setup as (Heess et al., 2015) , with the difference that the agent does not interact with the environment and learns from a fixed observational dataset.",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_d1180edb",
+                "title": "VG",
+                "blocks": [
+                    {
+                        "block_id": "b_195c359e",
+                        "type": "paragraph",
+                        "text": "A policy trained with value gradients, using the deterministic forward model. This is similar to SVG, but does not involve latent variables.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_51c83088",
+                "title": "MPUR",
+                "blocks": [
+                    {
+                        "block_id": "b_65c93ae6",
+                        "type": "paragraph",
+                        "text": "A policy trained with MPUR , using a deterministic or stochastic model. A cost term is included to penalize the uncertainty of the dynamics model.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7fd64784",
+                "title": "MPER",
+                "blocks": [
+                    {
+                        "block_id": "b_30236f6c",
+                        "type": "paragraph",
+                        "text": "A policy trained with MPER , using a deterministic or stochastic model. The policy is trained to match expert trajectories from the training set.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7db41a46",
+                "title": "POLICY EVALUATION RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_9ac0a3f5",
+                        "type": "paragraph",
+                        "text": "We evaluated policies using two measures: whether the controlled car reaches the end of the road segment without colliding into another car or driving off the road, and the distance travelled before the episode ends. Policies which collide quickly will travel shorter distances.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0bff3bd2",
+                        "type": "paragraph",
+                        "text": "We compared our approach against several baselines which can also learn from observational data, which are described in Figure 6c .  Table 1 : Policy and uncertainty costs with and without uncertainty regularization. The policy trained with unregularized VG exploits errors in the forward model to produce actions which yield low predicted cost but high uncertainty. Including the uncertainty cost yields higher predicted cost, but better performance when the policy is executed in the environment.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d4363eba",
+                        "type": "paragraph",
+                        "text": "the environment can be found at the URL. The policies learn effective behaviors such as braking, accelerating and turning to avoid other cars. Figure 7 shows trajectories on the map for different methods. We see that the single-step imitation learner produces divergent trajectories which turn into other lanes, whereas the MPUR and MPER methods show trajectories which primarily stay within their lanes.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8ab67f51",
+                        "type": "paragraph",
+                        "text": "MPUR becomes equivalent to VG in the deterministic setting if we remove the uncertainty penalty, and the large difference in performance shows that including this penalty is essential. Table 1 shows the average predicted policy cost and uncertainty cost of the two methods. VG produces much lower predicted policy cost, yet very high uncertainty cost. This indicates that the actions the policy produces induce a distribution over states which the forward model is highly uncertain about. The policy trained with MPUR produces higher policy cost estimates, but lower uncertainty cost, and performs much better when executed in the environment.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1dfdf547",
+                        "type": "paragraph",
+                        "text": "The stochastic model trained with a standard Gaussian posterior yields limited improvement over the deterministic model. However, the stochastic model trained with the z-dropout parameterization yields a significant improvement. Comparisons of action-conditional predictions using both models can be seen at the URL. The standard model is less responsive to input actions than the model trained with z-dropout, which likely accounts for their difference in performance. We hypothesize that the standard model uses its latent variables to encode factors of variation in the output which are in fact due to the actions. Using z-dropout discourages this since information in the output cannot be encoded in the latent variables the times they are sampled from the prior, and the loss can better be lowered by predicting the outputs from the actions instead. Please see Appendix E for additional experiments and discussion of this phenomenon.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_28d7c101",
+                        "type": "paragraph",
+                        "text": "Figure 6b shows the performance of MPUR and MPER for different rollout lengths. All methods see their performance improve dramatically as we increase the rollout length, which encourages the distribution of states the policy induces and the training distribution to match over longer time horizons. We also see that the stochastic model with z-dropout outperforms the standard stochastic model as well as the deterministic model over most rollout lengths.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f7a0e82c",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_3874c04b",
+                        "type": "paragraph",
+                        "text": "In this work, we proposed a general approach for learning policies from purely observational data.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_38342666",
+                        "type": "paragraph",
+                        "text": "The key elements are: i) a learned stochastic dynamics model, which is used to optimize a policy cost over multiple time steps, ii) an uncertainty term which penalizes the divergence of the trajectories induced by the policy from the manifold it was trained on, and iii) a modified posterior distribution which keeps the stochastic model responsive to input actions. We have applied this approach to a large observational dataset of real-world traffic recordings, and shown it can effectively learn policies for navigating in dense traffic, which outperform other approaches which learn from observational data. However, there is still a sizeable gap between the performance of our learned policies and human performance. We release both our dataset and environment, and encourage further research in this area to help narrow this gap. We also believe this provides a useful setting for evaluating generative models in terms of their ability to produce good policies. Finally, our approach is general and could potentially be applied to many other settings where interactions with the environment are expensive or unfeasible, but observational data is plentiful.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a930bfad",
+                "title": "A DATASET AND PLANNING ENVIRONMENT",
+                "blocks": [
+                    {
+                        "block_id": "b_72ce7b2a",
+                        "type": "paragraph",
+                        "text": "To begin with, we describe the details and preparation of the dataset and planning environment which we used, which are summarized in Figure 4 . The Next Generation Simulation program's Interstate 80 (NGSIM I-80) dataset (Halkias & Colyar, 2006 ) consists of 45 minutes of recordings made of a stretch of highway in the San Francisco Bay Area by cameras mounted on a 30-story building overlooking the highway. The recorded area includes six freeway lanes (including a high-occupancy vehicle lane) and an onramp. The driver behavior is complex and includes sudden accelerations, lane changes and merges which are difficult to predict; as such the dataset has high aleatoric uncertainty.",
+                        "extracted_citations": [
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7f51c86f",
+                        "type": "paragraph",
+                        "text": "There are three time segments, each of 15 minutes, taken at different times of day which capture the transition between uncongested and congested peak period conditions. After recording, a viewpoint transformation is applied to rectify the perspective, and vehicles are identified and tracked throughout the video; additionally, their size is inferred. This yields a total 5596 car trajectories, represented as sequences of coordinates {x t , y t }. We split these trajectories into training (80%), validation (10%) and testing sets (10%).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2889eca9",
+                        "type": "paragraph",
+                        "text": "We then applied additional preprocessing to obtain suitable representations for learning a predictive model. Specifically, we extracted the following: i) a state representation for each car at each time step s t , which encodes the necessary information to choose an action to take, ii) an action a t which represents the action of the driver, and iii) a cost c t , which associates a quality measure to each state. We describe each of these below.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_db4c6bc3",
+                        "type": "paragraph",
+                        "text": "State representation: Our state representation consists of two components: an image representing the neighborhood of the car, and a vector representing its current position and velocity. For the images, we rendered images centered around each car which encoded both the lane emplacements and the locations of other cars. Each image has 3 channels: the first (red) encodes the lane markings, the second (green) encodes the locations of neighboring cars, which are represented as rectangles reflecting the dimensions of each car, and the third channel (blue) represents the ego car, also scaled to the correct dimensions. All images have dimensions 3 \u00d7 117 \u00d7 24, and are denoted by i t . 4 Two examples are shown in Figure 8 . We also computed vectors u t = (p t , \u2206p t ), where p t = (x t , y t ) is the position at time t and \u2206p t = (x t+1 -x t , y t+1 -y t ) is the velocity. Cost: Our cost function has two terms: a proximity cost and a lane cost. The proximity cost reflects how close the ego car is to neighboring cars, and is computed using a mask in pixel space whose width is equal to the width of a lane and whose height depends on the speed of the car. Two examples are shown in Figure 8 . This mask is pointwise multiplied with the green channel, and the maximum value is taken to produce a scalar cost. The lane cost uses a similar mask fixed to the size of the car, and is similarly multiplied with the red channel, thus measuring the car's overlap with the lane. Both of these operations are differentiable so that we can backpropagate gradients with respect to these costs through images predicted by a forward model. This preprocessing yields a set of state-action pairs (s t , a t ) (with s t = (i t , u t )) for each car, which constitute the dataset we used for training our prediction model. We then use the cost function to optimize action sequences at planning time, using different methods which we describe in Section 2.2.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e006a2c1",
+                        "type": "paragraph",
+                        "text": "We now describe how we adapted this dataset to be used as an environment to evaluate planning methods. Building an environment for evaluating policies for autonomous driving is not obvious as it suffers from a cold-start problem. Precisely measuring the performance of a given driving policy would require it to be evaluated in an environment where all other cars follow policies which accurately reflect human behavior. This involves reacting appropriately both to other cars in the environment as well as the car being controlled by the policy being evaluated. However, constructing such an environment is not possible as it would require us to already have access to a policy which drives as humans do, which in some sense is our goal in the first place. One could hand-code a driving policy to control the other cars in the environment, however is it not clear how to do so in a way which accurately reflects the diverse and often unpredictable nature of human driving. We adopt a different approach where we let all other cars in the environment follow their trajectories in the dataset, while controlling one car with the policy we seek to evaluate. The trajectory of the controlled car is updated as a function of the actions output by the policy, while the trajectories of the other cars remain fixed. If the controlled car collides with another car, this is recorded and the episode ends. This approach has the advantage that all other cars in the environment maintain behavior which is close to human-like. The one difference with true human behavior is that the other cars do not react to the car being controlled or try to avoid it, which may cause crashes which would not occur in real life. The driving task is thus possibly made more challenging than in a true environment, which we believe is preferable to using a hand-coded policy. The interface is set up the same way as environments in OpenAI Gym (Brockman et al., 2016) , and can be accessed with a few lines of Python code, as shown in Figure 9 .",
+                        "extracted_citations": [
+                            "Citation_b5"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_19731451",
+                "title": "B BAYESIAN NEURAL NETWORK FORMULATION DETAILS",
+                "blocks": [
+                    {
+                        "block_id": "b_f32a0a43",
+                        "type": "paragraph",
+                        "text": "Our MPUR approach can be viewed as training a Bayesian neural network (BNN) (Neal, 1995) with latent variables using variational inference (Jordan et al., 1999; Kingma & Welling, 2013) . The distribution over model predictions for s t+1 is given by: p(s t+1 |s 1:t , a, D) = p(s t+1 |f \u03b8 (s 1:t , a, z))p(\u03b8, z|D)d\u03b8dz",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_db54f5b5",
+                        "type": "paragraph",
+                        "text": "The distribution p(\u03b8, z|D) reflects the posterior over model weights and latent variables given the data, and is intractable to evaluate. We instead approximate it with the variational distribution q parameterized by \u03b7:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_80073d97",
+                        "type": "paragraph",
+                        "text": "Here q \u03c6 represents a distribution over latent variables parameterized by \u03c6, which could be a diagonal Gaussian or the mixture distribution described in Section 2.1. The distribution q \u03b8 * is the dropout approximating distribution over model parameters described in (Gal & Ghahramani, 2016 ) (Section 3.2 of Supplement). This defines a mixture of two Gaussians with small variances over each row of each weight matrix in the forward model, with the mean of one Gaussian fixed at zero. The parameters of this distribution are the model weights, and samples can be drawn by applying different dropout masks. The parameters of the variational distribution are thus \u03b7 = {\u03b8 * , \u03c6}, and can be optimized by maximizing the evidence lower bound, which is equivalent to minimizing the Kullback-Leibler divergence between the approximate posterior and true posterior:",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2b2b1cb2",
+                        "type": "paragraph",
+                        "text": "Here p 0 (z, \u03b8) = p 0 (z) \u2022 p 0 (\u03b8) represents a prior over latent variables and model parameters. By applying the chain rule for KL divergences together with the fact that z and \u03b8 are independent, we obtain:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_17b540d4",
+                        "type": "paragraph",
+                        "text": "hidden units each, with the last layer outputting the parameters of a 2D Gaussian distribution from which the action is sampled. All policy networks are trained with Adam with learning rate 0.0001. The MPER and MPUR policies are trained by backpropagation through the unrolled forward model using the reparamaterization trick (Kingma & Welling, 2013) . The single-step imitation learner is trained to directly minimize the negative log-likelihood of the ground truth action in the dataset under the parameters output by the policy network. All MPUR policies use a weighting of \u03bb = 0.5 for the uncertainty cost. Additionally, we detach gradients of predicted costs coming into the states, to prevent the policy from lowering the predicted cost (which is speed-dependent) by slowing down. We found that not doing this can result in the policy slowing excessively, and then attempting to speed up only when another car gets close. We repeat the policy training with 3 random seeds for each method.",
+                        "extracted_citations": [
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_216442ed",
+                        "type": "paragraph",
+                        "text": "The policy cost which we minimize for VG, SVG and MPUR is given by:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eb0cd85b",
+                        "type": "paragraph",
+                        "text": "where C proximity and C lane are the proximity and lane costs described in Section 3. This puts a higher priority on avoiding other cars while still encouraging the policy to stay within the lanes. MPUR additionally minimizes U , the model uncertainty cost described in Section 2.2.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_21667b50",
+                        "type": "paragraph",
+                        "text": "When computing the uncertainty cost, to compensate for differences in baseline uncertainty across different rollout lengths, we normalize by the empirical mean and variance for every rollout length t of the forward model over the training set, to obtain \u00b5 t U and \u03c3 t U . We then define our uncertainty cost as follows:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d33ec03b",
+                        "type": "paragraph",
+                        "text": "If the uncertainty estimate is lower than the mean uncertainty estimate on the training set for this rollout length, this loss will be zero. These are cases where the model prediction is within normal uncertainty ranges. If the uncertainty estimate is higher, this loss exerts a pull to change the action so that the future state will be predicted with higher confidence by the forward model.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_aa659dd8",
+                "title": "E ACTION SENSITIVITY EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_fbddcd51",
+                        "type": "paragraph",
+                        "text": "We found the lack of responsiveness of the stochastic forward model to be especially pronounced when it is given a sequence of latent variables inferred from the current training sequence by the posterior network, instead of a sequence of latent variables sampled from the prior (intuitively, using the inferred sequence corresponds to using the future from the dataset, while using a sampled sequence corresponds to a different future). One reason for this difference in responsiveness may be that in the first case, the latent variables are highly dependent whereas in the second they are independent. If action information is encoded in the latent variables, the effects on the output may partially cancel each other out when the latents are independent. However, when they are highly dependent, together they may explain away the effects of the actions input to the forward model.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_804364ab",
+                        "type": "paragraph",
+                        "text": "The table below shows the performance of MPUR policies learned using inferred and sampled latent variables. We see a large drop in performance when using the inferred latent variables. This is consistent with the videos at the URL, which show that the forward model is less sensitive to actions when the latent variables are sampled from the posterior instead of the prior. Note that the z-dropout parameterization reduces this problem somewhat.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f27f222e",
+                "title": "F MODEL-FREE RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_1bdeabdb",
+                        "type": "paragraph",
+                        "text": "Although the goal of this work is to learn policies with no environment interaction, for completeness we also report results of running Proximal Policy Optimization (PPO) (Schulman et al., 2017) , a state-of-the-art model-free algorithm which learns through interacting with its environment. We used the OpenAI Baselines implementation (Brockman et al., 2016) with the same policy network architecture as for the other methods, and set the reward to be the negative policy cost defined in equation 9. We measure both final performance and cumulative regret, using the success rate as a reward. Cumulative regret is a measure often used in online learning which represents the difference between the agent's accumulated reward and the accumulated reward which would have been obtained by following the optimal policy, which we take to be human performance here. Specifically, the regret at epoch M is given by:",
+                        "extracted_citations": [
+                            "Citation_b40",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c5bf0de1",
+                        "type": "paragraph",
+                        "text": "where R * represents the reward obtained by following the optimal policy and R m is the reward obtained by following the policy at epoch m. Unlike final performance, regret also reflects poor decisions made during the learning process.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aa8fa703",
+                        "type": "paragraph",
+                        "text": "Results are shown in Figure 11 . PPO obtains slightly higher final performance than MPUR, but also incurs higher regret as it executes poor policies in the environment during the early stages of learning. In contrast, MPUR learns through observational data and already has a good policy in place when it begins interacting with the environment.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Learning to poke by poking: Experiential learning of intuitive physics Pulkit Agrawal Ashvin Nair Pieter Abbeel Jitendra Malik Sergey Levine CoRR, abs/1606.07419 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "A comparison of direct and model-based reinforcement learning C G Atkeson J C Santamaria 10.1109/ROBOT.1997.606886 Proceedings of International Conference on Robotics and Automation International Conference on Robotics and Automation April 1997 4",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Stochastic variational video prediction Mohammad Babaeizadeh Chelsea Finn Dumitru Erhan Roy H Campbell Sergey Levine CoRR, abs/1710.11252 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "End-to-end differentiable adversarial imitation learning Nir Baram Oron Anschel Itai Caspi Shie Mannor ICML 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "End to end learning for self-driving cars Mariusz Bojarski Davide Del Testa Daniel Dworakowski Bernhard Firner Beat Flepp Prasoon Goyal Lawrence D Jackel Mathew Monfort Urs Muller Jiakai Zhang Xin Zhang Jake Zhao Karol Zieba CoRR, abs/1604.07316 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Greg Brockman Vicki Cheung Ludwig Pettersson Jonas Schneider John Schulman Jie Tang Wojciech Zaremba Openai gym 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Deep reinforcement learning in a handful of trials using probabilistic dynamics models Kurtland Chua Roberto Calandra Rowan Mcallister Sergey Levine CoRR, abs/1805.12114 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Pilco: A model-based and data-efficient approach to policy search Marc Peter Deisenroth Carl Edward Rasmussen Proceedings of the International Conference on Machine Learning the International Conference on Machine Learning 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Stochastic video generation with a learned prior Emily Denton Rob Fergus CoRR, abs/1802.07687 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Learning and policy search in stochastic dynamical systems with bayesian neural networks Stefan Depeweg Jos\u00e9 Miguel Hern\u00e1ndez-Lobato Finale Doshi-Velez Steffen Udluft CoRR, abs/1605.07127 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Decomposition of uncertainty in Bayesian deep learning for efficient and risk-sensitive learning Stefan Depeweg Jose-Miguel Hernandez-Lobato Finale Doshi-Velez Steffen Udluft PMLR Proceedings of the 35th International Conference on Machine Learning Jennifer Dy Andreas Krause the 35th International Conference on Machine Learning Stockholm Sweden Jul 2018 80 Stockholmsmssan",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Model-based imitation learning by probabilistic trajectory matching P Englert A Paraschos J Peters M P Deisenroth 10.1109/ICRA.2013.6630832 2013 IEEE International Conference on Robotics and Automation May 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Unsupervised learning for physical interaction through video prediction Chelsea Finn Ian J Goodfellow Sergey Levine CoRR, abs/1605.07157 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Dropout as a bayesian approximation: Representing model uncertainty in deep learning Yarin Gal Zoubin Ghahramani Proceedings of The 33rd International Conference on Machine Learning Maria Florina Balcan Kilian Q Weinberger The 33rd International Conference on Machine Learning New York, New York, USA 20-22 Jun 2016 48 Proceedings of Machine Learning Research",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "John Halkias James Colyar FHWA-HRT-06-137 NGSIM interstate 80 freeway dataset. US Federal Highway Administration Washington, DC, USA 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Learning continuous control policies by stochastic value gradients Nicolas Heess Gregory Wayne David Silver Tim Lillicrap Tom Erez Yuval Tassa Advances in Neural Information Processing Systems C Cortes N D Lawrence D D Lee M Sugiyama R Garnett Curran Associates, Inc 2015 28",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Improving neural networks by preventing co-adaptation of feature detectors Geoffrey E Hinton Nitish Srivastava Alex Krizhevsky Ilya Sutskever Ruslan Salakhutdinov CoRR, abs/1207.0580 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Forward models: Supervised learning with a distal teacher Michael I Jordan David E Rumelhart 10.1016/0364-0213(92)90036-T Cognitive Science 0364-0213 16 3 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "An introduction to variational methods for graphical models I Michael Zoubin Jordan Tommi S Ghahramani Lawrence K Jaakkola Saul 10.1023/A:1007665907178 Mach. Learn 0885-6125 37 2 November 1999",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Uncertainty-aware reinforcement learning for collision avoidance Gregory Kahn Adam Villaflor Vitchyr Pong Pieter Abbeel Sergey Levine 2017 2",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Adam: A method for stochastic optimization P Diederik Jimmy Kingma Ba CoRR, abs/1412.6980 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Auto-encoding variational bayes P Diederik Max Kingma Welling CoRR, abs/1312.6114 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "road-obstacle-avoidance-through-end-to-end-learning. pdf. Yingzhen Li and Yarin Gal. Dropout inference in Bayesian neural networks with alpha-divergences Yann Lecun Urs Muller Jan Ben Eric Cosatto Beat Flepp Proceedings of the 34th International Conference on Machine Learning Doina Precup Yee Whye Teh the 34th International Conference on Machine Learning Sydney, Australia International Convention Centre 2006. Aug 2017 18 Advances in Neural Information Processing Systems",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Continuous control with deep reinforcement learning Timothy P Lillicrap Jonathan J Hunt Alexander Pritzel Nicolas Heess Tom Erez Yuval Tassa David Silver Daan Wierstra CoRR, abs/1509.02971 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Improving pilco with bayesian neural network dynamics models Rowan Mcallister Carl E Rasmussen 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Human-level control through deep reinforcement learning Volodymyr Mnih Koray Kavukcuoglu David Silver Andrei A Rusu Joel Veness Marc G Bellemare Alex Graves Martin Riedmiller Andreas K Fidjeland Georg Ostrovski Stig Petersen Charles Beattie Amir Sadik Ioannis Antonoglou Helen King Dharshan Kumaran Daan Wierstra Shane Legg Demis Hassabis 10.1038/nature14236 Nature 0028-0836 518 7540 February 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Asynchronous methods for deep reinforcement learning Volodymyr Mnih Adri\u00e0 Puigdom\u00e8nech Badia Mehdi Mirza Alex Graves Timothy P Lillicrap Tim Harley David Silver Koray Kavukcuoglu CoRR, abs/1602.01783 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Neural network dynamics for model-based deep reinforcement learning with model-free fine-tuning Anusha Nagabandi Gregory Kahn Ronald S Fearing Sergey Levine CoRR, abs/1708.02596 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Language understanding for textbased games using deep reinforcement learning Karthik Narasimhan Tejas D Kulkarni Regina Barzilay CoRR, abs/1506.08941 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Bayesian Learning for Neural Networks M Radford Neal AAINN02676 1995 Toronto, Ont., Canada, Canada PhD thesis",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "The truck backer-upper: an example of self-learning in neural networks Widrow Nguyen 10.1109/IJCNN.1989.118723 International 1989 Joint Conference on Neural Networks 1989 2",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Neural networks for control. chapter The Truck Backerupper: An Example of Self-learning in Neural Networks Derrick Nguyen Bernard Widrow 1990 MIT Press Cambridge, MA, USA",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Actionconditional video prediction using deep networks in atari games Junhyuk Oh Xiaoxiao Guo Honglak Lee Richard L Lewis Satinder P Singh CoRR, abs/1507.08750 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Agile off-road autonomous driving using end-to-end deep imitation learning Yunpeng Pan Ching-An Cheng Kamil Saigol Keuntaek Lee Xinyan Yan CoRR, abs/1709.07174 2017 Evangelos Theodorou, and Byron Boots",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "Learning model-based planning from scratch Razvan Pascanu Yujia Li Oriol Vinyals Nicolas Heess Lars Buesing S\u00e9bastien Racani\u00e8re David P Reichert Theophane Weber Daan Wierstra Peter Battaglia CoRR, abs/1707.06170 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Efficient training of artificial neural networks for autonomous navigation Dean A Pomerleau Neural Computation 3 97 1991",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b36",
+                "raw_text": "Efficient reductions for imitation learning St\u00e9phane Ross J Andrew Bagnell AISTATS 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b37",
+                "raw_text": "A reduction of imitation learning and structured prediction to no-regret online learning Stphane Ross Geoffrey J Gordon Drew Bagnell JMLR Proceedings Geoffrey J Gordon David B Dunson Miroslav Dudk 15 2011 JMLR.org",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b38",
+                "raw_text": "Planning for autonomous cars that leverage effects on human actions Dorsa Sadigh Shankar Sastry Sanjit A Seshia Anca D Dragan",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b39",
+                "raw_text": "An on-line algorithm for dynamic reinforcement learning and planning in reactive environments Jurgen Schmidhuber Proceedings of the International Joint Conference on Neural Networks (IJCNN) the International Joint Conference on Neural Networks (IJCNN) 1990",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b40",
+                "raw_text": "Proximal policy optimization algorithms John Schulman Filip Wolski Prafulla Dhariwal Alec Radford Oleg Klimov CoRR, abs/1707.06347 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b41",
+                "raw_text": "Universal planning networks Aravind Srinivas Allan Jabri Pieter Abbeel Sergey Levine Chelsea Finn CoRR, abs/1804.00645 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b42",
+                "raw_text": "Dropout: A simple way to prevent neural networks from overfitting Nitish Srivastava Geoffrey Hinton Alex Krizhevsky Ilya Sutskever Ruslan Salakhutdinov Journal of Machine Learning Research 15 1929-1958, 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b43",
+                "raw_text": "Imagination-augmented agents for deep reinforcement learning Theophane Weber S\u00e9bastien Racani\u00e8re David P Reichert Lars Buesing Arthur Guez Danilo Jimenez Rezende Adri\u00e0 Puigdom\u00e8nech Badia Oriol Vinyals Nicolas Heess Yujia Li Razvan Pascanu Peter Battaglia David Silver Daan Wierstra CoRR, abs/1707.06203 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b44",
+                "raw_text": "Information theoretic mpc for model-based reinforcement learning G Williams N Wagener B Goldfain P Drews J M Rehg B Boots E A Theodorou 10.1109/ICRA.2017.7989202 2017 IEEE International Conference on Robotics and Automation (ICRA) May 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b45",
+                "raw_text": "Learning simple algorithms from examples Wojciech Zaremba Tomas Mikolov Armand Joulin Rob Fergus CoRR, abs/1511.07275 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b46",
+                "raw_text": "Towards visionbased deep reinforcement learning for robotic motion control Fangyi Zhang J\u00fcrgen Leitner Michael Milford Ben Upcroft Peter I Corke CoRR, abs/1511.03791 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b47",
+                "raw_text": "Query-efficient imitation learning for end-to-end autonomous driving Jiakai Zhang Kyunghyun Cho CoRR, abs/1605.06450 2016",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.5666,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "Pros:\nThe paper formulates the driving policy problem as a model-based RL problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "Most related work on driving policy has been traditional robotics planning methods such as RRT or model-free RL such as policy gradient methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The policy is learned through unrolling a learned model of the environment dynamics over multiple time steps, and training a policy network to minimize a differentiable cost over this rolled-out trajectory.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The cost combine the objective the policy seeks to optimize (proximity to other cars) and an uncertainty cost representing the divergence from the states it is trained on.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Cons:\n\nThe model based RL formulation is pretty standard except that the paper has a additional model uncertainty cost.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Realistically, the output of driving policy should be planning decision, i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "the waypoints instead of steering angles and acceleration / deceleration commands.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "There does not seem to be a need to solve the control problem using learning since PID and iLQR has solved the control problem very well.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "The paper did not seem to reach a conclusion on why stochastic forward model does not yield a clear improvement over the deterministic model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "This may be due to the limitation of the dataset or the prediction horizon which seems to be 2 second.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "The dataset is only 45 minutes which captured by a camera looking down a small section of the road.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "So the policies learned might only do lane following and occasionally doing collision avoidance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "I would encourage the authors to look into more diverse dataset.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "See the paper DESIRE: Distant Future Prediction in Dynamic Scenes with Interacting Agents, CVPR 2017.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "Overall, the paper makes an interesting contribution: formulate the driving policy problem as a model-based RL problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "The techniques used are pretty standard.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "There are some insights in the experimental section.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "However, due to the limitation of the dataset, it is not clear how much the results can generalize to complex settings such as nudging around other cars, cutting in, pedestrian crossing, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "Response to rebuttal:\nIt is good to know that the authors have a new modified VAE posterior distribution for the stochastic model which can achieve significant gain over the deterministic model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "Is this empirical and specific to this dataset?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "Without knowing the details, it is not clear how general this new stochastic model is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "I agree that it is worthwhile to test the model using the 45 minute dataset.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "However, I still believe the dataset is very limiting and it is not clear how much the experimental results can apply to other large realistic datasets.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "My rating stays the same.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.3329,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The paper addresses the difficulty of covariate shift in model-based reinforcement learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "Here, the distribution over trajectories during is significantly different for the behaviour or data-collecting policy and the target or optimised policy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "As a mean to address this, the authors propose to add an uncertainty term to the cost, which is realised by the trace of the covariance of the outputs of a MC dropout forward model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "The method is applied to driving in dense traffic, where even single wrong actions can be catastrophic.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "I want to stress that the paper was a pleasure to read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "It was extraordinarily straightfoward to follow, because the text was well aligned with the necessary equations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "The introduction and related work seem complete to me, with two exceptions:\n\n- Depeweg, S., Hernandez-Lobato, J.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "M., Doshi-Velez, F., & Udluft, S.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "(2018, July).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "Decomposition of Uncertainty in Bayesian Deep Learning for Efficient and Risk-sensitive Learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "In *International Conference on Machine Learning* (pp.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "1192-1201).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "- Thomas, Philip S.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "*Safe reinforcement learning*.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "University of Massachusetts Libraries, 2015.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "The work by Depeweg et al addresses quite the same question as the authors of this work, but with a broader scope (i.e.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "not limited to traffic) but very much the same machinery.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "There are some important theoretical insights in this work and the connection to this submission should be drawn.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "In particular, the proposed method needs to be either compared to this work or it needs to be clarified why it is not applicable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "The latter appears to be of less significance in this context, but I found robust offline policy evaluation underrepresented in the related work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "I wonder if there is a way for a neural network to \"hack\" the uncertainty cost.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "I suppose that the proposed approach is an approximation to some entropy term, and it would be informative to see how exactly.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_22",
+                    "text": "The approach shown by Eq 1 appears to be an adhoc way of estimating whether the uncertainty resulting from an action is due to the data or the model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_23",
+                    "text": "What happens if this approach is not taken?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_24",
+                    "text": "The objective function of the forward model is only given in the appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_25",
+                    "text": "I think it needs to be moved to the main text, especially because the sum-of-squares term indicates a homoskedastic Gaussian for a likelihood.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_26",
+                    "text": "This has implications for the uncertainty estimates (see point above).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_27",
+                    "text": "Overall, the separation of data uncertainty/risk vs model uncertainty is not done.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_28",
+                    "text": "This indicates that heterskedastic environments are candidats where the method can fail, and this limitation needs to be discussed or pointed out.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_29",
+                    "text": "Further, the authors did not observe a benefit from using a stochastic forward model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_30",
+                    "text": "Especially, if the prior instead of the approximate posterior is used.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_31",
+                    "text": "My point would be that, depending on the exact grapical model and the way the sampling is done to train the policy, it is actually mathematically *right* to sample from the prior.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_32",
+                    "text": "This is also how it is described in the last equation of section 2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_33",
+                    "text": "## Summary\n\nOverall, I liked the paper and the way it was written.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_34",
+                    "text": "However, there are some shortcomings, such as the comparison to the work by Depeweg et al, which does a very similar thing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_35",
+                    "text": "Also, justifying the used heuristics as approximations to a principled quantity would help.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_36",
+                    "text": "It appears that the question why and how stochastic forward models should be used requires further investigation.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.467,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "- Does the paper present substantively new ideas or explore an under explored or highly novel question?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Somewhat, the paper combines two popular existing approaches (Imitation Learning,  Model Based Control and Uncertainty Quantification using Dropout).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The novelty is in  combining pre-existing ideas.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "- Does the results substantively advance the state of the art?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "No, the compared methods are not state-of-the-art.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "- Will a substantial fraction of the ICLR attendees be interested in reading this paper?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "I think that the topics of this paper would be very interesting to ICLR attendees.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "-Quality:  \n\nUnclear motivation to penalize prediction uncertainty to make the predicted states stay in the training data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Also, in some cases references to existing work that includes real robotic systems is out of context at minimum.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "So yes there are similarities between this paper and existing works  on  learning control for robotics systems using imitation learning, model based control and uncertainty aware cost function.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "However there is a profound difference in terms of working in simulation and working with a real system for which model and environment uncertainty is a very big issue.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "There are different challenges in working with a real uncertain system which you will have to actuate,  and working with set of images for making predictions in simulation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "-Clarity: \n\nEasy to read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "Experimental evaluation is clearly presented.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "-Originality: \n\nSimilar uncertainty penalty was used in other paper (Kahn et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "Therefore the originality is in some sense reduced.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "- Would I send this paper to one of my colleagues to read?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "Yes I would definitely send this paper to my colleagues.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "- General Comment: \n\nDropout can be used to represent the uncertainty/covariance of the neural network model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "The epistemic uncertainty, coming from the lack of data, can be gained through Monte Carlo sampling of the dropout-masked model during prediction.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "However, this type of uncertainty can only decrease by adding more explored data to current data set.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "Without any addition of data, the  variance reduction, which results  by penalizing the high variance during training, might indicate over-fitting to the current training data.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "As the penalty forces the model to predict states only in the training dataset, it is unclear how this shows better test-time performance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_23",
+                    "text": "The output of the policy network will simply be biased towards the training set as a result of the uncertainty cost.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_24",
+                    "text": "More theoretical explanation is needed or perhaps some intuition.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_25",
+                    "text": "This observation is also related to the fact that the model based controller used  is essentially a  risk sensitive controller.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_218a51c5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_218a51c5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_218a51c5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b45"
+        },
+        {
+            "source": "b_218a51c5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_218a51c5",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b46"
+        },
+        {
+            "source": "sec_8723ce16",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_218a51c5"
+        },
+        {
+            "source": "b_ae4d883a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_ae4d883a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_ae4d883a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_ae4d883a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_ae4d883a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_8723ce16",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ae4d883a"
+        },
+        {
+            "source": "b_e74fabcf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_e74fabcf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b36"
+        },
+        {
+            "source": "b_e74fabcf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_8723ce16",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e74fabcf"
+        },
+        {
+            "source": "sec_8723ce16",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_85e52877"
+        },
+        {
+            "source": "sec_be1bfc6d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3709f4ce"
+        },
+        {
+            "source": "b_60943444",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_60943444",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_60943444",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_3fbd8b72",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_60943444"
+        },
+        {
+            "source": "sec_3fbd8b72",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b60a8699"
+        },
+        {
+            "source": "sec_3fbd8b72",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f76204a6"
+        },
+        {
+            "source": "b_b82dcf46",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_b82dcf46",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_3fbd8b72",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b82dcf46"
+        },
+        {
+            "source": "sec_3fbd8b72",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fdc9842f"
+        },
+        {
+            "source": "sec_f20e7b3f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_19dba469"
+        },
+        {
+            "source": "sec_f20e7b3f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ee9d4c26"
+        },
+        {
+            "source": "sec_f20e7b3f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_04fa112d"
+        },
+        {
+            "source": "b_12191ab9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_12191ab9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b42"
+        },
+        {
+            "source": "b_12191ab9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_f20e7b3f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_12191ab9"
+        },
+        {
+            "source": "sec_f20e7b3f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3d98e484"
+        },
+        {
+            "source": "sec_f20e7b3f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6f82981c"
+        },
+        {
+            "source": "sec_f20e7b3f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9fc113b6"
+        },
+        {
+            "source": "sec_f20e7b3f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_acc37139"
+        },
+        {
+            "source": "b_771e3286",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_771e3286",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_771e3286",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_43c4f82b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_771e3286"
+        },
+        {
+            "source": "sec_43c4f82b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ca8e8563"
+        },
+        {
+            "source": "b_feb03694",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_feb03694",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_43c4f82b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_feb03694"
+        },
+        {
+            "source": "sec_43c4f82b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_118b8f43"
+        },
+        {
+            "source": "b_a39c67b6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_216eb996",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a39c67b6"
+        },
+        {
+            "source": "sec_216eb996",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9052853c"
+        },
+        {
+            "source": "b_2685b369",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_216eb996",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2685b369"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b39"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b43"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b41"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "b_369a53c3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_13767fef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_369a53c3"
+        },
+        {
+            "source": "b_11974780",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_11974780",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_13767fef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_11974780"
+        },
+        {
+            "source": "b_860ef403",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_13767fef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_860ef403"
+        },
+        {
+            "source": "b_22028584",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_22028584",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_13767fef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_22028584"
+        },
+        {
+            "source": "b_2c26ad55",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_2c26ad55",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b36"
+        },
+        {
+            "source": "b_2c26ad55",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b37"
+        },
+        {
+            "source": "b_2c26ad55",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b47"
+        },
+        {
+            "source": "sec_13767fef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2c26ad55"
+        },
+        {
+            "source": "b_51f3da57",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_51f3da57",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_13767fef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_51f3da57"
+        },
+        {
+            "source": "b_c0874c67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_c0874c67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_c0874c67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_c0874c67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "b_c0874c67",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b44"
+        },
+        {
+            "source": "sec_13767fef",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c0874c67"
+        },
+        {
+            "source": "sec_8474f25d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2e6f1720"
+        },
+        {
+            "source": "sec_1b7c9848",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6b3d042e"
+        },
+        {
+            "source": "sec_e488d50f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3361202a"
+        },
+        {
+            "source": "b_3b3d21f1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_c11df54e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3b3d21f1"
+        },
+        {
+            "source": "sec_d1180edb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_195c359e"
+        },
+        {
+            "source": "sec_51c83088",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_65c93ae6"
+        },
+        {
+            "source": "sec_7fd64784",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_30236f6c"
+        },
+        {
+            "source": "sec_7db41a46",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9ac0a3f5"
+        },
+        {
+            "source": "sec_7db41a46",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0bff3bd2"
+        },
+        {
+            "source": "sec_7db41a46",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d4363eba"
+        },
+        {
+            "source": "sec_7db41a46",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ab67f51"
+        },
+        {
+            "source": "sec_7db41a46",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1dfdf547"
+        },
+        {
+            "source": "sec_7db41a46",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28d7c101"
+        },
+        {
+            "source": "sec_f7a0e82c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3874c04b"
+        },
+        {
+            "source": "sec_f7a0e82c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_38342666"
+        },
+        {
+            "source": "b_72ce7b2a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_a930bfad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_72ce7b2a"
+        },
+        {
+            "source": "sec_a930bfad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7f51c86f"
+        },
+        {
+            "source": "sec_a930bfad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2889eca9"
+        },
+        {
+            "source": "sec_a930bfad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_db4c6bc3"
+        },
+        {
+            "source": "b_e006a2c1",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_a930bfad",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e006a2c1"
+        },
+        {
+            "source": "b_f32a0a43",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_f32a0a43",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f32a0a43"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_db54f5b5"
+        },
+        {
+            "source": "b_80073d97",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_80073d97"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b2b1cb2"
+        },
+        {
+            "source": "b_17b540d4",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_17b540d4"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_216442ed"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb0cd85b"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_21667b50"
+        },
+        {
+            "source": "sec_19731451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d33ec03b"
+        },
+        {
+            "source": "sec_aa659dd8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fbddcd51"
+        },
+        {
+            "source": "sec_aa659dd8",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_804364ab"
+        },
+        {
+            "source": "b_1bdeabdb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b40"
+        },
+        {
+            "source": "b_1bdeabdb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_f27f222e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1bdeabdb"
+        },
+        {
+            "source": "sec_f27f222e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c5bf0de1"
+        },
+        {
+            "source": "sec_f27f222e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aa8fa703"
+        }
+    ]
+}

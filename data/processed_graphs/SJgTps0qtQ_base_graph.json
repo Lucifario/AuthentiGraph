@@ -1,0 +1,1137 @@
+{
+    "paper_metadata": {
+        "paper_id": "SJgTps0qtQ",
+        "source": "OpenReview_ICLR_2019",
+        "year": "2019",
+        "decision": "Unknown",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_7c9f2fb9",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_19edab45",
+                        "type": "paragraph",
+                        "text": "How does the agent's environment affect the robustness of policies it learns through deep reinforcement learning? Previous work has addressed the sensitivity of RL to changing visual environments by applying domain randomization, i.e. training on randomized visual environments (Tobin et al., 2017; Sadeghi et al., 2017) , but there is limited work on the variability caused by the physics of the environment, such as object weight, surface friction, arm dynamics, etc. (Peng et al., 2018; Devin et al., 2017; Yu et al., 2017) . In practical applications, one cannot assume the the task environment at test time has the same properties as the training environment, particularly if the training is conducted in simulation, and in most cases it is unfeasible to measure and categorize the changes. At the same time, enumerating all possible physical properties during training is extremely time-consuming and may still not lead to the best policy.",
+                        "extracted_citations": [
+                            "Citation_b17",
+                            "Citation_b13",
+                            "Citation_b12",
+                            "Citation_b3",
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b2afb54e",
+                        "type": "paragraph",
+                        "text": "In this paper, we propose to develop RL algorithms that learn to exploit the training environment to discover the most robust and useful policy to handle any potential future environment, without needing explicit information about that future environment's underlying settings. We observe an interesting phenomenon, which we term 'inadvertent generalization': training a task under certain physical settings results in more robust policies than others. For example, a pendulum policy trained on a low weight solves the task perfectly, but then fails on a higher weight setting. However, training on a single high weight leads to success on all lower weights. We observe forms of inadvertent generalization across multiple tasks -[i] simple pendulum inversion (with two different physics simulators), [ii] cart-pole balancing, [iii] ball-pushing (where the agent is required to push a ball to an arbitrarily specified goal). Curiously, intuition gained to explain the phenomenon on any one task does not necessarily extend to the others. We speculate that this may be because certain environments make the task harder and thus require more robust policies to solve the task.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b46c4313",
+                        "type": "paragraph",
+                        "text": "Motivated by these observations, we propose to exploit variations in environments during training to learn a single policy that is capable of generalizing across environmental setting variations without incurring a significant additional cost, i.e. making the inadvertent generalization deliberate. We develop an approach called Reward-guided Stochastic Curriculum that automatically constructs a training curriculum for each learner to best motivate the learning of robust actor policies. We accomplish this by formulating the training curriculum as a multi-armed bandit problem, which seeks to maximize episodic rewards over all environmental settings of interest, utilizing separate bandits for each environmental variable (where different physics properties correspond to different variables), thus ensuring linear growth with the introduction of additional variables, as opposed to polynomial. Experiments show that our method yields policies with performance similar to the best policies identified by an exhaustive grid search, while being computationally less expensive, since we only need to train one policy as opposed to one for each environmental setting.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_45cc0d87",
+                "title": "PROBLEM DEFINITION",
+                "blocks": [
+                    {
+                        "block_id": "b_7e6f50fe",
+                        "type": "paragraph",
+                        "text": "The primary focus of this paper is to characterize and exploit the phenomenon of inadvertent generalization so that we may better guide and utilize experiences gained to develop action policies that are more robust to environmental perturbation and variation. We build our analyses on the Deep Deterministic Policy Gradient (DDPG) algorithm (Lillicrap et al., 2016) . DDPG is one of a class of actor-critic algorithms, where there exist separate actor and critic policies (each represented by a deep neural network). The critic attempts to learn the value of actions taken for a given state, which is then used to inform the improvement of the actor policy. We chose DDPG for its ability to handle continuous state and action spaces, which we consider to be important for both coarse and fine control, and for its status as a well-studied baseline algorithm with good stability and sample efficiency while learning (Duan et al., 2016) .",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b5"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6ed35ad0",
+                        "type": "paragraph",
+                        "text": "We first motivate the problem by demonstrating inadvertent generalization on the inverted pendulum task. The aim of the pendulum task is to train an agent to hold a pendulum mass steady above its pivot point (as shown in Appendix A, Figure 2 ) . This is a task that can be considered solved by many of the existing deep-RL architectures (Schulman et al., 2017; Lillicrap et al., 2016; Wang et al., 2016; Wu et al., 2017; Schulman et al., 2015) , but to the best of our knowledge, the robustness of RL policies to changes in the pendulum environment (or many classical control tasks) has not been well explored. We test whether an agent policy would still be capable of controlling the pendulum if the mass of the pendulum were changed. Our initial intuition was as follows: [i] decreasing the mass of the pendulum may result in significant overshoot of the vertical steady-point, potentially with a significant jitter in the motion, and [ii] increasing the mass might result in an inability to effectively swing-up the mass, resulting in failure. Both of these observations would make intuitive sense and could then be attributed to policies lacking an understanding of the environment dynamics. What we observed however is that, while hypothesis [ii] appears to hold, pendulum control policies trained with heavier masses generalized to a wider range of masses without a perceptible cost to stability. Table 1 provides a breakdown of the success rates of policies trained on individual OpenAI-gym Pendulum (Brockman et al., 2016) environment settings -in this case, with the only variable being the pendulum's mass. Observe that policies trained on heavier pendulums consistently outperform those trained on lower masses. It is important to note that all other aspects of the environment and action space were held equal -i.e. the maximum torque that the agent was allowed to apply was not changed and no other changes were made to how the physics in the environment are computed. To verify that these observations were not simply an anomaly of the physics simulator, tests were conducted on a separate pendulum environment built with the Unity game engine, which uses Nvidia's PhysX physics engine to simulate rigid-body dynamics. Our tests on the Unity pendulum environment show similar trends in behavior (as shown in Appendix C, Table 6 ), further establishing the Table 1 : OpenAI-Gym Pendulum policy success rate (higher is better). We evaluate multiple policies trained and tested on different OpenAI-Gym Pendulum-v0 environment settings. Rows represent performance for policies trained on a specific mass, columns correspond to specific test masses. Success rate is computed as the fraction of 8 trials with an average maximum deviation of less than 15 degrees, over 6 tests per test mass per trial, from the vertical steady point over the last 100 steps of a 300-step episode. Darker shading indicates worse performance. 0.75 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 0.98 10 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 7 ).",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b10",
+                            "Citation_b18",
+                            "Citation_b19",
+                            "Citation_b15",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1e239da6",
+                        "type": "paragraph",
+                        "text": "One might attribute these observations to the difference in physical inertia of pendulums, carts and poles of different masses -with a heavier pendulum presenting with higher inertia than a lighter one. This might further suggest that prioritizing high-inertia settings would result in improved generalization across environmental variations. Further testing with additional tasks however revealed that this is not the case. By analyzing the behavior of trained policies on a simple ball-pushing task (results presented in Table 2 ), where the agent is tasked with rolling a ball from an arbitrary starting position to an arbitrarily defined goal on a 2D plane, we observe that it is in fact the policies trained on lighter balls that do better at generalizing to variations in the environment when solving this task. Furthermore, policies trained with lighter balls also outperform their heavy-ball trained counterparts on test settings employing heavier balls. Independently, these observations can be rationalized to suggest that the higher inertia of the heavier balls requires the agents to exert more force on the ball to manipulate its position, resulting in a loss of finer control that might be developed with the lower-inertia (low mass) cases. However, it is clear that such intuition would in fact run counter to the behavior on the pendulum and cart-pole tasks.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e623fb7a",
+                        "type": "paragraph",
+                        "text": "Taken together, our observations and analyses demonstrate that there are classes of tasks, at least within the realm of continuous control, for which the following statement holds: given a task, there exists a window of generalizability for which training under a specific ideal set of environmental conditions results in a policy capable of generalizing to variations in the environmental settings.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_52a17b84",
+                        "type": "paragraph",
+                        "text": "When the variations are limited, a grid search over the variants may be reasonable, but as the number of variables and the degree of variability increases, this quickly becomes impractical. This leads us to our problem statement: we seek a principled approach that reliably and deliberately promotes the development of policies that are robust to environmental changes, similar to policies trained under 'ideal' settings, however, without the need for prior knowledge of the task/environment and without incurring significant additional computational cost over the cost of training a single policy.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9cd8181f",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_3520ace3",
+                        "type": "paragraph",
+                        "text": "To the best of our knowledge, there have not been many explorations of robustness to the environment of a single task, as studied in this paper, however, we are able to draw insight from studies into multi-task reinforcement learning, specifically those where a single policy is trained to be utilized for all relevant tasks. Many of the existing single-policy methods appear to share a core idea: expose the agent to all the relevant task variations, attempt to account for different value associations that different tasks might encourage, and hope that some level of generalization might be achievable. Single-policy methods offer a key advantage towards generalization: they can be developed to function even when exact task specifications are not known. This was demonstrated in the performance of various approaches proposed/attempted in the OpenAI Gym Retro Challenge (Nichol et al., 2018) , which was conducted in an attempt to systematically test algorithms abilities to generalize to unseen environments by having agents play levels of Sonic the Hedgehog. Interestingly, the best-performing approaches were achieved primarily by tuning the baselines \"joint PPO\", based on the PPO (Schulman et al., 2017) architecture, and \"joint Rainbow\", based on Rainbow (Hessel et al., 2017). These \"joint\" networks were constructed with separate replay buffers for each trained level (task). During training, agents are exposed to a sampling of levels, and the gradients for each of these levels are averaged to produce an update to the universal policy, which is then used to update each level's agents. Similar approaches were taken by Model-Agnostic Meta-Learning (MAML) (Finn et al., 2017 ) and DeepMind's IMPALA (Espeholt et al., 2018) . Key differences however are that they apply importance weighting to experience gained. MAML iteratively updates the policy in small steps relative to post-update losses of a series of proposed updates to the policy computed at the end of each episode (where each episode samples a new task). After sampling a set of tasks, MAML generates a final update to its primary policy from a scaled sum of the gradients generated from each proposed update. Instead of a direct averaging of agents, IMPALA applies their v-trace algorithm for importance weighting to compensate for the fact that their algorithm operates in a distributed manner with multiple (potentially un-synced) agents and learners, with some agents operating with outdated policies. IMPALA is primarily introduced as a distributed-learning framework, which conveniently possesses properties that allow it to be used in multi-task learning (where multiple agents can simultaneously train in different environments). Yu et al. (2017) attempt to address a problem most similar to the one studied in this paper. The authors attempt to get around the problem of environmental variation by utilizing a separately trained online physics parameter(s) identifier to inform a joint 'universal' policy on the current state of the environment. However, there is a non-trivial cost associated with training the online identifier and the approach inherently limits itself to cases encountered in training (as demonstrated by their evaluations where the policy was not able to generalize beyond a certain threshold).",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b16",
+                            "Citation_b7",
+                            "Citation_b6",
+                            "Citation_b20"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f3cdceac",
+                        "type": "paragraph",
+                        "text": "We also consider approaches that employ a sense of intrinsic motivation. While recent works in curiosity-driven learning achieve impressive results without any extrinsically defined reward signals from the environment (Burda et al., 2018) , we focused on first addressing the more traditional RL problem structure with extrinsically defined rewards. One such approach to intrinsic prioritization of experience is implemented in Prioritized Experience Replay (PER) (Schaul et al., 2016) , where experiences are sampled from the replay buffer proportionally to the magnitude of their Temporal-Difference (TD) error. A key inspiration for the method presented in this paper however comes from Graves et al. (2017) , who tackle multi-task Natural Language Processing (NLP), utilizing a curriculum formulated as a multi-armed bandit. The advantage of this approach is that the curriculum can be automatically generated and would adapt to the experiences of individual learners, unlike the hand-tuned or goal-oriented curricula typically employed in RL. We borrow a similar idea, also building our curriculum on the Exp3 algorithm proposed by Auer et al. (2003) , however, as discussed in Section 4, we employ a different valuation of the 'prediction gain'.",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b14",
+                            "Citation_b8",
+                            "Citation_b0"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_80573e7b",
+                "title": "REWARD-GUIDED STOCHASTIC CURRICULUM",
+                "blocks": [
+                    {
+                        "block_id": "b_02d19832",
+                        "type": "paragraph",
+                        "text": "As stated in Section 2, we seek to exploit the environment to find settings that lead to the most general policy for the task. We assume that all tasks have specific environment settings which can be controlled during training. The best policy is relatively straightforward to train when the ideal settings are known, however, these may not always be known a priori, and as the number of possible settings to consider increases, so too does the computational cost of exploring all variations of the settings in order to determine such settings.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3e555f04",
+                        "type": "paragraph",
+                        "text": "Drawing inspiration from Graves et al. (2017) , who tackle a multi-task NLP problem, we formulate the problem of developing an automated curriculum for learning generalization over environment settings for a given RL task as a multi-armed bandit problem, focused on minimizing regret and maximizing the actor's rewards. Each of the arms of the multi-armed bandit corresponds to an 'action' that the bandit can take, and each action would have a corresponding value (or payoff). The goal of the bandit is to maximize the payoff of every action, which would be trivial if the values of each arm is known, however, when action-values are not known, it is necessary to estimate the value by exploring the action space.",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c829e154",
+                        "type": "paragraph",
+                        "text": "We define a curriculum as a sampling policy on the different environmental settings associated with a given task. A basic curriculum over N possible environmental settings can be constructed as an N -armed bandit, with the syllabus of the developed curriculum intended to maximize the reward that the actor achieves over all the tasks. Over T rounds of 'play', the bandit agent selects an action, a t \u2208 {1, . . . , N }, corresponding to a decision to train under a specific environment setting, and observes a payoff r t , computed as the difference in mean rewards observed before and after training on the selected environment setting. The goal of the bandit/curriculum is to consistently select the settings which offer the best learning gains.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dfed5e77",
+                        "type": "paragraph",
+                        "text": "A key difference in our method from that employed by Graves et al. (2017) is in how we define the payoff, or the value gained by training on a specific setting. Graves et al. (2017) perform a comparison on the training loss before and after training, utilizing the same loss metric that is employed by the network. We instead compute our payoff based on the difference in mean episodic rewards before and after training. This choice was made based on an analysis of the Q values and TD errors of policies that generalized well on settings they were not trained on. We noted that, despite the 'good' performance of the actor, the critic was consistently wrong in its value predictions for any state/action pair, which was to be expected given that we do not model the physical environment. This led us to conclude that, in order to prioritize the performance of the actor policy, we would need to utilize a direct evaluation of the actor, which is reflected by the episodic rewards.",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b8"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_37d98a58",
+                "title": "SINGLE VARIABLE ENVIRONMENTAL SETTING",
+                "blocks": [
+                    {
+                        "block_id": "b_5096aab9",
+                        "type": "paragraph",
+                        "text": "To motivate the best choice of action that yields the lowest regret, we employ the Exponentiallyweighted algorithm for Exploration and Exploitation (Exp3) (Auer et al., 2003) . Specifically, we employ the Exp3.S variant of the algorithm to develop our multi-armed bandit's policy, which employs an -greedy strategy and additively mixes weights to ensure that the probabilities of selecting any particular action is not driven to insignificance. We define to limit the maximum probability of any setting being selected. (Note: we present Exp3.S similarly to Graves et al. (2017) , which is mathematically equivalent to the algorithm as it is presented in Auer et al. (2003) ).",
+                        "extracted_citations": [
+                            "Citation_b0",
+                            "Citation_b8",
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d14a7863",
+                        "type": "paragraph",
+                        "text": "For a bandit policy defined by weights, w i for i \u2208 {1, . . . , N }, corresponding to the N possible environment settings, at bandit-step t and the bandit's action, a i , the sampling probability, \u03c0 Exp3.S t (i) of action i is given by:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_606e5818",
+                        "type": "paragraph",
+                        "text": "At the end of each bandit step, the weights are updated based on observed payoff, r t :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_60e0d3bf",
+                        "type": "paragraph",
+                        "text": "where w 1 = 0, \u03b1 t := t -1 , and the importance sampled payoff is computed as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_55e9974c",
+                        "type": "paragraph",
+                        "text": "To bound the magnitude by which an arm's weight might change at any given step, payoffs, r t , per bandit step, t are scaled such that r t \u2208 [-1, 1]:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_656b281f",
+                        "type": "paragraph",
+                        "text": "where \u03b4R t = R t -R t-1 is the true bandit policy payoff at step t, computed based on mean rewards achieved by the actor on the set of environment setting of interest, and \u00b5 x represents the x th percentile of payoffs achieved: {r s \u2200 s \u2264 t}.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3d76e612",
+                "title": "MULTIPLE VARIABLE ENVIRONMENTAL SETTINGS",
+                "blocks": [
+                    {
+                        "block_id": "b_d8e7665f",
+                        "type": "paragraph",
+                        "text": "In addition to handling a single variable environment setting, we are also interested in efficiently handling environments where multiple settings might change -examples of single and multi-variable environments would respectively be the Pendulum environment, where the mass of the pendulum may change, or the Cart-Pole environment, where the masses of both the cart and pole could change. Considering the combinatorial enumeration of all possible combinations of environment variables would cause the number of settings (and corresponding bandit arms) to grow by order O( m\u2208M N m ). Instead, we propose a multi-multi-armed bandit solution, where a separate bandit is maintained for each variable. Crucially, this results in a linear growth in the number of arms to be maintained.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_58211d3d",
+                        "type": "paragraph",
+                        "text": "There are two primary differences between our approaches to the multi-variable and single variable settings for M variables:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2b85254a",
+                        "type": "paragraph",
+                        "text": "(i) The importance weighting of the scaled rewards (equation 3) is adjusted to account for the joint probabilities of the (assumed to be independent) variables:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b22985af",
+                        "type": "paragraph",
+                        "text": "where the pre-superscript m reflects the actions and properties of the the m th bandit (corresponding to the m th environment variable.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_18c9abd2",
+                        "type": "paragraph",
+                        "text": "(ii) The bandit weight policy weights are then updated per variable, effectively just as it was in equation 2, but using the importance sampled reward computed by equation 5:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7339d12b",
+                        "type": "paragraph",
+                        "text": "Algorithm 1: Reward-guided curriculum for improving policy robustness",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9ff6af4e",
+                "title": "EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_811149d3",
+                        "type": "paragraph",
+                        "text": "Evaluations are conducted on the three task environments that were previously discussed: [i] Pendulum, [ii] Cart-Pole, and [iii] Ball-pushing. While the pendulum and ball-pushing environments have only a single variable environment setting (the pendulum and ball mass respectively), cart-pole has two variables (the pole mass and the cart mass), thus allowing us to evaluate the multi-variable version of our algorithm.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_012f0c8b",
+                        "type": "paragraph",
+                        "text": "To meter the performance of our method, our results are compared against two key baselines: [i] The best results observed via a grid search (oracle) on policies trained exclusively on specific individual environment settings (i.e. the best inadvertently generalizing agent for each task, as presented in Tables 1, 2 and Appendix C, Table 7 ), and [ii] Policies trained under a joint/mixed training structure (joint), where the environment settings are varied every episode during training, with the episode settings drawn uniformly at random from a list of values of interest. This is similar to domain randomization. Additionally, for the pendulum task, which served as our primary sandbox for testing different ideas, we also provide comparisons against policies trained with Prioritized Experience Replay (PER) and also policies where the curriculum's key payoff indicator was determined by the changes in TD-error instead of the episodic rewards but otherwise followed Algorithm 1. These baselines are motivated by initial attempts to guide training with respect to the TD-error, which seems reasonable given that it is the primary error metric for policy training in RL. Performance metrics for the Pendulum, Cart-Pole and Ball-pushing tasks are provided in Tables 3, 4 and 5 respectively. It is immediately clear that our method outperforms policies built on joint sampling, PER (where tested) and the TD-error-guided curriculum (where tested), and achieves a performance closest to our oracle, of all the methods tested -with the Pendulum and Cart-Pole getting within 1% and 4% of their oracles' success rate respectively (noting that the Pendulum's oracle achieved a 100% success rate). In the case of the ball-pushing task, where we did not have a binary definition of success, it can be noted that the average error is improved over joint sampling, being within 2\u00d7 of the oracle's error, as opposed to 3\u00d7. Our method also has a significantly lower computational cost than the oracle, needing to train only a single policy as opposed to m\u2208M N m policies. Additionally, as evidenced by Figure 1 , the curricula developed appear to address the needs of each learner, adjusting the curriculum policies as necessary. It is interesting to note that TD error is apparently a bad metric for guiding curriculum choice and evolution. This is observed both with PER and the TD-error-guided curriculum -where the former samples the replay buffer proportionally to a transition's TD-error, and the latter adjusts the curriculum based on the TD-errors of transitions associated with previously tested settings. We hypothesize that prioritizing TD-error, which is inherently a measure of the next-state prediction capabilities of the critic, negatively impacts performance due to the fact that the critic is expected to always be wrong when working without a model of the environment and its settings -without explicitly knowing the current setting of the environment, it may simply be impossible to develop good predictions of expected future reward. Prioritizing TD-error as a metric by which to guide multi-setting (and possibly multi-task) learning may therefore wrongly bias policies towards minimizing the variance in TD-error across settings (or tasks). Rudimentary tests on the TD-errors on trained policies appear to support this hypothesis, however, due to time constraints, we have not been able to test this idea sufficiently to make a conclusive claim.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f1cd2bbf",
+                "title": "A TRAINING ENVIRONMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_28ecb61a",
+                        "type": "paragraph",
+                        "text": "We primarily use 4 training environments in all our experiments:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6cf91369",
+                        "type": "paragraph",
+                        "text": "1. Pendulum-v0 from OpenAI Gym (Brockman et al., 2016) , modified minimally to allow for programmatic control of the pendulum's mass. \u2022 Network Architecture: DDPG",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7b1408d0",
+                        "type": "paragraph",
+                        "text": "\u2022 Hidden layer configuration: (400,300)",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c6c85e11",
+                        "type": "paragraph",
+                        "text": "\u2022 Additional notes: Code adapted from Patrick Emami's code which is available on Github. Modifications were made to remove the use of tflearn and use only tensorflow. Additionally, the OpenAI's replay buffer code from their baselines (Dhariwal et al., 2017) was adapted into this code to allow for the easy implementation of PER (Schaul et al., 2016) Reward-Guided stochastic curriculum parameters:",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a6457bf6",
+                        "type": "paragraph",
+                        "text": "\u2022 : 0.05 for pendulum and ball-pushing, 0.2 for cart-pole",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_98ed8c60",
+                        "type": "paragraph",
+                        "text": "\u2022 \u03b2: 0.05 for pendulum and ball-pushing, 0.2 for cart-pole",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "The nonstochastic multiarmed bandit problem Peter Auer Nicol\u00f2 Cesa-Bianchi Yoav Freund Robert E Schapire 10.1137/S0097539701398375 SIAM J. Comput 0097-5397 32 1 January 2003",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Greg Brockman Vicki Cheung Ludwig Pettersson Jonas Schneider John Schulman Jie Tang Wojciech Zaremba Openai gym. CoRR, abs/1606.01540 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Large-scale study of curiosity-driven learning Yuri Burda Harrison A Edwards Deepak Pathak Amos J Storkey Trevor Darrell Alexei A Efros CoRR, abs/1808.04355 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Learning modular neural network policies for multi-task and multi-robot transfer Coline Devin Abhishek Gupta Trevor Darrell Pieter Abbeel Sergey Levine 10.1109/ICRA.2017.7989250 IEEE International Conference on Robotics and Automation 05 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Prafulla Dhariwal Christopher Hesse Oleg Klimov Alex Nichol Matthias Plappert Alec Radford John Schulman Szymon Sidor Yuhuai Wu Peter Zhokhov 2017 Openai baselines",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Benchmarking deep reinforcement learning for continuous control Yan Duan Xi Chen Rein Houthooft John Schulman Pieter Abbeel Proceedings of the 33rd International Conference on International Conference on Machine Learning the 33rd International Conference on International Conference on Machine Learning 2016 48",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "IM-PALA: scalable distributed deep-rl with importance weighted actor-learner architectures Lasse Espeholt Hubert Soyer R\u00e9mi Munos Karen Simonyan Volodymyr Mnih Tom Ward Yotam Doron Vlad Firoiu Tim Harley Iain Dunning Shane Legg Koray Kavukcuoglu CoRR, abs/1802.01561 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Model-agnostic meta-learning for fast adaptation of deep networks Chelsea Finn Pieter Abbeel Sergey Levine Proceedings of the 34th International Conference on Machine Learning Doina Precup Yee Whye Teh the 34th International Conference on Machine Learning Sydney, Australia Aug 2017 70 Proceedings of Machine Learning Research. International Convention Centre",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Automated curriculum learning for neural networks Alex Graves Marc G Bellemare Jacob Menick R\u00e9mi Munos Koray Kavukcuoglu CoRR, abs/1704.03003 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Rainbow: Combining improvements in deep reinforcement learning Matteo Hessel Joseph Modayil Tom Hado Van Hasselt Georg Schaul Will Ostrovski Daniel Dabney Bilal Horgan Mohammad Gheshlaghi Piot David Azar Silver Association for the Advancement of Artificial Intelligence Conference on Artificial Intelligence 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Continuous control with deep reinforcement learning Timothy P Lillicrap Jonathan J Hunt Alexander Pritzel Nicolas Heess Tom Erez Yuval Tassa David Silver Daan Wierstra International Conference on Learning Representations 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Gotta learn fast: A new benchmark for generalization in RL Alex Nichol Vicki Pfau Christopher Hesse Oleg Klimov John Schulman CoRR, abs/1804.03720 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Deepmimic: Exampleguided deep reinforcement learning of physics-based character skills Xue Bin Peng Pieter Abbeel Sergey Levine Michiel Van De Panne 10.1145/3197517.3201311 ACM Trans. Graph 0730-0301 37 4 14 July 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Sim2real view invariant visual servoing by recurrent control Fereshteh Sadeghi Alexander Toshev Eric Jang Sergey Levine CoRR, abs/1712.07642 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Prioritized experience replay Tom Schaul John Quan Ioannis Antonoglou David Silver ternational Conference on Learning Representations 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Trust region policy optimization John Schulman Sergey Levine Pieter Abbeel Michael Jordan Philipp Moritz Proceedings of the 32nd International Conference on Machine Learning Francis Bach David Blei the 32nd International Conference on Machine Learning Lille, France Jul 2015 37 Proceedings of Machine Learning Research",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Proximal policy optimization algorithms John Schulman Filip Wolski Prafulla Dhariwal Alec Radford Oleg Klimov CoRR, abs/1707.06347 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Domain randomization for transferring deep neural networks from simulation to the real world Josh Tobin Rachel Fong Alex Ray Jonas Schneider Wojciech Zaremba Pieter Abbeel 10.1109/IROS.2017.8202133 IEEE/RSJ International Conference on Intelligent Robots and Systems 09 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Sample efficient actor-critic with experience replay Ziyu Wang Victor Bapst Nicolas Heess Volodymyr Mnih R\u00e9mi Munos Koray Kavukcuoglu Nando De Freitas CoRR, abs/1611.01224 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Scalable trust-region method for deep reinforcement learning using kronecker-factored approximation Yuhuai Wu Elman Mansimov Shun Roger B Grosse Jimmy Liao Ba Advances in Neural Information Processing Systems I Guyon U V Luxburg S Bengio H Wallach R Fergus S Vishwanathan R Garnett Curran Associates, Inc 2017 30",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Preparing for the unknown: Learning a universal policy with online system identification Wenhao Yu C Karen Liu Greg Turk Robotics: Science and Systems 2017",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0228,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "- Does the paper present substantively new ideas or explore an under-explored or highly novel question?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The paper claimed that there is limited work on the investigating the sensitivity of RL caused by the physics variations of the environment, such as object weight, surface friction, arm dynamics, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "So the paper proposed learning a stochastic curriculum, guided by episodic reward signals (which is their contribution compared with previous related work) to develop policies robust to environmental perturbation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "Overall the combination of ideas is novel but the experimental results are limited in scope.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "- Does the results substantively advance the state of the art?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "The results advance the state of the art, since they are compared against : 1) the best results observed via a grid search (oracle) on policies trained exclusively on specific individual environment settings; 2) Policies trained under a mixed training structure, where the environment settings are varied every episode during training, with the episode settings drawn uniformly at random from a list of values of interest.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "Their 3 experiment results are competitive with 1) and much better than 2).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "- Will a substantial fraction of the ICLR attendees be interested in reading this paper?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Yes, because the robustness of RL policies to changes in the physic parameters of the environment has not been well explored.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Although previous investigations exist, and this paper\u2019s algorithm is the combination of EXP3 and DDPG, it is still interesting to see them combined together to solve model uncertainty problem of RL with very good simulation results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "- Would I send this paper to one of my colleagues to read?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "I would definitely send the paper to my colleagues to read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "- In terms of quality:  \n\nClear motivation; substantiated literature review; but the algorithms proposed are not novel and the question of whether the method will scale to more unknown parameters is not answered.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "- I terms of clarity:  \n\nEasy to read.\u2013Experimental evaluation is clearly presented.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "- Originality:  The problem of developing an automated curriculum for learning generalization over environment settings for a given RL task is formulated as a multi-armed bandit problem, and EXP3 algorithm is used to minimize regret and maximize the actor\u2019s rewards.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "Itis a very interesting application of EXP3, although such inspiration is drawn from a former multi-task NLP paper Graves et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "- In terms of significance:  \n\n The paper is definitely interesting and presents an  promising  direction.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "The significance is  limited because of the simplicity of the examples considered in the experimental session.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "It would be interesting to see how this method performs in problems with more states and more unknown parameters.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.4124,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The paper looks at the problem of generalization across physical parameter varaition in learning for continuous control.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "The paper presents a method to develop a sampling based curriculum over env.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "settings for training robust agents.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "* The paper makes an interesting observation on inadvertent generalization in robust policy learning.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "However, the examples in both the cartpole and the pendulum cases seem not to be watertight.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "For instance, the authors claim that \nBut from a dynamical system perspective in both cases, the controller is operating near limits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "The solution and subsequent generalization depend more on the topology of the solution space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "A heavy Pendulum is an overdamped system and required the policy to operate at the limits of action to generate momentum for swing up.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "Hence a solution for a lighter pendulum in implicitly included.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "Similarly, the rolling ball is an underdamped system, and where the policy operates near zero limits in light ball case to prevent the system from going unstable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Adding mass results in damping which makes it easier.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "In this case, as well the solution space is implicitly contained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "But this is not a novel observation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "Similar observations have been made for Robust control and Model-Reference Adaptive Control.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "The paper also overlooks a number of related works in model-free randomization [4], adaptive randomization [3], adversarial randomization [5,6].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "The method also does not compare with model-based methods for adaptive policy learning and iLQR based methods to handle this problem [2, 7].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "The argument that the method is model-free is perhaps not as acceptable since the model parameters need to be known apriori for adaptation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "The policy itself may be model-free but that is a design choice.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "A good experimental evaluation for this is generalization across known unknowns and unknown unknowns.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "* The algorithm itself is reasonable but the problem setup and choice of a discrete dynamics parameter choices are questionable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "The bandit style method operates over a discrete decision set.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "It also assumes in the multi-parameter setting that they are independent, which may not be true very often.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_22",
+                    "text": "The algorithm proposed itself isnt novel, but would have been justified if the results supported the use of such a method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_23",
+                    "text": "* Experiments are quite weak.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_24",
+                    "text": "Both the experimental domains are rather simplistic with smooth nonlinear dynamics.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_25",
+                    "text": "There are more sophisticated and interesting continuous control environments such as control suite [1] or manipulation suite [2].",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_26",
+                    "text": "It would be useful to see how tis method works in more complicated domains and how the performance compares with simpler methods such as joint brute-force randomization both in performance and in computation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_27",
+                    "text": "Questions: \n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_28",
+                    "text": "Please provide details of Algorithm 1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_29",
+                    "text": "How are the quantities K and M related?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_30",
+                    "text": "What is the process of task initialization?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_31",
+                    "text": "What information is required and what priors are used.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_32",
+                    "text": "Uniform prior over what range?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_33",
+                    "text": "In summary, the authors explore an interesting adaptive curriculum design method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_34",
+                    "text": "However, in its current form, the work needs more thought and empirical evaluation for the sake of completeness.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_35",
+                    "text": "References:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_36",
+                    "text": "Model Reference Adaptive Control [https://doi.org/10.1007/978-1-4471-5102-9_116-1\n]\n2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_37",
+                    "text": "ADAPT: Zero-Shot Adaptive Policy Transfer for Stochastic Dynamical Systems [https://arxiv.org/abs/1707.04674]\n3.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_38",
+                    "text": "EPOpt: Learning Robust Neural Network Policies Using Model Ensembles [https://arxiv.org/abs/1610.01283]\n4.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_39",
+                    "text": "Domain Randomization for Transferring Deep Neural Networks from Simulation to the Real World\n[https://arxiv.org/abs/1610.01283]\n5.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_40",
+                    "text": "Certifying Some Distributional Robustness with Principled Adversarial Training [https://arxiv.org/pdf/1710.10571.pdf]\n6.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_41",
+                    "text": "Adversarially Robust Policy Learning: Active Construction of Physically-Plausible Perturbations [http://vision.stanford.edu/pdf/mandlekar2017iros.pdf]\n7.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_42",
+                    "text": "Synthesis and Stabilization of Complex Behaviors through Online Trajectory Optimization [https://homes.cs.washington.edu/~todorov/papers/TassaIROS12.pdf]",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.5066,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This paper investigated the robustness of RL policies learning under different environmental conditions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Based on the observations that policies learnt in different experimental settings lead to different generalizability, the authors proposed an EXP3 based reward-guided curriculum for improving policy robustness.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "The algorithm was tested on inverse pendulum, cart-pole balancing, and ball-pushing in OpenAI gym.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "The paper is well-organized and easy to understand.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Written errors didn't influence understanding.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "Papers in the references were not properly cited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "It is an interesting discovery that different environment brewed different policies with different robustness/generalizability in daily life.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "However, these are also easily derivable in physics, especially in the three experiments tested in the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "It would be more complete to compare with PID controllers.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_19edab45",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_19edab45",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_19edab45",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_19edab45",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_19edab45",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_7c9f2fb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_19edab45"
+        },
+        {
+            "source": "sec_7c9f2fb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b2afb54e"
+        },
+        {
+            "source": "sec_7c9f2fb9",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b46c4313"
+        },
+        {
+            "source": "b_7e6f50fe",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_7e6f50fe",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "sec_45cc0d87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7e6f50fe"
+        },
+        {
+            "source": "b_6ed35ad0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_6ed35ad0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_6ed35ad0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_6ed35ad0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_6ed35ad0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_6ed35ad0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_45cc0d87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6ed35ad0"
+        },
+        {
+            "source": "sec_45cc0d87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1e239da6"
+        },
+        {
+            "source": "sec_45cc0d87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e623fb7a"
+        },
+        {
+            "source": "sec_45cc0d87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_52a17b84"
+        },
+        {
+            "source": "b_3520ace3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_3520ace3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_3520ace3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_3520ace3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_3520ace3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "sec_9cd8181f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3520ace3"
+        },
+        {
+            "source": "b_f3cdceac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_f3cdceac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_f3cdceac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_f3cdceac",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_9cd8181f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f3cdceac"
+        },
+        {
+            "source": "sec_80573e7b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_02d19832"
+        },
+        {
+            "source": "b_3e555f04",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_80573e7b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3e555f04"
+        },
+        {
+            "source": "sec_80573e7b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c829e154"
+        },
+        {
+            "source": "b_dfed5e77",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_dfed5e77",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_80573e7b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dfed5e77"
+        },
+        {
+            "source": "b_5096aab9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_5096aab9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_5096aab9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_37d98a58",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5096aab9"
+        },
+        {
+            "source": "sec_37d98a58",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d14a7863"
+        },
+        {
+            "source": "sec_37d98a58",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_606e5818"
+        },
+        {
+            "source": "sec_37d98a58",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_60e0d3bf"
+        },
+        {
+            "source": "sec_37d98a58",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_55e9974c"
+        },
+        {
+            "source": "sec_37d98a58",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_656b281f"
+        },
+        {
+            "source": "sec_3d76e612",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d8e7665f"
+        },
+        {
+            "source": "sec_3d76e612",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_58211d3d"
+        },
+        {
+            "source": "sec_3d76e612",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b85254a"
+        },
+        {
+            "source": "sec_3d76e612",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b22985af"
+        },
+        {
+            "source": "sec_3d76e612",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18c9abd2"
+        },
+        {
+            "source": "sec_3d76e612",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7339d12b"
+        },
+        {
+            "source": "sec_9ff6af4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_811149d3"
+        },
+        {
+            "source": "sec_9ff6af4e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_012f0c8b"
+        },
+        {
+            "source": "sec_f1cd2bbf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28ecb61a"
+        },
+        {
+            "source": "b_6cf91369",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_f1cd2bbf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6cf91369"
+        },
+        {
+            "source": "sec_f1cd2bbf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7b1408d0"
+        },
+        {
+            "source": "b_c6c85e11",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_c6c85e11",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_f1cd2bbf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c6c85e11"
+        },
+        {
+            "source": "sec_f1cd2bbf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a6457bf6"
+        },
+        {
+            "source": "sec_f1cd2bbf",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_98ed8c60"
+        }
+    ]
+}

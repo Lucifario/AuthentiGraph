@@ -1,0 +1,1038 @@
+{
+    "paper_metadata": {
+        "paper_id": "rJfUCoR5KX",
+        "source": "OpenReview_ICLR_2019",
+        "year": "2019",
+        "decision": "Unknown",
+        "total_reviews_available": 3
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_268cf845",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_62ebbb17",
+                        "type": "paragraph",
+                        "text": "There is great interest in expanding usage of Deep Neural Networks (DNNs) from running remotely in the cloud to performing local on-device inference on resource-constrained devices (Sze et al., 2017; Lane & Warden, 2018) . Examples of such devices are mobile phones, wearables, IoT devices, and robots. This is motivated by privacy implications of sharing data and models with remote machines, and the appetite to apply DNNs in new environments and scenarios where cloud-inference is not viable. However, requirements of such devices are very demanding: there are stringent compute, storage, memory and bandwidth limitations; many applications need to work in real-time; many devices require long battery life for all-day or always-on use; and there is a thermal ceiling to consider when designing thin and light devices. On the other hand, the quest for more accurate DNNs has resulted in deeper, more compute-intensive models. This is particularly the case for CNNs. For instance, while the convolutional layers of AlexNet (Krizhevsky et al., 2012) make up only 4% of the model parameters, they are accountable for 91% of the computations at inference time (Louizos et al., 2017) .",
+                        "extracted_citations": [
+                            "Citation_b28",
+                            "Citation_b19",
+                            "Citation_b18",
+                            "Citation_b23"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6af8eabc",
+                        "type": "paragraph",
+                        "text": "Compression and efficient implementation of DNNs are therefore more important than ever. There has been a spate of recent work proposing training and post-training schemes that aim to compress models without significant loss in their performance. Main examples of these techniques are pruning, weight sharing, low-rank approximation, knowledge distillation and perhaps most importantly quantisation to lower precisions (Han et al., 2017; Ullrich et al., 2017; Hinton et al., 2015) . Quantisation is widely used in commercial deployments and its trade-offs and performance improvements for CNNs is well-studied in the literature (Krishnamoorthi, 2018) . One appealing training-time quantisation scheme (Courbariaux et al., 2015) pushed it to the extreme, by representing each weight with a single bit, while maintaining respectable model accuracy. This paved the way for emergence Binary Neural Networks (BNNs). Courbariaux et al. (2016) and Rastegari et al. (2016) expanded BNNs by using the sign function as the non-linearity to achieve binary activations in addition to binary parameters. With this approach, full-precision MAC operations in convolution layers can be replaced with cheap XNOR and POPCOUNT binary operations. This results in 58\u00d7 (Rastegari et al., 2016) improvement in compute-time in addition to the inherit 32\u00d7 saving in model size that comes from replacing 32-bit floating point parameters with binary ones.",
+                        "extracted_citations": [
+                            "Citation_b10",
+                            "Citation_b29",
+                            "Citation_b12",
+                            "Citation_b16",
+                            "Citation_b4",
+                            "Citation_b5",
+                            "Citation_b25",
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a661badc",
+                        "type": "paragraph",
+                        "text": "However, as we will describe in Section 2, the common optimisation process used in BNNs is still not fully understood. Moreover, state-of-the-art binary models employ various modifications to conventional training settings in order to squeeze the best performance from the models. Some examples of these modifications are: applying constraints to weights and gradients, changing typical order of operations in a convolutional block, scaling learning rates based on Xavier (Glorot & Bengio, 2010) initialisation values, learning additional parameters for affine transformations of kernels, changing momentum hyper-parameters in Batch Normalisation (Ioffe & Szegedy, 2015) and the choice of optimiser, loss function, learning rate and number of training epochs. In the absence of rigorous mathematical understanding as of yet, it is imperative to empirically study the sensitivity of the optimisation process and the performance of BNNs to these settings and tweaks. Such an empirical understanding of the tools will greatly aid any development of solid mathematical foundations for the field. To that end, the main contributions of this work are as follows:",
+                        "extracted_citations": [
+                            "Citation_b8",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1299d1d5",
+                        "type": "paragraph",
+                        "text": "\u2022 We identify the essential techniques required for successful optimisation of binary models and show that end-to-end training of binary networks crucially relies on the optimiser taking advantage of second-moment gradient estimates.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e3efa7d1",
+                        "type": "paragraph",
+                        "text": "\u2022 We show that most of the commonly used tricks in training binary models, such as gradient and weight clipping, are only required during the final stages of the training to achieve the best performance. Further, we demonstrate that these tricks lead to much slower convergence in the early stages of optimisation.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8f245187",
+                        "type": "paragraph",
+                        "text": "\u2022 We propose new procedures for training, making optimisation notably faster by delaying these tricks, or by training a full-precision model first and fine-tune it into a binary model.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_208505ed",
+                        "type": "paragraph",
+                        "text": "\u2022 We provide our reference implementations and training-evaluation source code online 1 .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_6f2a8516",
+                "title": "BACKGROUND",
+                "blocks": [
+                    {
+                        "block_id": "b_f80ec76d",
+                        "type": "paragraph",
+                        "text": "Early quantised models were derived by quantisating full-precision weights of pre-trained models (Gong et al., 2014) . This approach is widely used in real deployments and enjoys advantages such as the flexibility to apply different levels of quantisation based on the target model size, and not requiring knowledge of model internals. However, it suffers from a significant loss of accuracy. Hubara et al. (2017) showed that in order to maintain model performance, quantisation must be incorporated as part of the training process. This is done by either performing additional training steps to fine-tune a quantised model or by directly learning quantised parameters. This is essential for BNNs where binarising weights of pre-trained models result in significant loss in accuracy.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_9432998c",
+                        "type": "paragraph",
+                        "text": "The first successful binarisation-aware training method was proposed in BinaryConnect by Courbariaux et al. (2015) . In their work, the binary weights are not learned directly; instead, full-precision weights are maintained and learned during the training as proxies for the binary weights. These proxies are only required during training. During the forward path, binary weights are computed by applying sign function to their corresponding full-precision proxies. Since the sign function is not differentiable BinaryConnect employs Straight-Through-Estimator (STE) (Bengio et al., 2013) for back-propagating gradient estimates to full-precision proxies. The STE estimator simply passes the gradients along as if the non-differentiable operator was not present. In practice, BinaryConnect applied two additional restrictions on vanilla STE: (1) Gradient clipping stops gradient flow if the weight's magnitude is larger than 1. This effectively means gradients are computed with respect to hard tanh function.",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2b6b496d",
+                        "type": "paragraph",
+                        "text": "(2) Weight clipping is applied to weights after gradients have been applied to keep them within a range. To formalise this consider w r to be a full-precision proxy for binary weight w b . During the forward path (and at the end of the training):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c0cc193d",
+                        "type": "paragraph",
+                        "text": "STE with gradient clipping provides an estimate for the gradient of this operation:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_86310314",
+                        "type": "paragraph",
+                        "text": "In a back-propagation context, we assume the gradient of the cost C at the output ( \u2202C \u2202w b ) is available where in computing it the same STE estimator above has been used wherever required. Eq 1 enables us to estimate the gradient of the cost at the input ( \u2202C \u2202wr ) and update the proxies:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c61fa749",
+                        "type": "paragraph",
+                        "text": "The estimator passes gradients backwards unchanged when proxies are within the {-1,1} range and cancels the gradient flow when the proxy weight has got too positive or too negative. Figure 1 depicts how this works for a convolutional kernel in a CNN.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0a17842a",
+                        "type": "paragraph",
+                        "text": "Figure 1 : A convolutional kernel in a Binary Neural Network is binary (left) but its values are derived from a full-precision proxy learned using the STE estimator (right). At the end of the training, the proxy kernel is used for one last time to compute final binary values.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c4564a91",
+                        "type": "paragraph",
+                        "text": "There have been several extensions to BinaryConnect's core idea of using STE estimator in binary models. BinaryConnect showed slightly better results when STE was used in stochastic binary neurons. BinaryNet (Courbariaux et al., 2016) used binary activations in addition to binary parameters (as described in Section 1) and made the convolution operation more efficient by using a custom GPU kernel. XNOR-Net and BWN (Rastegari et al., 2016) managed to scale up BNNs to achieve competitive results on the much bigger ImageNet (Deng et al., 2009) dataset by learning additional full-precision scale factors per-layer. DoReFa-Net (Zhou et al., 2016) used STE in the backpropagation path to quantise gradients and achieve faster training. TernaryNet (Zhu et al., 2016 ) quantised parameters to one and a half bits and represented weights using {-1,0,+1}. Having zero allows efficient hardware implementations when kernels are sparse. Lin et al. (2017) achieved state-of-the-art performance by learning a combination of very few binary kernels in each layer.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b25",
+                            "Citation_b6",
+                            "Citation_b32",
+                            "Citation_b33",
+                            "Citation_b22"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_aa3476d3",
+                "title": "A SYSTEMATIC STUDY OF EXISTING METHODOLOGIES IN BNNS",
+                "blocks": [
+                    {
+                        "block_id": "b_667716a3",
+                        "type": "paragraph",
+                        "text": "There have been several non-empirical attempts to formalise STE and BNNs. Anderson & Berg (2018) took a high-dimensional geometric point-of-view to justify the existence of binary solutions irrespective of the optimisation process. Li et al. (2017) provided accuracy guarantees for training binary models under convexity assumptions. However, STE still has not been shown to find the solution of any particular loss function. In the meantime, binary models are achieving acceptable levels of accuracy in practice. Table 1 lists some of the recent binary architectures and their commonly-used training setup.",
+                        "extracted_citations": [
+                            "Citation_b0",
+                            "Citation_b21"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e4d5566e",
+                        "type": "paragraph",
+                        "text": "In this section, we provide an empirical analysis of the main approaches used in these models and help the researchers and practitioners navigate this space. We explore two classes of architectures The remainder of this section is organised as follows: We first show that the choice of optimiser matters considerably. We then show the impact of clipping gradients and weights followed by batch normalisation hyper-parameters on convergence speed and accuracy of BNNs. We finish by testing the effectiveness of some of the other commonly used tweaks used in training binary models.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_28441374",
+                "title": "IMPACT OF OPTIMISER",
+                "blocks": [
+                    {
+                        "block_id": "b_c52058ea",
+                        "type": "paragraph",
+                        "text": "The majority of recent binary models use an adaptive optimiser in their implementations: Bina-ryConnect uses ADAM (Kingma & Ba, 2015) for CIFAR-10 and vanilla SGD for MNIST (although in their released source code they used ADAM for both datasets), DoReFa-Net and XNOR-Net use ADAM in their experiments and ABC-Net (Lin et al., 2017) uses SGD with momentum. In this section, we show that this is not accidental and investigate how the optimiser type and its associated hyper-parameters affects the viability of the STE estimator.",
+                        "extracted_citations": [
+                            "Citation_b15",
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6053d077",
+                        "type": "paragraph",
+                        "text": "For experiments in this section, we looked at optimisers from four classes in order of increasing complexity: (1) history-free optimisers such as mini-batch SGD that do not take previous jumps or gradients into account, (2) momentum optimisers that maintain and use a running average of previous jumps such as Momentum and Nesterov (Sutskever et al., 2013) , (3) Adaptive optimisers that adjust learning rate for each parameter separately such as AdaGrad (Duchi et al., 2011) and AdaDelta (Zeiler, 2012), and finally, (4) optimisers that combine elements from categories above such as ADAM which combines momentum with adaptive learning rate.",
+                        "extracted_citations": [
+                            "Citation_b27",
+                            "Citation_b7"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1e4f674e",
+                        "type": "paragraph",
+                        "text": "Table 2 summarises the best accuracies we achieved using different optimisers. We ran experiments for more epochs than typically required for the datasets (up to 500 epochs depending on the experiment). In each experiment, the relevant hyper-parameters were tuned for best results. We observed great variance in convergence speed and model performance as a result of optimiser choice that goes beyond differences seen when training non-binary models. Our first observation is that vanilla SGD generally fails in optimising binary models using STE. We note that reducing SGD's stochasticity (by increasing batch size) improves performance initially. However, it still fails to obtain the best possible accuracy. SGD momentum and Nesterov optimisers perform better than SGD when they are carefully fine-tuned. However, they perform significantly slower compared to optimsing non-binary models and have to be used for many more epochs than normally used for CIFAR-10 and MNIST datasets. Similar to SGD, increasing momentum rate improves training speed significantly but results in worse final model accuracy. In Appendix A we include results for the equivalent non-binary models that show the effect of batch size and momentum are far less substantial.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6c3284fe",
+                        "type": "paragraph",
+                        "text": "A possible hypothesis is that early stages of training binary models require more averaging for the optimiser to proceed in presence of binarisaton operation. On the other hand, in the late stages of the training, we rely on noisier sources to increase exploration power of the optimiser. This is reinforced by our observation that binary models are often trained long after the training or validation accuracy stop showing improvements. Reducing the learning rate in these epochs does not improve things either. Yet, the best validations are often found in these epochs. In other words, using early stopping for training binary models would terminate the training early on and would result in suboptimal accuracies.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_39b6d0e3",
+                        "type": "paragraph",
+                        "text": "Finally, adaptive optimisers, and specifically ADAM, consistently perform faster and able to achieve better accuracy levels. We experimented with different hyper-parameters in ADAM optimiser (see Figure 2c ) and found the decay rate for the second moment estimate to play a significant role.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f043fba4",
+                "title": "IMPACT OF GRADIENT AND WEIGHT CLIPPING",
+                "blocks": [
+                    {
+                        "block_id": "b_bddb1ca2",
+                        "type": "paragraph",
+                        "text": "The STE variant used in BinaryConnect, XNOR-Net, and most other binary models, is different from vanilla STE introduced by Bengio et al. (2013) . In these models, the STE stops gradient flow to proxies when the full-precision weights have grown beyond \u00b11. Additionally, BinaryConnect clips weights after gradient updates have been applied to keep weights within range. Our experiments (summarised in Table 3 ) show that this technique does indeed result in slight improvements in the accuracy of binary models. We observed 0.07% and 0.54% improvement for MNIST and CIFAR-10 datasets respectively. Clipping weights does generally help when it is combined with gradient clipping but is less effective on its own. In our experiments placing these additional constraints had negligible effects on speed of SGD or Momentum based optimisers. However, ADAM is sensitive to these constraints. We will revisit clipping in Section 4 where we study them again in terms of optimising convergence speed. 1 all binary models change the placement of pooling operation within a convolutional layer. This change makes sense intuitively. For instance, applying MaxPooling to a binary vector results in a vector with almost all ones. We have seen two variants of block reordering and in both cases (see Figure 3 ), pooling is done immediately after the convolution operator where the vector is not binary. In our experiments, not making this change resulted in significant accuracy loss.",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a51dcc28",
+                        "type": "paragraph",
+                        "text": "Learning Rate Scaling using Xavier. In BinaryConnect Courbariaux et al. (2015) propose scaling learning rates of each convolutional or fully connected layer by the inverse of Xavier initialisation's variance value. The same value is also used as the range in weight clipping after gradient update. They report noticeable accuracy improvements using these techniques. This modification is interesting because it suggests STE estimator requires an additional dimension. Applying this change effectively makes the slope of the line between -1 and +1 (see Figure 1b ) directly proportional to the square root of (Fan-In + Fan-Out) of each layer. In our experiments, this approach helped when used with SGD but we did not see any impact when used with other optimisers. We were able to replicate accuracy levels reported by BinaryConnect without using this technique.",
+                        "extracted_citations": [
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_3b49506d",
+                "title": "TRAINING BNNS FASTER: EMPIRICAL INSIGHTS PUT INTO PRACTICE",
+                "blocks": [
+                    {
+                        "block_id": "b_fbc0c735",
+                        "type": "paragraph",
+                        "text": "We continue in this section by applying a number of our empirical observations towards optimising BNNs in a faster and more efficient manner. We believe this demonstrates some of the practical implications of our results described earlier that are still to be explored.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0fff7045",
+                        "type": "paragraph",
+                        "text": "In this case-study, we consider the well-known observation that training a binary model is often notably slower than its non-binary counter-part, the reasons for which are not well understood. One reason typically cited is that binarisation hinders the use of large learning rates -relative to those adopted in full precision networks. Our experiments show that counter to the conventional wisdom the STE on its own does not affect the training speed of BNNs considerably. The slowdown is mainly caused by the commonly applied gradient and weight clipping, as they keep parameters within the {-1,1} range at all times during training. Figure 5 shows how disabling one or both of these clipping schemes affects the training curve of a binary CNN. It can be seen that not clipping weights when learning rates are large can completely halt the optimisation (red curve in Figure 5 ). On the other hand, using vanilla STE brings the training speed back on par with the non-binary model. This is particularly true for ADAM.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fcdbae72",
+                        "type": "paragraph",
+                        "text": "However, this faster convergence comes at the price of a loss in accuracy (see Section 3.2). While weight and gradient clipping help achieve better accuracy, our hypothesis is that they are only required in the later stages of training where the noise added by clipping weights and gradients increases the exploration of the optimiser. We tested this hypothesis by training a binary model in two stages: (1) using vanilla STE in the first stage with higher learning rates and (2) turning clippings back on when the accuracy stops improving by reducing learning rate.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ceeebe6f",
+                        "type": "paragraph",
+                        "text": "With vanilla STE the gradients are simply passed along to the full-precision proxies and the model is optimised as if the binarisation operations were not present. This, combined with results above, prompts the question of whether it is even necessary to apply binarisation from the very beginning of the training. While it might be conceptually attractive to train binary models end-to-end, we are still learning full-precision structures during training. One can define and train an equivalent nonbinary model where the binarisation operations are removed. This is useful because in many cases this model is already available. This pre-trained model can then be used to initialise the values of full-precision proxies in the binary model. The model can then be trained using STE and gradient clipping. Our experiments (see Figure 4 ) show that this works equally well in terms of accuracy but converges considerably faster for ResNet-18 (He et al., 2016) and VGG-10 architectures than if we had trained these binary models end-to-end. Mishra & Marr (2018) reported similar results.",
+                        "extracted_citations": [
+                            "Citation_b11",
+                            "Citation_b24"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4f560cc6",
+                        "type": "paragraph",
+                        "text": "There is a significant loss in accuracy when this model is binarised for the first time. This can be seen in the starting point of the Binary (from full precision) curves in Figure 4 . This shows once again why we cannot simply binarise a pre-trained non-binary model and expect it to work well. However, we noted that the number of training steps required to recover the accuracy is very small. This result is encouraging because it turns the problem of learning binary models into a fine-tuning stage that can be applied to available pre-trained models.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_49e545b5",
+                        "type": "paragraph",
+                        "text": "It is important to note that while we can quickly get to the point where training and validation accuracies stagnate, there is a small gap between the achieved accuracy and the best possible one. This gap can only be filled by continuing training for many epochs. This difference is often consistent with the gap we observe between (a) the best test accuracy when training for many epochs and (b) the first epoch where validations accuracy stops improving. This reinforces our earlier hypothesis in Section 3.1 that suggests the last mile of model performance has little dependence on the STE's capability and mostly relies on a stochastic exploration of the parameter space.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4ac9742e",
+                "title": "CONCLUSION AND BEST-PRACTICES",
+                "blocks": [
+                    {
+                        "block_id": "b_38340ea6",
+                        "type": "paragraph",
+                        "text": "In this work, we study the landscape of binary neural networks and evaluate the impact of various techniques on the accuracy and convergence performance of binary models. We show that training binary models are harder and slower than the equivalent non-binary model. Our empirical study suggests that while the limit of STE's capability can be achieved easily, finding the best set of weights requires longer training. For efficient training of Binary models we recommend: (1) using ADAM for optimising the objective, (2) not using early stopping, (3) splitting the training into two stages, (4) removing gradient and weight clipping in the first stage and (5) reducing the averaging rate in Batch Normalisation layers in the second stage.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "The high-dimensional geometry of binary neural networks Alexander G Anderson Cory P Berg International Conference on Learning Representations 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Estimating or propagating gradients through stochastic neurons for conditional computation Yoshua Bengio Nicholas L\u00e9onard Aaron Courville arXiv:1308.3432 2013 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Binarized convolutional landmark localizers for human pose estimation and face alignment with limited resources Adrian Bulat International Conference on Computer Vision 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Deep learning with low precision by half-wave gaussian quantization Zhaowei Cai Xiaodong He Jian Sun Nuno Vasconcelos CVPR 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Binaryconnect: Training deep neural networks with binary weights during propagations Matthieu Courbariaux Yoshua Bengio Jean-Pierre David Advances in neural information processing systems 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Ran El-Yaniv, and Yoshua Bengio Matthieu Courbariaux Itay Hubara Daniel Soudry arXiv:1602.02830 Binarized neural networks: Training neural networks with weights and activations constrained to+ 1 or-1 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Imagenet: A large-scale hierarchical image database Jia Deng Wei Dong Richard Socher Kai Li Jia Li Li Li Fei-Fei CVPR 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Adaptive subgradient methods for online learning and stochastic optimization John Duchi Elad Hazan Yoram Singer Journal of Machine Learning Research 12 Jul. 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Understanding the difficulty of training deep feedforward neural networks Xavier Glorot Yoshua Bengio Proceedings of the thirteenth international conference on artificial intelligence and statistics the thirteenth international conference on artificial intelligence and statistics 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Compressing deep convolutional networks using vector quantization Yunchao Gong Liu Liu Ming Yang Lubomir Bourdev arXiv:1412.6115 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Deep compression: Compressing deep neural networks with pruning, trained quantization and huffman coding Song Han Huizi Mao William J Dally International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Deep residual learning for image recognition K He X Zhang S Ren J Sun 2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) June 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Distilling the knowledge in a neural network Geoffrey Hinton Oriol Vinyals Jeff Dean arXiv:1503.02531 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Quantized neural networks: Training neural networks with low precision weights and activations Itay Hubara Matthieu Courbariaux Daniel Soudry The Journal of Machine Learning Research 18 1 2017 Ran El-Yaniv, and Yoshua Bengio",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Batch normalization: accelerating deep network training by reducing internal covariate shift Sergey Ioffe Christian Szegedy Proceedings of the 32nd International Conference on International Conference on Machine Learning the 32nd International Conference on International Conference on Machine Learning 2015 37",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Adam: A method for stochastic optimization P Diederik Jimmy Kingma Ba International Conference on Learning Representations 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Quantizing deep convolutional networks for efficient inference: A whitepaper Raghuraman Krishnamoorthi arXiv:1806.08342 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Learning multiple layers of features from tiny images Alex Krizhevsky Geoffrey Hinton 2009 Citeseer Technical report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Imagenet classification with deep convolutional neural networks Alex Krizhevsky Ilya Sutskever Geoffrey E Hinton Advances in neural information processing systems 2012",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "The deep (learning) transformation of mobile and embedded computing N D Lane P Warden Computer 51 5 May 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Yann Lecun The \"MNIST\" database of handwritten digits 1998",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Training quantized nets: A deeper understanding Hao Li Soham De Zheng Xu Christoph Studer Hanan Samet Tom Goldstein Advances in Neural Information Processing Systems 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Towards accurate binary convolutional neural network Xiaofan Lin Cong Zhao Wei Pan Advances in Neural Information Processing Systems 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Bayesian compression for deep learning Christos Louizos Karen Ullrich Max Welling Advances in Neural Information Processing Systems I Guyon U V Luxburg S Bengio H Wallach R Fergus S Vishwanathan R Garnett Curran Associates, Inc 2017 30",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Apprentice: Using knowledge distillation techniques to improve lowprecision network accuracy Asit Mishra Debbie Marr International Conference on Learning Representations 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Xnor-net: Imagenet classification using binary convolutional neural networks Mohammad Rastegari Vicente Ordonez Joseph Redmon Ali Farhadi European Conference on Computer Vision Springer 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Very deep convolutional networks for large-scale image recognition K Simonyan A Zisserman International Conference on Learning Representations 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "On the importance of initialization and momentum in deep learning Ilya Sutskever James Martens George Dahl Geoffrey Hinton International conference on machine learning 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Efficient processing of deep neural networks: A tutorial and survey Vivienne Sze Yu-Hsin Chen Tien-Ju Yang Joel S Emer Proceedings of the IEEE the IEEE 2017 105",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Soft weight-sharing for neural network compression Karen Ullrich Edward Meeds Max Welling International Conference on Learning Representations 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Binary deep neural networks for speech recognition Yanmin Xu Xiang Kai Qian Yu Proc. Interspeech Interspeech 2017. 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "D Matthew Zeiler arXiv:1212.5701 Adadelta: an adaptive learning rate method 2012 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "DoReFa-Net: Training low bitwidth convolutional neural networks with low bitwidth gradients Shuchang Zhou Yuxin Wu Zekun Ni Xinyu Zhou He Wen Yuheng Zou CoRR, abs/1606.06160 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Trained ternary quantization Chenzhuo Zhu Song Han Huizi Mao William J Dally CoRR, abs/1612.01064 2016",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.4366,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "The authors made several claims and provide suggestions on training binary networks, however, they are not proved or theoretically analyzed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The empirical verification of the proposed hypothesis was viewed as weak as the only two datasets used are small datasets MNIST and CIFAR-10, and the used network architectures are also limited.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "Much more rigorous and thorough testing is required for an empirical paper which proposes new claims.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "Take the first claim \"end-to-end training of binary networks crucially relies on the optimiser taking advantage of second moment gradient estimates\" as an example.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "As it is known that choice of optimizer is highly dependent on the specific dataset and network structure, it is not convincing to jump to this conclusion using the observations on two small datasets and limited network architectures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "E.g, many binarization papers use momentum for ImageNet dataset with residual networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "Does Adam also outperforms momentum in this case?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "Similarly, it is also hard for me to judge whether the other conclusions made about weight/gradient clipping, the momentum in batch normalization and learning rate, are correct or not.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "Some minor issues are:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "In Figure 4, different methods are not run to convergence, and the comparison may not be fair.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "The second paragraph in section 4: \"It can be seen that not clipping weights when learning rates are large can completely halt the optimisation (red curve in Figure 5).\" However, in figure 5, the red curve is \"Clipping gradients\", which one is correct?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "The authors propose a recipe for faster training of binary networks, is there experiments supporting that training networks with the proposed recipe is faster than the original counterpart?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.1138,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The paper systematically studies the training of binary neural networks, where binary in this case refers to single bit weight elements in the network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "In particular, different existing training methods are tested and compared for training both MLPs and CNNs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The main findings of the paper are:\n- Using methods such as AdaGrad, AdaDelta, RMSProp and ADAM yields better performance than simpler momentum-based methods such as vanilla momentum and Nesterov momentum, which in turn are much better than vanilla SGD\n- When training binary models, it is common to clip weights and/or gradients for the proxy weights in the network.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "In the paper it is however shown that these methods hinder using a fast learning rate in the beginning of training, while the methods are required in later stages of training in order to achieve good results\n- Pre-training the model with full-precision training works well in speeding up training\n\nFor a practitioner, the paper presents a very useful reference for what methods work well when training binary networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "Although there are some proposals and hypotheses for reasons behind the results, I see the paper as a review paper of existing methods for training binary networks, showing experiments where the methods are tested using the same benchmark and training procedure in order to give a fair comparison.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "As a practical guide, the paper therefore has clear value.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "What is lacking compared to typical ICLR papers is rigorously presenting new findings.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "The authors present a hypothesis for why different batch sizes are needed in the beginning compared to the end of training, but I found neither the justification nor the results very convincing with respect to the hypothesis.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "The way I see it, the actual novel proposals that are made in the paper are two two-stage training methods: one in which the tricks of weight and gradient clipping are only used towards the end of training, and one where the first stage of training is done using a full precision model.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "It is however quite well known that some training schemes with different stages can lead to improved performance: for instance with ADAM, even if it is an adaptive method, lowering the learning rate towards the end of training is often beneficial.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "It might therefore be fair to compare the methods to other multi-stage training methods.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "In addition, I could not find the training curves or final performance figures of the method where clipping is only activated towards the end of training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "To put it all together, the paper is clearly useful for the community as it provides a useful summary of the performance of different methods for training binary neural networks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "In addition, it presents two two-stage training schemes that seem to make training even faster.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "What the paper lacks is rigorous theoretical justifications and clearly novel ideas.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "Small comments:\n- How are the training lengths decided for the different methods?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "If I am not mistaken, in Figure 2, it seems like the SGD and momentum methods have not yet converged when training is halted.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "Is there a budget for wall clock time or is early stopping used or something similar?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "Considering the nature of the paper, I would see this kind of decisions as important to report.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "- In the abstract, you might want to refer to binary weights somewhere.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "Based on the abstract it is easy to mix the binary networks in this paper with stochastic binary networks that can also be trained using the STE estimator\n- Are the differences in the performances in Table 3 statistically significant?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.8165,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "This is a good review paper covering techniques proposed across many of the well-known works in this area and doing an in-depth analysis of the value each of the techniques brings.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "Additionally, based on these studies the paper offers insights into the best algorithms and procedures to combine to achieving good results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "One recent whitepaper that has related work (not fully overlapping though), that may be worth looking by the authors is at https://arxiv.org/abs/1806.08342.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "It is fairly new and not very well-known so not surprising that the authors missed it.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "Pros\n- Well written paper with lots of in-depth experiments \n- Does well at teasing out the impact of each of the techniques and gives some intuitive explanations of why they matter.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "- Provides better insights into how to make training of binary neural networks faster.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "- As the importance of low precision networks grows, this is a valuable paper in pushing the area of research forward.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "Cons\n- A review paper, which doesn't add much new to the existing suite of techniques.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Note: This is true for most review papers.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_62ebbb17",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "b_62ebbb17",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_62ebbb17",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_62ebbb17",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "sec_268cf845",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_62ebbb17"
+        },
+        {
+            "source": "b_6af8eabc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_6af8eabc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_6af8eabc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_6af8eabc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_6af8eabc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_6af8eabc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_6af8eabc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_6af8eabc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_268cf845",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6af8eabc"
+        },
+        {
+            "source": "b_a661badc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_a661badc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_268cf845",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a661badc"
+        },
+        {
+            "source": "sec_268cf845",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1299d1d5"
+        },
+        {
+            "source": "sec_268cf845",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e3efa7d1"
+        },
+        {
+            "source": "sec_268cf845",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8f245187"
+        },
+        {
+            "source": "sec_268cf845",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_208505ed"
+        },
+        {
+            "source": "b_f80ec76d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_f80ec76d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_6f2a8516",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f80ec76d"
+        },
+        {
+            "source": "b_9432998c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_9432998c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_6f2a8516",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9432998c"
+        },
+        {
+            "source": "sec_6f2a8516",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2b6b496d"
+        },
+        {
+            "source": "sec_6f2a8516",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c0cc193d"
+        },
+        {
+            "source": "sec_6f2a8516",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_86310314"
+        },
+        {
+            "source": "sec_6f2a8516",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c61fa749"
+        },
+        {
+            "source": "sec_6f2a8516",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0a17842a"
+        },
+        {
+            "source": "b_c4564a91",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_c4564a91",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_c4564a91",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_c4564a91",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_c4564a91",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b33"
+        },
+        {
+            "source": "b_c4564a91",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_6f2a8516",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c4564a91"
+        },
+        {
+            "source": "b_667716a3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_667716a3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "sec_aa3476d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_667716a3"
+        },
+        {
+            "source": "sec_aa3476d3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e4d5566e"
+        },
+        {
+            "source": "b_c52058ea",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_c52058ea",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_28441374",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c52058ea"
+        },
+        {
+            "source": "b_6053d077",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_6053d077",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "sec_28441374",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6053d077"
+        },
+        {
+            "source": "sec_28441374",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1e4f674e"
+        },
+        {
+            "source": "sec_28441374",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6c3284fe"
+        },
+        {
+            "source": "sec_28441374",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_39b6d0e3"
+        },
+        {
+            "source": "b_bddb1ca2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_f043fba4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bddb1ca2"
+        },
+        {
+            "source": "b_a51dcc28",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_f043fba4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a51dcc28"
+        },
+        {
+            "source": "sec_3b49506d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fbc0c735"
+        },
+        {
+            "source": "sec_3b49506d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0fff7045"
+        },
+        {
+            "source": "sec_3b49506d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fcdbae72"
+        },
+        {
+            "source": "b_ceeebe6f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_ceeebe6f",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "sec_3b49506d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ceeebe6f"
+        },
+        {
+            "source": "sec_3b49506d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4f560cc6"
+        },
+        {
+            "source": "sec_3b49506d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_49e545b5"
+        },
+        {
+            "source": "sec_4ac9742e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_38340ea6"
+        }
+    ]
+}

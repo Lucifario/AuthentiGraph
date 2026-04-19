@@ -1,0 +1,2083 @@
+{
+    "paper_metadata": {
+        "paper_id": "rkevMnRqYQ",
+        "source": "OpenReview_ICLR_2019",
+        "year": "2019",
+        "decision": "Unknown",
+        "total_reviews_available": 4
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_0af8f39b",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_8bb69bee",
+                        "type": "paragraph",
+                        "text": "Deep reinforcement learning (deep RL) has been shown to succeed at a wide variety of complex tasks given a correctly specified reward function. Unfortunately, for many real-world tasks it can be challenging to specify a reward function that captures human preferences, particularly the preference for avoiding unnecessary side effects while still accomplishing the goal (Amodei et al., 2016) . As a result, there has been much recent work (Christiano et al., 2017; Fu et al., 2017; Sadigh et al., 2017) that aims to learn specifications for tasks a robot should perform.",
+                        "extracted_citations": [
+                            "Citation_b2",
+                            "Citation_b8",
+                            "Citation_b13",
+                            "Citation_b23"
+                        ]
+                    },
+                    {
+                        "block_id": "b_18b5cd0e",
+                        "type": "paragraph",
+                        "text": "Typically when learning about what people want and don't want, we look to human action as evidence: what reward they specify (Hadfield-Menell et al., 2017) , how they perform a task (Ziebart et al., 2010; Fu et al., 2017) , what choices they make (Christiano et al., 2017; Sadigh et al., 2017) , or how they rate certain options (Daniel et al., 2014) . Here, we argue that there is an additional source of information that is potentially rather helpful, but that we have been ignoring thus far:",
+                        "extracted_citations": [
+                            "Citation_b14",
+                            "Citation_b29",
+                            "Citation_b13",
+                            "Citation_b8",
+                            "Citation_b23",
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e528c0df",
+                        "type": "paragraph",
+                        "text": "The key insight of this paper is that when a robot is deployed in an environment that humans have been acting in, the state of the environment is already optimized for what humans want.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8f0aec66",
+                        "type": "paragraph",
+                        "text": "For example, consider an environment in which a household robot must navigate to a goal location without breaking any vases in its path, illustrated in Figure 1 . The human operator, Alice, asks the robot to go to the purple door, forgetting to specify that it should also avoid breaking vases along the way. However, since the robot has been deployed in a state that only contains unbroken vases, it can infer that while acting in the environment (prior to robot's deployment), Alice was using one of the relatively few policies that do not break vases, and so must have cared about keeping vases intact. Alice attempts to accomplish a goal in an environment with an easily breakable vase in the center. The robot observes the state of the environment, s 0 , after Alice has acted for some time from an even earlier state s -T . It considers multiple possible human reward functions, and infers that states where vases are intact usually occur when Alice's reward penalizes breaking vases. In contrast, it doesn't matter much what the reward function says about carpets, as we would observe the same final state either way. Note that while we consider a specific s -T for clarity here, the robot could also reason using a distribution over s -T .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_92fc0049",
+                        "type": "paragraph",
+                        "text": "The initial state s 0 can contain information about arbitrary preferences, including tasks that the robot should actively perform. For example, if the robot observes a basket full of apples near an apple tree, it can reasonably infer that Alice wants to harvest apples. However, s 0 is particularly useful for inferring which side effects humans care about. Recent approaches avoid unnecessary side effects by penalizing changes from an inaction baseline (Krakovna et al., 2018; Turner, 2018) . However, this penalizes all side effects. The inaction baseline is appealing precisely because the initial state has already been optimized for human preferences, and action is more likely to ruin s 0 than inaction. If our robot infers preferences from s 0 , it can avoid negative side effects while allowing positive ones.",
+                        "extracted_citations": [
+                            "Citation_b18",
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0ac6ec13",
+                        "type": "paragraph",
+                        "text": "This work is about highlighting the potential of this observation, and as such makes unrealistic assumptions, such as known dynamics and hand-coded features. Given just s 0 , these assumptions are necessary: without dynamics, it is hard to tell whether some feature of s 0 was created by humans or not. Nonetheless, we are optimistic that these assumptions can be relaxed, so that this insight can be used to improve deep RL systems. We suggest some approaches in our discussion.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_cb2daeaa",
+                        "type": "paragraph",
+                        "text": "Our contributions are threefold. First, we identify the state of the world at initialization as a source of information about human preferences. Second, we leverage this insight to derive an algorithm, Reward Learning by Simulating the Past (RLSP), which infers reward from initial state based on a Maximum Causal Entropy (Ziebart et al., 2010) model of human behavior. Third, we demonstrate the properties and limitations of RLSP on a suite of proof-of-concept environments: we use it to avoid side effects, as well as to learn implicit preferences that require active action. In Figure 1 the robot moves to the purple door without breaking the vase, despite the lack of a penalty for breaking vases.",
+                        "extracted_citations": [
+                            "Citation_b29"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4443c784",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_cc3687ae",
+                        "type": "paragraph",
+                        "text": "Preference learning. Much recent work has learned preferences from different sources of data, such as demonstrations (Ziebart et al., 2010; Ramachandran and Amir, 2007; Ho and Ermon, 2016; Fu et al., 2017; Finn et al., 2016 ), comparisons (Christiano et al., 2017; Sadigh et al., 2017; Wirth et al., 2017) , ratings (Daniel et al., 2014) , human reinforcement signals (Knox and Stone, 2009; Warnell et al., 2017; MacGlashan et al., 2017) , proxy rewards (Hadfield-Menell et al., 2017) , etc. We suggest preference learning with a new source of data: the state of the environment when the robot is first deployed. It can also be seen as a variant of Maximum Causal Entropy Inverse Reinforcement Learning (Ziebart et al., 2010) : while inverse reinforcement learning (IRL) requires demonstrations, or at least state sequences without actions (Edwards et al., 2018; Yu et al., 2018) , we learn a reward function from a single state, albeit with the simplifying assumption of known dynamics. This can also be seen as an instance of IRL from summary data (Kangasr\u00e4\u00e4si\u00f6 and Kaski, 2018) .",
+                        "extracted_citations": [
+                            "Citation_b29",
+                            "Citation_b22",
+                            "Citation_b15",
+                            "Citation_b13",
+                            "Citation_b12",
+                            "Citation_b23",
+                            "Citation_b27",
+                            "Citation_b9",
+                            "Citation_b17",
+                            "Citation_b26",
+                            "Citation_b19",
+                            "Citation_b14",
+                            "Citation_b29",
+                            "Citation_b28"
+                        ]
+                    },
+                    {
+                        "block_id": "b_62f38c5b",
+                        "type": "paragraph",
+                        "text": "Frame properties. The frame problem in AI (McCarthy and Hayes, 1981) refers to the issue that we must specify what stays the same in addition to what changes. In formal verification, this manifests as a requirement to explicitly specify the many quantities that the program does not change (Andreescu, 2017) . Analogously, rewards are likely to specify what to do (the task), but may forget to say what not to do (the frame properties). One of our goals is to infer frame properties automatically.",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b3"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e1a2188a",
+                        "type": "paragraph",
+                        "text": "Side effects. An impact penalty can mitigate reward specification problems, since it penalizes unnecessary \"large\" changes (Armstrong and Levinstein, 2017) . We could penalize a reduction in the number of reachable states (Krakovna et al., 2018) or attainable utility (Turner, 2018) . However, such approaches will penalize all irreversible effects, including ones that humans want. In contrast, by taking a preference inference approach, we can infer which effects humans care about.",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b18",
+                            "Citation_b25"
+                        ]
+                    },
+                    {
+                        "block_id": "b_c80182bb",
+                        "type": "paragraph",
+                        "text": "Goal states as specifications. Desired behavior in RL can be specified with an explicitly chosen goal state (Kaelbling, 1993; Schaul et al., 2015; Nair et al., 2018; Bahdanau et al., 2018; Andrychowicz et al., 2017) . In our setting, the robot observes the initial state s 0 where it starts acting, which is not explicitly chosen by the designer, but nonetheless contains preference information.",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b24",
+                            "Citation_b21",
+                            "Citation_b6",
+                            "Citation_b4"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f5a43802",
+                "title": "PRELIMINARIES",
+                "blocks": [
+                    {
+                        "block_id": "b_77b3890a",
+                        "type": "paragraph",
+                        "text": "A finite-horizon Markov decision process (MDP) is a tuple M = S, A, T , r, T , where S is the set of states, A is the set of actions, T : S \u00d7 A \u00d7 S \u2192 [0, 1] is the transition probability function, r : S \u2192 R is the reward function, and T \u2208 Z + is the finite planning horizon. We consider MDPs where the reward is linear in features, and does not depend on action: r(s; \u03b8) = \u03b8 T f (s), where \u03b8 are the parameters defining the reward function and f computes features of a given state.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aab6431a",
+                        "type": "paragraph",
+                        "text": "Inverse Reinforcement Learning (IRL). In IRL, the aim is to infer the reward function r given an MDP without reward M\\r and expert demonstrations D = {\u03c4 1 , ..., \u03c4 n }, where each \u03c4 i = (s 0 , a 0 , ..., s T , a T ) is a trajectory sampled from the expert policy acting in the MDP. It is assumed that each \u03c4 i is feasible, so that T (s j+1 | s j , a j ) > 0 for every j.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7fc413db",
+                        "type": "paragraph",
+                        "text": "Maximum Causal Entropy IRL (MCEIRL). As human demonstrations are rarely optimal, Ziebart et al. (2010) models the expert as a Boltzmann-rational agent that maximizes total reward and causal entropy of the policy. This leads to the policy \u03c0 t (a | s, \u03b8) = exp(Q t (s, a; \u03b8) -V t (s; \u03b8)), where V t (s; \u03b8) = ln a exp(Q t (s, a; \u03b8)) plays the role of a normalizing constant. Intuitively, the expert is assumed to act close to randomly when the difference in expected total reward across the actions is small, but nearly always chooses the best action when it leads to a substantially higher expected return. The soft Bellman backup for the state-action value function Q is the same as usual, and is given by",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e67fb291",
+                        "type": "paragraph",
+                        "text": "The likelihood of a trajectory \u03c4 given the reward parameters \u03b8 is:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_044becd0",
+                        "type": "paragraph",
+                        "text": "MCEIRL finds the reward parameters \u03b8 * that maximize the log-likelihood of the demonstrations:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5e0efdc0",
+                        "type": "paragraph",
+                        "text": "\u03b8 * gives rise to a policy whose feature expectations match those of the expert demonstrations.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_a0fe3ce0",
+                "title": "REWARD LEARNING BY SIMULATING THE PAST",
+                "blocks": [
+                    {
+                        "block_id": "b_419c4b44",
+                        "type": "paragraph",
+                        "text": "We solve the problem of learning the reward function of an expert Alice given a single final state of her trajectory; we refer to this problem as IRL from a single state. Formally, we aim to infer Alice's reward \u03b8 given an environment M\\r and the last state of the expert's trajectory s 0 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5bcca437",
+                        "type": "paragraph",
+                        "text": "Formulation. To adapt MCEIRL to the one state setting we modify the observation model from Equation 1 . Since we only have a single end state s 0 of the trajectory \u03c4 0 = (s -T , a -T , ..., s 0 , a 0 ), we marginalize over all of the other variables in the trajectory:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_816681e1",
+                        "type": "paragraph",
+                        "text": "where p(\u03c4 0 | \u03b8) is given in Equation 1 . We could invert this and sample from p(\u03b8 | s 0 ); the resulting algorithm is presented in Appendix C, but is relatively noisy and slow. We instead find the MLE:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5bcc6cce",
+                        "type": "paragraph",
+                        "text": "Similarly to MCEIRL, we use a gradient ascent algorithm to solve the IRL from one state problem. We explain the key steps here and give the full derivation in Appendix B. First, we express the gradient in terms of the gradients of trajectories:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_091a169e",
+                        "type": "paragraph",
+                        "text": "This has a nice interpretation -compute the Maximum Causal Entropy gradients for each trajectory, and then take their weighted sum, where each weight is the probability of the trajectory given the evidence s 0 and current reward \u03b8. We derive the exact gradient for a trajectory instead of the approximate one in Ziebart et al. (2010) in Appendix A and substitute it in to get:",
+                        "extracted_citations": [
+                            "Citation_b29"
+                        ]
+                    },
+                    {
+                        "block_id": "b_0b7bc270",
+                        "type": "paragraph",
+                        "text": "where we have suppressed the dependence on \u03b8 for readability. F t (s t ) denotes the expected features when starting at s t at time t and acting until time 0 under the policy implied by \u03b8.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9ca21146",
+                        "type": "paragraph",
+                        "text": "Since we combine gradients from simulated past trajectories, we name our algorithm Reward Learning by Simulating the Past (RLSP). The algorithm computes the gradient using dynamic programming, detailed in Appendix B. We can easily incorporate a prior on \u03b8 by adding the gradient of the log prior to the gradient in Equation 5 .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_99258dcb",
+                "title": "EVALUATION",
+                "blocks": [
+                    {
+                        "block_id": "b_3dec97e7",
+                        "type": "paragraph",
+                        "text": "Evaluation of RLSP is non-trivial. The inferred reward is very likely to assign state s 0 maximal reward, since it was inferred under the assumption that when Alice optimized the reward she ended up at s 0 . If the robot then starts in state s 0 , if a no-op action is available (as it often is), the RLSP reward is likely to incentivize no-ops, which is not very interesting.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_05def770",
+                        "type": "paragraph",
+                        "text": "Ultimately, we hope to use RLSP to correct badly specified instructions or reward functions. So, we created a suite of environments with a true reward R true , a specified reward R spec , Alice's first state s -T , and the robot's initial state s 0 , where R spec ignores some aspect(s) of R true . RLSP is used to infer a reward \u03b8 Alice from s 0 , which is then combined with the specified reward to get a final reward \u03b8 final = \u03b8 Alice + \u03bb\u03b8 spec . (We considered another method for combining rewards; see Appendix D for details.) We inspect the inferred reward qualitatively and measure the expected amount of true reward obtained when planning with \u03b8 final , as a fraction of the expected true reward from the optimal policy. We tune the hyperparameter \u03bb controlling the tradeoff between R spec and the human reward for all algorithms, including baselines. We use a Gaussian prior over the reward parameters.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_107c961b",
+                "title": "BASELINES",
+                "blocks": [
+                    {
+                        "block_id": "b_2da52439",
+                        "type": "paragraph",
+                        "text": "Specified reward policy \u03c0 spec . We act as if the true reward is exactly the specified reward.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_343fde42",
+                        "type": "paragraph",
+                        "text": "Policy that penalizes deviations \u03c0 deviation . This baseline minimizes change by penalizing deviations from the observed features f",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_96944156",
+                        "type": "paragraph",
+                        "text": "Relative reachability policy \u03c0 reachability . Relative reachability (Krakovna et al., 2018) considers a change to be negative when it decreases coverage, relative to what would have happened had the agent done nothing. Here, coverage is a measure of how easily states can be reached from the current state. We compare against the variant of relative reachability that uses undiscounted coverage and a baseline policy where the agent takes no-op actions, as in the original paper. Relative reachability requires known dynamics but not a handcoded featurization. A version of relative reachability that operates in feature space instead of state space would behave similarly.",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_af5d3b0c",
+                "title": "COMPARISON TO BASELINES",
+                "blocks": [
+                    {
+                        "block_id": "b_b02a5637",
+                        "type": "paragraph",
+                        "text": "We compare RLSP to our baselines with the assumption of known s -T , because it makes it easier to analyze RLSP's properties. We consider the case of unknown s -T in Section 5.3. We summarize the results in Table 1 , and show the environments and trajectories in Figure 2 .  Side effects: Room with vase (Figure 2a ). The room tests whether the robot can avoid breaking a vase as a side effect of going to the purple door. There are features for the number of broken vases, standing on a carpet, and each door location. Since Alice didn't walk over the vase, RLSP infers a negative reward on broken vases, and a small positive reward on carpets (since paths to the top door usually involve carpets). So, \u03c0 RLSP successfully avoids breaking the vase. The penalties also achieve the desired behavior: \u03c0 deviation avoids breaking the vase since it would change the \"number of broken vases\" feature, while relative reachability avoids breaking the vase since doing so would result in all states with intact vases becoming unreachable.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d3a119c2",
+                        "type": "paragraph",
+                        "text": "Distinguishing environment effects: Toy train (Figure 2b ). To test whether algorithms can distinguish between effects caused by the agent and effects caused by the environment, as suggested in Krakovna et al. (2018) , we add a toy train that moves along a predefined track. The train breaks if the agent steps on it. We add a new feature indicating whether the train is broken and new features for each possible train location. As before, the specified reward only has a positive weight on the purple door, while the true reward also penalizes broken trains and vases.",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_500b8e22",
+                        "type": "paragraph",
+                        "text": "RLSP infers a negative reward on broken vases and broken trains, for the same reason as before. It also infers not to put any weight on any particular train location, even though it changes frequently, because it doesn't help explain s 0 . As a result, \u03c0 RLSP walks over a carpet, but not a vase or a train. \u03c0 deviation immediately breaks the train to keep the train location the same. \u03c0 reachability deduces that breaking the train is irreversible, and so follows the same trajectory as \u03c0 RLSP .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8f77db5c",
+                        "type": "paragraph",
+                        "text": "Implicit reward: Apple collection (Figure 2d ). This environment tests whether the algorithms can learn tasks implicit in s 0 . There are three trees that grow apples, as well as a basket for collecting apples, and the goal is for the robot to harvest apples. However, the specified reward is zero: the robot must infer the task from the observed state. We have features for the number of apples in baskets, the number of apples on trees, whether the robot is carrying an apple, and each location that the agent could be in. s 0 has two apples in the basket, while s -T has none.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7f381b3c",
+                        "type": "paragraph",
+                        "text": "\u03c0 spec is arbitrary since every policy is optimal for the zero reward. \u03c0 deviation does nothing, achieving zero reward, since its reward can never be positive. \u03c0 reachability also does not harvest apples. RLSP infers a positive reward on apples in baskets, a negative reward for apples on trees, and a small positive reward for carrying apples. Despite the spurious weights, \u03c0 RLSP harvests apples as desired.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b6e7ac7b",
+                        "type": "paragraph",
+                        "text": "Desirable side effect: Batteries (Figure 2c ). This environment tests whether the algorithms can tell when a side effect is allowed. We take the toy train environment, remove vases and carpets, and add batteries. The robot can pick up batteries and put them into the (now unbreakable) toy train, but the batteries are never replenished. If the train runs for 10 timesteps without a new battery, it stops operating. There are features for the number of batteries, whether the train is operational, each train location, and each door location. There are two batteries at s -T but only one at s 0 . The true reward incentivizes an operational train and being at the purple door. We consider two variants for the task reward -an \"easy\" case, where the task reward equals the true reward, and a \"hard\" case, where the task reward only rewards being at the purple door.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3c2c2a97",
+                        "type": "paragraph",
+                        "text": "Unsurprisingly, \u03c0 spec succeeds at the easy case, and fails on the hard case by allowing the train to run out of power. Both \u03c0 deviation and \u03c0 reachability see the action of putting a battery in the train as a side effect to be penalized, and so neither can solve the hard case. They penalize picking up the batteries, and so only solve the easy case if the penalty weight is small. RLSP sees that one battery is gone and that the train is operational, and infers that Alice wants the train to be operational and doesn't want batteries (since a preference against batteries and a preference for an operational train are nearly indistinguishable). So, it solves both the easy and the hard case, with \u03c0 RLSP picking up the battery, then staying at the purple door except to deliver the battery to the train.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_36175dd9",
+                        "type": "paragraph",
+                        "text": "\"Unseen\" side effect: Room with far away vase (Figure 2e ). This environment demonstrates a limitation of our algorithm: it cannot identify side effects that Alice would never have triggered. In this room, the vase is nowhere close to the shortest path from the Alice's original position to her goal, but is on the path to the robot's goal. Since our baselines don't care about the trajectory the human takes, they all perform as before: \u03c0 spec walks over the vase, while \u03c0 deviation and \u03c0 reachability both avoid it. Our method infers a near zero weight on the broken vase feature, since it is not present on any reasonable trajectory to the goal, and so breaks it when moving to the goal. Note that this only applies when Alice is known to be at the bottom left corner at s -T : if we have a uniform prior over s -T (considered in Section 5.3) then we do consider trajectories where vases are broken.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fb65b7db",
+                "title": "COMPARISON BETWEEN KNOWING s -T VS. A DISTRIBUTION OVER s -T",
+                "blocks": [
+                    {
+                        "block_id": "b_bf0566d7",
+                        "type": "paragraph",
+                        "text": "So far, we have considered the setting where the robot knows s -T , since it is easier to analyze what happens. However, typically we will not know s -T , and will instead have some prior over s -T . Here, we compare RLSP in two settings: perfect knowledge of s -T (as in Section 5.2), and a uniform distribution over all states.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ad51886b",
+                        "type": "paragraph",
+                        "text": "Side effects: Room with vase (Figure 2a ) and toy train (Figure 2b ). In both room with vase and toy train, RLSP learns a smaller negative reward on broken vases when using a uniform prior. This is because RLSP considers many more feasible trajectories when using a uniform prior, many of which do not give Alice a chance to break the vase, as in Room with far away vase in Section 5.2. In room with vase, the small positive reward on carpets changes to a near-zero negative reward on carpets.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b3de47d3",
+                        "type": "paragraph",
+                        "text": "With known s -T , RLSP overfits to the few consistent trajectories, which usually go over carpets, whereas with a uniform prior it considers many more trajectories that often don't go over carpets, and so it correctly infers a near-zero weight. In toy train, the negative reward on broken trains becomes slightly more negative, while other features remain approximately the same. This may be because when Alice starts out closer to the toy train, she has more of an opportunity to break it, compared to the known s -T case.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a9bb39c1",
+                        "type": "paragraph",
+                        "text": "Implicit preference: Apple collection (Figure 2d ). Here, a uniform prior leads to a smaller positive weight on the number of apples in baskets compared to the case with known s -T . Intuitively, this is because RLSP is considering cases where s -T already has one or two apples in the basket, which implies that Alice has collected fewer apples and so must have been less interested in them. States where the basket starts with three or more apples are inconsistent with the observed s 0 and so are not considered. Following the inferred reward still leads to good apple harvesting behavior.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4fd005ea",
+                        "type": "paragraph",
+                        "text": "Desirable side effects: Batteries (Figure 2c ). With the uniform prior, we see the same behavior as in Apple collection, where RLSP with a uniform prior learns a slightly smaller negative reward on the batteries, since it considers states s -T where the battery was already gone. In addition, due to the particular setup the battery must have been given to the train two timesteps prior, which means that in any state where the train started with very little charge, it was allowed to die even though a battery could have been provided before, leading to a near-zero positive weight on the train losing charge. Despite this, RLSP successfully delivers the battery to the train in both easy and hard cases.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fff8057f",
+                        "type": "paragraph",
+                        "text": "\"Unseen\" side effect: Room with far away vase (Figure 2e ). With a uniform prior, we \"see\" the side effect: if Alice started at the purple door, then the shortest trajectory to the black door would break a vase. As a result, \u03c0 RLSP successfully avoids the vase (whereas it previously did not). Here, uncertainty over the initial state s -T can counterintuitively improve the results, because it increases the diversity of trajectories considered, which prevents RLSP from \"overfitting\" to the few trajectories consistent with a known s -T and s 0 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_97b740ed",
+                        "type": "paragraph",
+                        "text": "Overall, RLSP is quite robust to the use of a uniform prior over s -T , suggesting that we do not need to be particularly careful in the design of that prior.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_65f13fd6",
+                "title": "ROBUSTNESS TO THE CHOICE OF ALICE'S PLANNING HORIZON",
+                "blocks": [
+                    {
+                        "block_id": "b_b4f24168",
+                        "type": "paragraph",
+                        "text": "We investigate how RLSP performs when assuming the wrong value of Alice's planning horizon T . We vary the value of T assumed by RLSP, and report the true return achieved by \u03c0 RLSP obtained using the inferred reward and a fixed horizon for the robot to act. For this experiment, we used a uniform prior over s -T , since with known s -T , RLSP often detects that the given s -T and s 0 are incompatible (when T is misspecified). The results are presented in Figure 3 . The performance worsens when RLSP assumes that Alice had a smaller planning horizon than she actually had. Intuitively, if we assume that Alice has only taken one or two actions ever, then even if we knew the actions they could have been in service of many goals, and so we end up quite uncertain about Alice's reward.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f539f14b",
+                        "type": "paragraph",
+                        "text": "When the assumed T is larger than the true horizon, RLSP correctly infers things the robot should not do. Knowing that the vase was not broken for longer than T timesteps is more evidence to suspect that Alice cared about not breaking the vase. However, overestimated T leads to worse performance at inferring implicit preferences, as in the Apples environment. If we assume Alice has only collected two apples in 100 timesteps, she must not have cared about them much, since she could have collected many more. The batteries environment is unusual -assuming that Alice has been acting for 100 timesteps, the only explanation for the observed s 0 is that Alice waited until the 98th timestep to put the battery into the train. This is not particularly consistent with any reward function, and performance degrades.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f056a8ff",
+                        "type": "paragraph",
+                        "text": "Overall, T is an important parameter and needs to be set appropriately. However, even when T is misspecified, performance degrades gracefully to what would have happened if we optimized \u03b8 spec by itself, so RLSP does not hurt. In addition, if T is larger than it should be, then RLSP still tends to accurately infer parts of the reward that specify what not to do.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ef6a53ac",
+                "title": "LIMITATIONS AND FUTURE WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_e02bd22b",
+                        "type": "paragraph",
+                        "text": "Summary. Our key insight is that when a robot is deployed, the state that it observes has already been optimized to satisfy human preferences. This explains our preference for a policy that generally avoids side effects. We formalized this by assuming that Alice has been acting in the environment prior to the robot's deployment. We developed an algorithm, RLSP, that computes a MAP estimate of Alice's reward function. The robot then acts according to a tradeoff between Alice's reward function and the specified reward function. Our evaluation showed that information from the initial state can be used to successfully infer side effects to avoid as well as tasks to complete, though there are cases in which we cannot infer the relevant preferences. While we believe this is an important step forward, there is still much work to be done to make this accurate and practical.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_245e3e76",
+                        "type": "paragraph",
+                        "text": "Realistic environments. The primary avenue for future work is to scale to realistic environments, where we cannot enumerate states, we don't know dynamics, and the reward function may be nonlinear. This could be done by adapting existing IRL algorithms (Fu et al., 2017; Ho and Ermon, 2016; Finn et al., 2016) . Unknown dynamics is particularly challenging, since we cannot learn dynamics from a single state observation. While acting in the environment, we would have to learn a dynamics model or an inverse dynamics model that can be used to simulate the past, and update the learned preferences as our model improves over time. Alternatively, if we use unsupervised skill learning (Achiam et al., 2018; Eysenbach et al., 2018; Nair et al., 2018) or exploration (Burda et al., 2018) , or learn a goal-conditioned policy (Schaul et al., 2015; Andrychowicz et al., 2017) , we could compare the explored states with the observed s 0 .",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b15",
+                            "Citation_b12",
+                            "Citation_b0",
+                            "Citation_b11",
+                            "Citation_b21",
+                            "Citation_b7",
+                            "Citation_b24",
+                            "Citation_b4"
+                        ]
+                    },
+                    {
+                        "block_id": "b_8cd4a211",
+                        "type": "paragraph",
+                        "text": "Hyperparameter choice. While our evaluation showed that RLSP is reasonably robust to the choice of planning horizon T and prior over s -T , this may be specific to our gridworlds. In the real world, we often make long term hierarchical plans, and if we don't observe the entire plan (corresponding to a choice of T that is too small) it seems possible that we infer bad rewards, especially if we have an uninformative prior over s -T . We do not know whether this will be a problem, and if so how bad it will be, and hope to investigate it in future work with more realistic environments.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dccd39f9",
+                        "type": "paragraph",
+                        "text": "Conflicts between \u03b8 spec and \u03b8 Alice . RLSP allows us to infer \u03b8 Alice from s 0 , which we must somehow combine with \u03b8 spec to produce a reward \u03b8 final for the robot to optimize. \u03b8 Alice will usually prefer the status quo of keeping the state similar to s 0 , while \u03b8 spec will probably incentivize some change to the state, leading to conflict. We traded off between the two by optimizing their sum, but future work could improve upon this. For example, \u03b8 Alice could be decomposed into \u03b8 Alice,task , which says which task Alice is performing (\"go to the black door\"), and \u03b8 frame , which consists of the frame conditions (\"don't break vases\"). The robot then optimizes \u03b8 frame + \u03bb\u03b8 spec . This requires some way of performing the decomposition. We could model the human as pursuing multiple different subgoals, or the environment as being created by multiple humans with different goals. \u03b8 frame would be shared, while \u03b8 task would vary, allowing us to distinguish between them. However, combination may not be the answer -instead, perhaps the robot ought to use the inferred reward to inform Alice of any conflicts and actively query her for more information, along the lines of Amin et al. (2017) .",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_3c3143a0",
+                        "type": "paragraph",
+                        "text": "Learning tasks to perform. The apples and batteries environments demonstrate that RLSP can learn preferences that require the robot to actively perform a task. It is not clear that this is desirable, since the robot may perform an inferred task instead of the task Alice explicitly sets for it.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_609d8e74",
+                        "type": "paragraph",
+                        "text": "Preferences that are not a result of human optimization. While the initial state is optimized for human preferences, this may not be a result of human optimization, as assumed in this paper. For example, we prefer that the atmosphere contain oxygen for us to breathe. The atmosphere meets this preference in spite of human action, and so RLSP would not infer this preference. While this is of limited relevance for household robots, it may become important for more capable AI systems.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_e4d5f04e",
+                "title": "A",
+                "blocks": [
+                    {
+                        "block_id": "b_b03ef167",
+                        "type": "paragraph",
+                        "text": "Here, we derive an exact gradient for the maximum causal entropy distribution introduced in Ziebart et al. ( 2010 ), as the existing approximation is insufficient for our purposes. Given a trajectory \u03c4 T = s 0 a 0 . . . s T a T , we seek the gradient \u2207 \u03b8 ln p(\u03c4 T ). We assume that the expert has been acting according to the maximum causal entropy IRL model given in Section 3 (where we have dropped \u03b8 from the notation for clarity):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_14763d1d",
+                        "type": "paragraph",
+                        "text": "In the following, unless otherwise specified, all expectations over states and actions use the probability distribution over trajectories from the above model, starting from the state and action just prior. For example,",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4e2d782f",
+                        "type": "paragraph",
+                        "text": "In addition, for all probability distributions over states and actions, we drop the dependence on \u03b8 for readability, so the probability of reaching state s T is written as p(s T ) instead of p(s T | \u03b8).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_13b7b684",
+                        "type": "paragraph",
+                        "text": "First, we compute the gradient of V t (s). We have \u2207 \u03b8 V T +1 (s) = 0, and for 0 \u2264 t \u2264 T :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_75fa7a8b",
+                        "type": "paragraph",
+                        "text": "Unrolling the recursion, we get that the gradient is the expected feature counts under the policy implied by \u03b8 from s t onwards, which we could prove using induction. Define:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_86b7862e",
+                        "type": "paragraph",
+                        "text": "We can now calculate the gradient we actually care about:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9171aa93",
+                        "type": "paragraph",
+                        "text": "The last term of the summation is f",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_05b94ab8",
+                        "type": "paragraph",
+                        "text": ", so we can drop it. Thus, our gradient is:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_dd9aab2a",
+                        "type": "paragraph",
+                        "text": "This is the gradient we will use in Appendix B, but a little more manipulation allows us to compare with the gradient in Ziebart et al. (2010) . We reintroduce the terms that we cancelled above:",
+                        "extracted_citations": [
+                            "Citation_b29"
+                        ]
+                    },
+                    {
+                        "block_id": "b_378d855d",
+                        "type": "paragraph",
+                        "text": "Ziebart et al. (2010) states that the gradient is given by the expert policy feature expectations minus the learned policy feature expectations, and in practice uses the feature expectations from demonstrations to approximate the expert policy feature expectations. Assuming we have N trajectories {\u03c4 i }, the gradient would be 1",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5749b7fa",
+                        "type": "paragraph",
+                        "text": "The first term matches our first term exactly. Our second term matches the second term in the limit of sufficiently many trajectories, so that the starting states s 0 follow the distribution p(s 0 ). Our third term converges to zero with sufficiently many trajectories, since any s t , a t pair in a demonstration will be present sufficiently often that the empirical counts of s t+1 will match the expected proportions prescribed by T (\u2022 | s t , a t ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_668e67f6",
+                        "type": "paragraph",
+                        "text": "In a deterministic environment, we have T (s t+1 | s t , a t ) = 1[s t+1 = s t+1 ] since only one transition is possible. Thus, the third term is zero and even for one trajectory the gradient reduces to T t=0 f (s t ) -F 0 (s 0 ). This differs from the gradient in Ziebart et al. (2010) only in that it computes feature expectations from the observed starting state s 0 instead of the MDP distribution over initial states p(s 0 ).",
+                        "extracted_citations": [
+                            "Citation_b29"
+                        ]
+                    },
+                    {
+                        "block_id": "b_085c269f",
+                        "type": "paragraph",
+                        "text": "In a stochastic environment, the third term need not be zero, and corrects for the \"bias\" in the observed states s t+1 . Intuitively, when the expert chose action a t , she did not know which next state s t+1 would arise, but the first term of our gradient upweights the particular next state s t+1 that we observed. The third term downweights the future value of the observed state and upweights the future value of all other states, all in proportion to their prior probability T (s t+1 | s t , a t ).",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_f8e3e451",
+                "title": "B",
+                "blocks": [
+                    {
+                        "block_id": "b_00a9b7ac",
+                        "type": "paragraph",
+                        "text": "This section provides a derivation of the gradient \u2207 \u03b8 ln p(s 0 ), which is needed to solve argmax \u03b8 ln p(s 0 ) with gradient ascent. We provide the results first as a quick reference:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4a0ce5d8",
+                        "type": "paragraph",
+                        "text": "Base cases: first, p(s -T ) is given, second, G -T (s -T ) = 0, and third, F 0 (s 0 ) = f (s 0 ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_81cef92c",
+                        "type": "paragraph",
+                        "text": "For the derivation, we start by expressing the gradient in terms of gradients of trajectories, so that we can use the result from Appendix A. Note that, by inspecting the final form of the gradient in Appendix A, we can see that \u2207 \u03b8 p(\u03c4 -T :0 ) is independent of a 0 . Then, we have:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_258e37e0",
+                        "type": "paragraph",
+                        "text": "This has a nice interpretation -compute the gradient for each trajectory and take the weighted sum, where each weight is the probability of the trajectory given the evidence s 0 and current reward \u03b8.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_691657fb",
+                        "type": "paragraph",
+                        "text": "We can rewrite the gradient in Equation 6 as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9ca11a71",
+                        "type": "paragraph",
+                        "text": "We can now substitute this to get:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7a122410",
+                        "type": "paragraph",
+                        "text": "Published as a conference paper at ICLR 2019 Note that we can compute p(s t ) since we are given the distribution p(s -T ) and we can use the recursive rule p(s t+1 ) = st,at p(s t )\u03c0 t (a t | s t )T (s t+1 | s t , a t ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_36432c77",
+                        "type": "paragraph",
+                        "text": "In order to compute g(s t , a t ) we need to compute F t (s t ), which has base case F 0 (s 0 ) = f (s 0 ) and recursive rule:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f23c4090",
+                        "type": "paragraph",
+                        "text": "For the remaining part of the gradient, define G t such that \u2207 \u03b8 ln p(s 0 ) = G0(s0) p(s0) :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_95107ed4",
+                        "type": "paragraph",
+                        "text": "We now derive a recursive relation for G:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2a9922e7",
+                        "type": "paragraph",
+                        "text": "For the base case, note that",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_82d9bee4",
+                        "type": "paragraph",
+                        "text": "Comparing this to the recursive rule, for the base case we can set G -T (s -T ) = 0.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_55996e87",
+                "title": "C",
+                "blocks": [
+                    {
+                        "block_id": "b_c3a31ea2",
+                        "type": "paragraph",
+                        "text": "Instead of estimating the MLE (or MAP if we have a prior) using RLSP, we could approximate the entire posterior distribution. One standard way to address the computational challenges involved with the continuous and high-dimensional nature of \u03b8 is to use MCMC sampling to sample from p(\u03b8 | s 0 ) \u221d p(s 0 | \u03b8)p(\u03b8). The resulting algorithm resembles Bayesian IRL (Ramachandran and Amir, 2007) and is presented in Algorithm 1.",
+                        "extracted_citations": [
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_133410c8",
+                        "type": "paragraph",
+                        "text": "While this algorithm is less efficient and noisier than RLSP, it gives us an estimate of the full posterior distribution. In our experiments, we collapsed the full distribution into a point estimate by taking the mean. Initial experiments showed that the algorithm was slower and noisier than the gradientbased RLSP, so we did not test it further. However, in future work we could better leverage the full distribution, for example to create risk-averse policies, to identify features that are uncertain, or to identify features that are certain but conflict with the specified reward, after which we could actively query Alice for more information.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ded75d8c",
+                        "type": "paragraph",
+                        "text": "Algorithm 1 MCMC sampling from the one state IRL posterior",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_59618de9",
+                        "type": "paragraph",
+                        "text": "Require: MDP M, prior p(\u03b8), step size \u03b4",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3b95cb9e",
+                        "type": "paragraph",
+                        "text": "The value function is initialized with V . We show how the percentage of true reward obtained by \u03c0 RLSP varies as we change the tradeoff between \u03b8 Alice and \u03b8 spec . The zero temperature case corresponds to traditional value iteration; this often leads to identical behavior and so the lines overlap. So, we also show the results when planning with soft value iteration, varying the softmax temperature, to introduce some noise into the policy. Overall, there is not much difference between the two methods. We did not include the Apples environment because \u03b8 spec is uniformly zero and the Additive and Bayesian methods do exactly the same thing.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_cd22ab18",
+                "title": "D COMBINING THE SPECIFIED REWARD WITH THE INFERRED REWARD",
+                "blocks": [
+                    {
+                        "block_id": "b_6386a2c9",
+                        "type": "paragraph",
+                        "text": "In Section 5, we evaluated RLSP by combining the reward it infers with a specified reward to get a final reward \u03b8 final = \u03b8 Alice + \u03bb\u03b8 spec . As discussed in Section 6, the problem of combining \u03b8 Alice and \u03b8 spec is difficult, since the two rewards incentivize different behaviors and will conflict. The Additive method above is a simple way of trading off between the two.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e3977b23",
+                        "type": "paragraph",
+                        "text": "Both RLSP and the sampling algorithm of Appendix C can incorporate a prior over \u03b8. Another way to combine the two rewards is to condition the prior on \u03b8 spec before running the algorithms. In particular, we could replace our prior P (\u03b8 Alice ) with a new prior P (\u03b8 Alice | \u03b8 spec ), such as a Gaussian distribution centered at \u03b8 spec . When we use this prior, the reward returned by RLSP can be used as the final reward \u03b8 final .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c629c543",
+                        "type": "paragraph",
+                        "text": "It might seem like this is a principled Bayesian method that allows us to combine the two rewards. However, the conflict between the two reward functions still exists. In this formulation, it arises in the new prior P (\u03b8 Alice | \u03b8 spec ). Modeling this as a Gaussian centered at \u03b8 spec suggests that before knowing s 0 , it seems likely that \u03b8 Alice is very similar to \u03b8 spec . However, this is not true -Alice is probably providing the reward \u03b8 spec to the robot so that it causes some change to the state that she has optimized, and so it will be predictably different from \u03b8 spec . On the other hand, we do need to put high probability on \u03b8 spec , since otherwise \u03b8 final will not incentivize any of the behaviors that \u03b8 spec did.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_3df41914",
+                        "type": "paragraph",
+                        "text": "Nonetheless, this is another simple heuristic for how we might combine the two rewards, that manages the tradeoff between \u03b8 spec and \u03b8 Alice . We compared the Additive and Bayesian methods by evaluating their robustness. We vary the parameter that controls the tradeoff and report the true reward obtained by \u03c0 RLSP , as a fraction of the expected true reward under the optimal policy. For the Bayesian method, we vary the standard deviation \u03c3 of the Gaussian prior over \u03b8 Alice that is centered at \u03b8 spec . For the Additive method, the natural choice would be to vary \u03bb; however, in order to make the results more comparable, we instead set \u03bb = 1 and vary the standard deviation of the Gaussian prior used while inferring \u03b8 Alice , which is centered at zero instead of at \u03b8 spec . A larger standard deviation allows \u03b8 Alice to become larger in magnitude (since it is penalized less for deviating from the mean of zero reward), which effectively corresponds to a smaller \u03bb.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_28783fa2",
+                        "type": "paragraph",
+                        "text": "While we typically create \u03c0 RLSP using value iteration, this leads to deterministic policies with very sharp changes in behavior that make it hard to see differences between methods, and so we also show results with soft value iteration, which creates stochastic policies that vary more continuously. As demonstrated in Figure 4 , our experiments show that overall the two methods perform very similarly, with some evidence that the Additive method is slightly more robust. The Additive method also has the benefit that it can be applied in situations where the inferred reward and specified reward are over different feature spaces, by creating the final reward R final (s) = \u03b8 Alice T f Alice (s) + \u03bbR spec (s).",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Joshua Achiam Harrison Edwards Dario Amodei Pieter Abbeel arXiv:1807.10299 Variational option discovery algorithms 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Repeated inverse reinforcement learning Kareem Amin Nan Jiang Satinder Singh Advances in Neural Information Processing Systems 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Dario Amodei Chris Olah Jacob Steinhardt Paul Christiano John Schulman Dan Man\u00e9 arXiv:1606.06565 Concrete problems in ai safety 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Static analysis of functional programs with an application to the frame problem in deductive verification Oana Fabiana Andreescu Rennes 1 2017 PhD thesis",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Hindsight experience replay Marcin Andrychowicz Filip Wolski Alex Ray Jonas Schneider Rachel Fong Peter Welinder Bob Mcgrew Josh Tobin Pieter Abbeel Wojciech Zaremba Advances in Neural Information Processing Systems 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Stuart Armstrong Benjamin Levinstein arXiv:1705.10720 Low impact artificial intelligences 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Learning to understand goal specifications by modelling reward Dzmitry Bahdanau Felix Hill Jan Leike Edward Hughes Pushmeet Kohli Edward Grefenstette arXiv:1806.01946 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Yuri Burda Harri Edwards Deepak Pathak Amos Storkey Trevor Darrell Alexei A Efros arXiv:1808.04355 Large-scale study of curiosity-driven learning 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Deep reinforcement learning from human preferences Jan Paul F Christiano Tom Leike Miljan Brown Shane Martic Dario Legg Amodei Advances in Neural Information Processing Systems 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Active reward learning Christian Daniel Malte Viering Jan Metz Oliver Kroemer Jan Peters Robotics: Science and Systems 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Himanshu Ashley D Edwards Yannick Sahni Charles L Schroeker Isbell arXiv:1805.07914 Imitating latent policies from observation 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Diversity is all you need: Learning skills without a reward function Benjamin Eysenbach Abhishek Gupta Julian Ibarz Sergey Levine arXiv:1802.06070 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Guided cost learning: Deep inverse optimal control via policy optimization Chelsea Finn Sergey Levine Pieter Abbeel International Conference on Machine Learning 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Justin Fu Katie Luo Sergey Levine arXiv:1710.11248 Learning robust rewards with adversarial inverse reinforcement learning 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Inverse reward design Dylan Hadfield-Menell Smitha Milli Pieter Abbeel Stuart J Russell Anca Dragan Advances in Neural Information Processing Systems 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Generative adversarial imitation learning Jonathan Ho Stefano Ermon Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Antti Kangasr\u00e4\u00e4si\u00f6 and Samuel Kaski. Inverse reinforcement learning from summary data Leslie Pack Kaelbling IJCAI Citeseer 1993. 2018 107 Learning to achieve goals",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Interactively shaping agents via human reinforcement: The tamer framework Knox Bradley Peter Stone Proceedings of the fifth international conference on Knowledge capture the fifth international conference on Knowledge capture ACM 2009",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Measuring and avoiding side effects using relative reachability Victoria Krakovna Laurent Orseau Miljan Martic Shane Legg arXiv:1806.01186 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "James Macglashan K Mark Robert Ho Bei Loftin David Peng Matthew E Roberts Taylor Michael L Littman arXiv:1701.06049 Interactive learning from policy-dependent human feedback 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Some philosophical problems from the standpoint of artificial intelligence John Mccarthy Patrick J Hayes Readings in artificial intelligence Elsevier 1981",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Ashvin Nair Vitchyr Pong Murtaza Dalal Shikhar Bahl Steven Lin Sergey Levine arXiv:1807.04742 Visual reinforcement learning with imagined goals 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Bayesian inverse reinforcement learning Deepak Ramachandran Eyal Amir 61801. 2007 51 Urbana",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Active preference-based learning of reward functions Dorsa Sadigh RSS Anca Dragan RSS Shankar Sastry RSS Sanjit A Seshia RSS Robotics: Science and Systems 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Universal value function approximators Tom Schaul Daniel Horgan Karol Gregor David Silver International Conference on Machine Learning 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "Alex Turner Towards a new impact measure 2018. 2018-09-26",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Deep tamer: Interactive agent shaping in high-dimensional state spaces Garrett Warnell Nicholas Waytowich Vernon Lawhern Peter Stone arXiv:1709.10163 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "A Survey of Preference-Based Reinforcement Learning Methods Christian Wirth Riad Akrour Gerhard Neumann Johannes F\u00fcrnkranz 10.1109/CIS.2008.204 Journal of Machine Learning Research 18 136 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "One-shot imitation from observing humans via domain-adaptive meta-learning Tianhe Yu Chelsea Finn Annie Xie Sudeep Dasari Tianhao Zhang Pieter Abbeel Sergey Levine arXiv:1802.01557 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "Modeling interaction via the principle of maximum causal entropy Andrew Brian D Ziebart Anind K Bagnell Dey 2010",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.4574,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This paper considers the problem of inferring unspecified costs in an RL problem (e.g., inferring that vases in a room should not be broken).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The primary insight is that the initial state of the environment conveys rich information about such unspecified costs since environments are often optimized for humans.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The paper frames the problem of inferring unspecified costs from the initial condition as an inverse reinforcement learning (IRL) problem and applies the Maximum Causal Entropy IRL framework to solve this problem.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "Two methods are proposed for combining the inferred unspecified costs with specified costs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "The efficacy of the proposed approach is demonstrated on a number of simulated examples.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "Overall, I was impressed by this paper and I believe that it makes a strong contribution.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "The paper presents an interesting perspective on a relatively old problem (the frame problem in AI).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "The primary intuition of the paper (that the initial state conveys information about unspecified costs) and the framing of this problem in terms of IRL is novel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "The simulated examples (while relatively simple in terms of the number of states and actions) are informative and demonstrate the strengths of the approach (and also some of the weaknesses; the paper is explicit about the current challenges).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "The paper is very clearly written and is easy to read.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "My concerns are relatively minor:\n- Perhaps the weakest bit of the paper is Section 5 (combining the specified reward with the inferred reward).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "As presented, the Additive method is somewhat hard to justify.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "However, the simulated results suggest that the Additive method performs slightly better than the Bayesian method.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "I would suggest either presenting a bit more intuition and justification for the Additive method or getting rid of this method altogether (since the results are not too different from the Bayesian method, which seems a bit more justifiable).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "- One practical (and potentially important) question that the paper does not directly address is the problem of choosing the time horizon T (i.e., the time horizon for the past).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "In the standard IRL setting, it is reasonable to assume that the time horizon is given (since the demonstrations have an associated horizon).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "However, it is not entirely clear how to choose T in the setting considered in this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "It is possible that if one chooses T to be too small, the inferred rewards will not be accurate (and one may have to look further back in the past to correctly infer rewards).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "A discussion of this issue and possible ways to choose T would be helpful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "- In Section 6.1 (baselines), the paper mentions that \"while relative reachability makes use of known dynamics, it does not benefit from our handcoded featurization\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "Is it possible to modify the relative reachability method to also take advantage of the handcoded features, perhaps by considering dynamics over the feature space?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "If not, a sentence explaining that this is not straightforward would be helpful.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "- In the related work section (and also in the introduction), I would recommend being more explicit about precisely what the differences are between the presented work and the approaches presented in (Krakovna et al.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "2018) and (Turner, 2018).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_24",
+                    "text": "The paper is currently slightly vague about the differences.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_25",
+                    "text": "- Currently, the title of the paper is a bit uninformative.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_26",
+                    "text": "On first reading the title, I expected a paper on control theory; the title makes no mention of unspecified costs, or reinforcement learning, or humans, etc.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_27",
+                    "text": "I believe that this is a good paper and that the paper would have more readers if the title was more inline with the content of the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_28",
+                    "text": "Of course, this is at the discretion of the authors.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_29",
+                    "text": "My suggestion would be something along the lines of \"Inferring Unspecified Rewards in RL from the Initial State\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_30",
+                    "text": "Typos:\n- Pg.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_31",
+                    "text": "1, second paragraph, 3rd line: there is a placeholder for citations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_32",
+                    "text": "- Periods are missing at the end of equations.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.4214,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "The authors propose to augment the explicitly stated reward function of an RL agent with auxiliary rewards/costs inferred from the initial state and a model of the state dynamics.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "Intuitively, the fact that a vase precariously placed in the center of the room remains intact suggests that it is a precious object that should be handled with care, even though the reward function may not explicitly say so.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "Technically, implicit rewards like these are inferred via inverse reinforcement learning: the agent (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "robot) first estimates the most likely reward functions to have guided existing agents (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "humans) by integrating over all possible state-action paths that could have led to the initial condition and evaluating their probability under different rewards (and hence different optimal policies).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "The proposal is clever, but there are some philosophical hurdles to overcome and the experimental results offer little quantitative evidence to support this idea.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "In my view, the biggest challenge is how to balance explicitly stated rewards with those inferred from the initial condition.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Section 5 briefly addresses this question, but essentially capitulates by saying, \"This trade-off is inevitable given our problem formulation, since we have two sources of information...and they will conflict in some cases.\"  I fear this conflict may be the rule rather than the exception.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "For example, when I deploy my brand new dish-washing robot on my sink full of dirty dishes, my instructions to clean up will be in direct conflict with my past self's actions (or lack thereof).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "How is the agent to know how strongly to adhere to the stated goals and when to deviate?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "One possible solution is to only allow the inferred reward to affect features that are not explicitly included in the specified reward.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "Neither the Additive nor the Bayesian combination methods have this property though.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "The technical presentation could use some improvement.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "The preliminaries in Section 3 do a decent job of introducing MDPs and IRL, but stop short of saying how the objective function for MCEIRL is actually computed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "Specifically, theta does not appear on the right hand side of Eq (1); implicitly, pi is a function of theta that is estimated, presumably, via value or policy iteration.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "The marginal probability of the initial state and its gradients presented in Section 4.1 are the main technical contribution of the paper, but most of the key details are deferred to the appendix or referenced to Ziebart (2010).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "For example, the dynamic programming algorithm for computing Eq (3) and the expectations over state-action paths in Eq (5) could use more discussion in the main text, as could some elements of the derivation of Eq (5).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "The experimental results are presented primarily in words (e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "\"\\pi_spec walks over the vase while \\pi_deviation and \\pi_reachability both avoid it.\").",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "It would be helpful to see the resulting paths taken by the various agents, or even better, to see their learned reward functions alongside the true reward functions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "The only quantitative results are those in Figure 3, and unfortunately they are a bit confusing.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "Why would we expect non-monotonic rewards at some temperatures?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_22",
+                    "text": "Moreover, why are some reward \"percentages\" negative?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_23",
+                    "text": "The idea of leveraging the initial state for augmenting the reward function is clever, but there are a few shortcomings of the current paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_24",
+                    "text": "There are basic concerns about how implicit and explicit rewards can be combined, and the technical presentation needs some improvement.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_25",
+                    "text": "Most importantly, the experimental results do not show enough quantitative evidence of how the proposed method performs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_26",
+                    "text": "[UPDATE] I appreciate the authors' detailed response and revisions to the paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_27",
+                    "text": "I've updated my score accordingly.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_2",
+            "type": "Human",
+            "liang_alpha_score": 0.0275,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_2_s_0",
+                    "text": "The framework of this work is Reinforcement Learning (RL) optimisation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_1",
+                    "text": "The data consists of states of the space where the action takes place.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_2",
+                    "text": "Actions are possible, and they lead to possible transitions in the state space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_3",
+                    "text": "A reward function assesses how adequate a state space is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_4",
+                    "text": "The main originality of the work is to use the initial state as a key information about the features that translate many desired state of background objects in a scene.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_5",
+                    "text": "An algorithm is built to make use of this information to build an ad hoc reward function, which specifies a good landscape of desired vs non-desired states of the space.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_6",
+                    "text": "An empirical evaluation of the introduced method is presented.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_7",
+                    "text": "It is rich and interesting, although hard to fully grasp for a non-expert.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_8",
+                    "text": "Key questions/remarks:\n - how different is your approach to a Bayesian approach with the combination of a likelihood (~reward) and prior (~initial state analysis) into a posterior distribution of the space?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_9",
+                    "text": "This seems to be the case in Section 5, where your alternative formulation clearly resembles a Lasso approach (which can be cast in a Bayesian framework).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_10",
+                    "text": "- I quite like your decomposition of your ideas into many titled paragraphs.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_11",
+                    "text": "The drawback is that there is sometimes a lack of connections between the many ideas you combine.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_12",
+                    "text": "A would see a big figure in the form of a map as a central contribution of your work to explain the different bits.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_13",
+                    "text": "Still, I appreciate the effort to have a synthetic contribution!",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_14",
+                    "text": "Small remarks:\n - the abstract could be improved to provide an easier reading experience\n - first time IRL on p2 is mentioned, without a prior explanation of the acronym\n - the world is already optimised for human preferences: yes and no, this is one of your (strong?) assumptions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_15",
+                    "text": "The robot could well move the vase to a location which is acceptable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_16",
+                    "text": "Or put it back.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_17",
+                    "text": "- on p3, beg.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_18",
+                    "text": "of Section 3, explain the decomposition of r(s) = \\theta^{T}f(s).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_19",
+                    "text": "- in IRL paragraph: say the elements of \\tau_{i} are s.t.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_20",
+                    "text": "the transitions need be possible.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_21",
+                    "text": "- p8 'access to a simulator': what can be simulated if very little is know about the background, but via an initial state?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_2_s_22",
+                    "text": "- past point of the discussion: I simply don't get it!?!",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_3",
+            "type": "Human",
+            "liang_alpha_score": 0.2339,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_3_s_0",
+                    "text": "This work proposes a way to infer the implicit information in the initial state using IRL and combine the inferred reward with a specified reward to achieve better performance in a few simulated environments where the specified reward is not sufficient to solve the task.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_1",
+                    "text": "The main novelty of this work is to reformulate the Maximum Causal Entropy IRL objective using just the initial state as the end state of an expert trajectory to infer the underlying preference.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_2",
+                    "text": "Overall the proposed approach is impressive and the intuition behind the paper is novel and easy to understand.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_3",
+                    "text": "My main concerns are the following:\n- All the simulated experiments are able to demonstrate the effectiveness of the method, though they seem to be a bit too simplistic, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_4",
+                    "text": "known dynamics.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_5",
+                    "text": "As mentioned in Section 7, more real-environment experiments would make this method a lot stronger.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_6",
+                    "text": "- The way of choosing the distribution s_{-T} seems to require some sort of human preference, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_7",
+                    "text": "in the apple collection case,  s_{-T} has to be sampled from the distribution where there's no apple in the basket in order to make the algorithm to work.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_8",
+                    "text": "This assumption seems to make the implicit information of the initial state not so *implicit*.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_9",
+                    "text": "Besides, it's unclear how to choose the horizon T.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_3_s_10",
+                    "text": "It would be interesting to see how the value of T affects the performance.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_8bb69bee",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_8bb69bee",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_8bb69bee",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_8bb69bee",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "sec_0af8f39b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8bb69bee"
+        },
+        {
+            "source": "b_18b5cd0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_18b5cd0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_18b5cd0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_18b5cd0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "b_18b5cd0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_18b5cd0e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_0af8f39b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_18b5cd0e"
+        },
+        {
+            "source": "sec_0af8f39b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e528c0df"
+        },
+        {
+            "source": "sec_0af8f39b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8f0aec66"
+        },
+        {
+            "source": "b_92fc0049",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_92fc0049",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_0af8f39b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_92fc0049"
+        },
+        {
+            "source": "sec_0af8f39b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0ac6ec13"
+        },
+        {
+            "source": "b_cb2daeaa",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_0af8f39b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cb2daeaa"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_cc3687ae",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b28"
+        },
+        {
+            "source": "sec_4443c784",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cc3687ae"
+        },
+        {
+            "source": "b_62f38c5b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_62f38c5b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "sec_4443c784",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_62f38c5b"
+        },
+        {
+            "source": "b_e1a2188a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_e1a2188a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "b_e1a2188a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "sec_4443c784",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e1a2188a"
+        },
+        {
+            "source": "b_c80182bb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_c80182bb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_c80182bb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_c80182bb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_c80182bb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_4443c784",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c80182bb"
+        },
+        {
+            "source": "sec_f5a43802",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_77b3890a"
+        },
+        {
+            "source": "sec_f5a43802",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aab6431a"
+        },
+        {
+            "source": "sec_f5a43802",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7fc413db"
+        },
+        {
+            "source": "sec_f5a43802",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e67fb291"
+        },
+        {
+            "source": "sec_f5a43802",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_044becd0"
+        },
+        {
+            "source": "sec_f5a43802",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5e0efdc0"
+        },
+        {
+            "source": "sec_a0fe3ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_419c4b44"
+        },
+        {
+            "source": "sec_a0fe3ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5bcca437"
+        },
+        {
+            "source": "sec_a0fe3ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_816681e1"
+        },
+        {
+            "source": "sec_a0fe3ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5bcc6cce"
+        },
+        {
+            "source": "b_091a169e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_a0fe3ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_091a169e"
+        },
+        {
+            "source": "sec_a0fe3ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0b7bc270"
+        },
+        {
+            "source": "sec_a0fe3ce0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9ca21146"
+        },
+        {
+            "source": "sec_99258dcb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3dec97e7"
+        },
+        {
+            "source": "sec_99258dcb",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_05def770"
+        },
+        {
+            "source": "sec_107c961b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2da52439"
+        },
+        {
+            "source": "sec_107c961b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_343fde42"
+        },
+        {
+            "source": "b_96944156",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_107c961b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_96944156"
+        },
+        {
+            "source": "sec_af5d3b0c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b02a5637"
+        },
+        {
+            "source": "b_d3a119c2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_af5d3b0c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d3a119c2"
+        },
+        {
+            "source": "sec_af5d3b0c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_500b8e22"
+        },
+        {
+            "source": "sec_af5d3b0c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8f77db5c"
+        },
+        {
+            "source": "sec_af5d3b0c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7f381b3c"
+        },
+        {
+            "source": "sec_af5d3b0c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b6e7ac7b"
+        },
+        {
+            "source": "sec_af5d3b0c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3c2c2a97"
+        },
+        {
+            "source": "sec_af5d3b0c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36175dd9"
+        },
+        {
+            "source": "sec_fb65b7db",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bf0566d7"
+        },
+        {
+            "source": "sec_fb65b7db",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ad51886b"
+        },
+        {
+            "source": "sec_fb65b7db",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b3de47d3"
+        },
+        {
+            "source": "sec_fb65b7db",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a9bb39c1"
+        },
+        {
+            "source": "sec_fb65b7db",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4fd005ea"
+        },
+        {
+            "source": "sec_fb65b7db",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fff8057f"
+        },
+        {
+            "source": "sec_fb65b7db",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_97b740ed"
+        },
+        {
+            "source": "sec_65f13fd6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b4f24168"
+        },
+        {
+            "source": "sec_65f13fd6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f539f14b"
+        },
+        {
+            "source": "sec_65f13fd6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f056a8ff"
+        },
+        {
+            "source": "sec_ef6a53ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e02bd22b"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b7"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_245e3e76",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "sec_ef6a53ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_245e3e76"
+        },
+        {
+            "source": "sec_ef6a53ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8cd4a211"
+        },
+        {
+            "source": "b_dccd39f9",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_ef6a53ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dccd39f9"
+        },
+        {
+            "source": "sec_ef6a53ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3c3143a0"
+        },
+        {
+            "source": "sec_ef6a53ac",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_609d8e74"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b03ef167"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_14763d1d"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4e2d782f"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_13b7b684"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_75fa7a8b"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_86b7862e"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9171aa93"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_05b94ab8"
+        },
+        {
+            "source": "b_dd9aab2a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dd9aab2a"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_378d855d"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5749b7fa"
+        },
+        {
+            "source": "b_668e67f6",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_668e67f6"
+        },
+        {
+            "source": "sec_e4d5f04e",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_085c269f"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_00a9b7ac"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4a0ce5d8"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_81cef92c"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_258e37e0"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_691657fb"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9ca11a71"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7a122410"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_36432c77"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f23c4090"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_95107ed4"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2a9922e7"
+        },
+        {
+            "source": "sec_f8e3e451",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_82d9bee4"
+        },
+        {
+            "source": "b_c3a31ea2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_55996e87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c3a31ea2"
+        },
+        {
+            "source": "sec_55996e87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_133410c8"
+        },
+        {
+            "source": "sec_55996e87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ded75d8c"
+        },
+        {
+            "source": "sec_55996e87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_59618de9"
+        },
+        {
+            "source": "sec_55996e87",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3b95cb9e"
+        },
+        {
+            "source": "sec_cd22ab18",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6386a2c9"
+        },
+        {
+            "source": "sec_cd22ab18",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e3977b23"
+        },
+        {
+            "source": "sec_cd22ab18",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c629c543"
+        },
+        {
+            "source": "sec_cd22ab18",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3df41914"
+        },
+        {
+            "source": "sec_cd22ab18",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28783fa2"
+        }
+    ]
+}

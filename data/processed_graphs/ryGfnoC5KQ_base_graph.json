@@ -1,0 +1,1325 @@
+{
+    "paper_metadata": {
+        "paper_id": "ryGfnoC5KQ",
+        "source": "OpenReview_ICLR_2019",
+        "year": "2019",
+        "decision": "Unknown",
+        "total_reviews_available": 2
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_c5583b2a",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_1f648bf9",
+                        "type": "paragraph",
+                        "text": "Animals and humans excel at learning tasks that involve long-term temporal dependencies. A key challenge of learning such tasks is the problem of spatiotemporal credit assignment: the learner must find which of many past neural states is causally connected to the currently observed error, then allocate credit across neurons in the brain. When the time-dependencies between network states and errors are long, learning becomes difficult.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e6cba737",
+                        "type": "paragraph",
+                        "text": "In machine learning, the current standard for training recurrent architectures is Backpropagation Through Time (BPTT, Rumelhart et al. (1985) , Werbos (1990) ). BPTT assigns temporal credit or blame by unfolding a recurrent neural network in time up to a horizon length T , processing the input in a forward pass, and then backpropagating the error back in time in a backward pass (see Fig. 1a ).",
+                        "extracted_citations": [
+                            "Citation_b18"
+                        ]
+                    },
+                    {
+                        "block_id": "b_12a53463",
+                        "type": "paragraph",
+                        "text": "From a biological perspective, BPTT -like backpropagation in feedforward neural networks -is implausible for many reasons. For each weight update, BPTT requires using the transpose of the recurrent weights to transmit errors backwards in time and assign credit for how past activity affected present performance. Running the network with transposed weights requires that the network either has two-way synapses, or uses a symmetric copy of the feedforward weights to backpropagate error. In either case, the network must alternatingly gate its dynamical process to run forward or backward, and switch from nonlinear to linear dynamics, depending on whether activity or errors are being sent through the network.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a428031c",
+                        "type": "paragraph",
+                        "text": "From both biological and engineering perspectives, there is a heavy memory demand: the complete network states, going T timesteps back in time, must be stored. The time-complexity of computation of the gradient in BPTT scales like T , making each iteration slow when training tasks with long time scale dependencies. Although T should match the length of the task or the maximum temporal lag between network states and errors for unbiased gradient learning, in practice T is often truncated to mitigate these computational costs, introducing a bias.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_809aa6ec",
+                        "type": "paragraph",
+                        "text": "The present work is another step in the direction of providing heuristics and relaxed approximations to backpropagation-based gradient learning for recurrent networks. KeRNL confronts the problems of efficiency and biological plausibility. It replaces the lengthy, linearized backward-flowing backpropagation phase with a product of a forward-flowing temporal eligibility trace and a spatial sensitivity weight. Instead of storing all details of past states in memory, synapses integrate their past activity during the forward pass (see Fig. 1b ). The network does not have to recompute the entire gradient at each update, as the time-scales of the eligibility trace and the sensitivity weight are learned over time.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ca0aa433",
+                "title": "RELATED WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_78b6c9bf",
+                        "type": "paragraph",
+                        "text": "In recent years, much work has been devoted to implementing backpropagation algorithms in a more biologically plausible way, partly in the hope that more plausible implementations might also be simpler. The symmetry requirement between the forwards and backwards weights can be alleviated by using random return weights (Lillicrap et al. (2016) and N\u00f8kland (2016) ), however, learning still requires a separate backward pass through a network with linearized dynamics. Neurons may be able to extract error information in the time derivative of their firing rates using an STDP-like learning rule (Bengio et al. (2015) ), with error backpropagation computed as a relaxation to equilibrium (Scellier & Bengio (2017) ), at least for learning fixed points.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b10",
+                            "Citation_b0",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e8d6e0cf",
+                        "type": "paragraph",
+                        "text": "Other work has focused on replacing batch learning with online learning. Typically, BPTT is implemented in a setting where data is prepared into batches of fixed sequence length T and used to perform learning in a T -step unrolled graph; however, online learning, with a constant stream of data error signals, is a more natural description of how the world supplies a learning system with data. BPTT without truncation struggles with online learning, as it must repeatedly backpropagate the error all the way through a continuously expanding graph. Since computation of the unbiased gradient scales with the length of the graph, gradient computation increases linearly with time. For a task with T timesteps, the total computation of the gradients scales like T 2 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_79ed6215",
+                        "type": "paragraph",
+                        "text": "Real Time Recurrent Learning (RTRL, Williams & Zipser (1989) ) and Unbiased Online Gradient Optimization (UORO, Tallec & Ollivier (2017) , Ollivier et al. (2015) ) deal with this issue by keeping track of how the synaptic weights affect the hidden state in a feedforward way. Decoupled Neural Interfaces (DNI Jaderberg et al. (2016) ) estimates the truncated part of the gradient by continually predicting the future loss with respect to the hidden state.",
+                        "extracted_citations": [
+                            "Citation_b15",
+                            "Citation_b11",
+                            "Citation_b6"
+                        ]
+                    },
+                    {
+                        "block_id": "b_6ff9e10f",
+                        "type": "paragraph",
+                        "text": "KeRNL offers this same advantage, in addition to other benefits. RTRL requires that the network keep track of an unwieldy rank-3 tensor, which could not be stored by any known biological entities. UORO factorizes this into rank-2 objects but still requires non-local computations like vector norm operations. Finally, DNI requires an entire separate network to keep track of the synthetic gradient. KeRNL is distinguished by its simplicity, requiring only rank-2 tensors. All computations are local, and synapses need to integrate over only a few relevant quantities.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_643d13e0",
+                "title": "THE LEARNING RULE",
+                "blocks": [
+                    {
+                        "block_id": "b_a65bdd33",
+                        "type": "paragraph",
+                        "text": "Consider a single-layer RNN in discrete time (indexed by t) with readout, input, and hidden layer activations given by y t , x t , and h t , respectively (boldface represents vectors, with vector entries denoting the activity of individual units). The dynamics of the recurrently connected hidden units are given by:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6a57a683",
+                        "type": "paragraph",
+                        "text": "where W rec , W in are the recurrent and input weights, b are the hidden biases, \u03c3 is a general pointwise non-linearity, and g t represents the summed inputs (pre-nonlinearity) to the neurons at time t. The readout is given by y",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e258b867",
+                        "type": "paragraph",
+                        "text": "where \u0177T is the target output, in the case where error feedback is received at the end of an episode of length T , and C = T t=0 C t when errors C t = C({(x 0 , y 0 ), \u2022 \u2022 \u2022 (x t , y t ), \u0177t }) are received continuously over the episode. The parameters W in , W rec , W out , b, b out are trainable.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_7f06a269",
+                        "type": "paragraph",
+                        "text": "Assuming the readout weights and biases (W out , b out ) are trained in the usual way, the KeRNL update rule for the RNN weights W = {W in , W rec } is simply:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c0a31566",
+                        "type": "paragraph",
+                        "text": "is the gradient of the cost with respect to the current hidden state, \u03b2 ij is a set of learned sensitivity weights, and",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_af52c8ba",
+                        "type": "paragraph",
+                        "text": "is a local eligibility trace (Williams (1992)) consisting of a temporally filtered version of the product of presynaptic activation and a postsynaptic activity factor. The temporal filter or kernel, K, in the eligibility has learnable time-scales; in this manuscript we use the simplest version of a lowpass temporal filter, a decaying exponential with a single time-constant \u03b3 j per neuron: K(\u03c4, \u03b3 j ) = exp(-\u03b3 j \u03c4 ), though one can imagine many other function choices with multiple timescales. The role of the eligibility is to specify how strongly a synapse W jk should be held responsible for any errors in neuron j at the present time, on the basis on how far in the past the presynaptic neuron k was active. Here",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_93b34293",
+                        "type": "paragraph",
+                        "text": "} stands in for the activation of the neuron presynaptic to the synapse being updated. 1 . Since the eligibility trace can be computed during the forward pass, KeRNL does not require backpropagating the error through time. Furthermore, KeRNL only uses at most rank-2 tensors, so neurons and synapses could plausibly do all of the required computation. The contrast between BPTT and KeRNL is depicted in Fig. 1a, b . KeRNL emerges from the following Ansatz:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f3cc41c2",
+                        "type": "paragraph",
+                        "text": "We call \u2202h t i /\u2202h t-\u03c4 j , a key term in the computation of the gradient, the sensitivity tensor in an extension of the usage in Fiete & Seung (2006) ). This sensitivity describes how the activity of neuron j at a previous time t -\u03c4 affects the activity of neuron i at the current time t. While the true sensitivity is a 4-index tensor summarizing many interactions based on the many paths through which activity propagates forward in a recurrent network, we approximate it with a product of a (learnable) rank-2 sensitivity weight matrix \u03b2 and a temporal kernel K with (learnable) inversetime coefficients \u03b3. The sensitivity weights \u03b2 ij describe how strongly neuron j affects neuron i on average, while the temporal kernel describes how far into the future the activity of a neuron affects the other neurons for learning. We describe how to learn these parameters (\u03b2, \u03b3) in the next section.",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b70fb987",
+                        "type": "paragraph",
+                        "text": "We arrive at KeRNL by using our Ansatz for the sensitivity (4) in the computation of a gradientbased weight update, instead of using the true sensitivity. First, we write down the full gradient rule for a recurrent network. If the parameters W ij are treated as functions that can vary over time during a trial, then the derivative can be written as a functional derivative:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_11529a93",
+                        "type": "paragraph",
+                        "text": "This is simply mathematical notation for the \"unfolding-in-time\" trick, in which the network and weights are assumed to be replicated for each time-step of the dynamics of a recurrent network, and separate gradients are computed for each time-replica of the weights; the actual weight updates are simply the average of the separate weight variations for each time-replica. We next apply the sensitivity lemma Fiete & Seung (2006) to express gradients with respect to weights as gradients with respect to input activations, times the presynaptic activity: \u03b4C \u03b4W jk (t) = \u03b4C \u03b4gj (t) s k (t). Thus,",
+                        "extracted_citations": [
+                            "Citation_b1"
+                        ]
+                    },
+                    {
+                        "block_id": "b_a4c2ecf8",
+                        "type": "paragraph",
+                        "text": "By replacing the sensitivity \u03b4h i (t)/\u03b4h j (t -\u03c4 ) with our Ansatz (4), we arrive at our learning rule, KeRNL(2).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_0e3c13e8",
+                        "type": "paragraph",
+                        "text": "The time-dependent part of the computation-a leaky integral of the product of the presynaptic activity multiplied by the instantaneous change in the postsynaptic activity-can be computed during the forwards pass, without any backpropagation of activity or error signals.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c35b8af6",
+                "title": "LEARNING THE SENSITIVITY WEIGHTS AND INVERSE-TIMESCALES",
+                "blocks": [
+                    {
+                        "block_id": "b_84288a25",
+                        "type": "paragraph",
+                        "text": "For our Ansatz to align as well as possible with the gradient, we allow the sensitivity weights \u03b2 and inverse-timescales \u03b3 to be learned. We learn these parameters by tracking the effect of small i.i.d. hidden perturbations \u03be during the forward pass. In order to do so our hidden neurons must store two values, the true hidden state h, and a perturbed hidden state h, which is generated by applying noise to the neurons during the forward pass:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f36dc178",
+                        "type": "paragraph",
+                        "text": "The effect of previous noise on the current hidden state can be computed using the sensitivity",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2fecc15b",
+                        "type": "paragraph",
+                        "text": "We train \u03b3, \u03b2 to predict the network's response to these noisy perturbations. We take gradients with respect to the objective function.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_417c61a9",
+                        "type": "paragraph",
+                        "text": "which we have generated by substituting our Ansatz (4) into (9). 2",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c0a3b39d",
+                        "type": "paragraph",
+                        "text": "Taking gradients with respect to this objective function gives us the following update rule for the sensitivity weights and inverse-timescales.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8b94e4f9",
+                        "type": "paragraph",
+                        "text": "represents the error in reconstructing the effect of the perturbation via the sensitivity weights and \u2126 t j (\u03be) \u2261 \u03c4 exp(-\u03b3 j \u03c4 )\u03be t-\u03c4 j and \u0393 t j (\u03be) \u2261 d\u2126 t j d\u03b3j = \u03c4 \u03c4 exp(-\u03b3 j \u03c4 )\u03be t-\u03c4 j are integrals that neuron h j performs over the applied perturbation \u03be. In our implementation, we update these parameters immediately before we compute the gradient using (2). The full update rule is described in the pseudocode table.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5c5410a2",
+                        "type": "paragraph",
+                        "text": "2 If we don't care about the size of the gradients and only the direction, we can use the cost function",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_94be3ab2",
+                        "type": "paragraph",
+                        "text": ". This cost function trains the parameters to predict the correct direction of the perturbed hidden state minus the hidden state and works for algorithms where the gradient is divided by a running average of its magnitude (RMSProp, Adam).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_09a2a0a1",
+                        "type": "paragraph",
+                        "text": "Algorithm 1 Pseudocode table describing the implementation of Online-KeRNL on an RNN. For Batched-KeRNL we only update parameters when t = T while t \u2264 T do",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_1500e85f",
+                "title": "EMPIRICAL RESULTS",
+                "blocks": [
+                    {
+                        "block_id": "b_efc1d967",
+                        "type": "paragraph",
+                        "text": "We test KeRNL on several benchmark tasks that require memory and computation over time, showing that it is competitive with BPTT across these tasks. We implemented batch learning with KeRNL and BPTT on two tasks: the adding problem ( Hochreiter & Schmidhuber (1997) ; Hochreiter et al. (2001) ) and pixel-by-pixel MNIST (LeCun et al. (1998) ). We implemented an online version of KeRNL with an LSTM network on the A n , B n task (Gruslys et al. (2016) ) to compare with results from the UORO algorithm (Tallec & Ollivier (2017) ). 3 The tuned hyperparameters for BPTT and KeRNL were the learning rate, \u03b7, and the gradient clipping parameter, gc (Pascanu et al. (2013) ). For KeRNL, we additionally permitted a shared learning rate parameter for the sensitivity weights and kernels, \u03b7 m . In practice, the same hyperparameter settings \u03b7, gc tended to work well for both BPTT and KeRNL. The additional hyperparameter for KeRNL, \u03b7 m , did not need to be find tuned, and often worked well across a broad range (across several orders of magnitude, so long as it not too small but smaller than \u03b7).",
+                        "extracted_citations": [
+                            "Citation_b4",
+                            "Citation_b5",
+                            "Citation_b3",
+                            "Citation_b15",
+                            "Citation_b12"
+                        ]
+                    },
+                    {
+                        "block_id": "b_33ce0ea8",
+                        "type": "paragraph",
+                        "text": "We implemented both the RMSprop (Tieleman & Hinton (2012) ) and Adam (Kingma & Ba (2014)) optimizers and reported the best result.",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_06a28a36",
+                "title": "ADDING PROBLEM",
+                "blocks": [
+                    {
+                        "block_id": "b_63ec24bb",
+                        "type": "paragraph",
+                        "text": "In the adding problem, the network receives two input streams, one a sequence of random numbers in [0, 1], and the second a mask vector of zeros, with two entries set randomly to one in each trial. The network's task is to sum the input from the first stream whenever there is a non-zero entry in the second. This task requires remembering sparse pieces of information over long time scales and ignoring long sequences of noise, which is difficult for RNNs when the sequences are long.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1bd085ef",
+                        "type": "paragraph",
+                        "text": "We tested the performance of two networks on a variety of sequence lengths, up to 400, using both BPTT and KeRNL, Table 2 . The networks were an IRNN, which is an RNN with a ReLU non-linearity where the recurrent weight matrix is initialized to identity, and a RNN with tanh nonlinearity. The implementation details are described in Appendix A.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fe01b2eb",
+                        "type": "paragraph",
+                        "text": "Untruncated BPTT applied to an IRNN performed very well on this task, but less so on the RNN with tanh nonlinearity. KeRNL was somewhat unstable on the IRNN, but it outperformed BPTT with the tanh nonlinearity (Fig. 2 ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_acaa4dbd",
+                        "type": "paragraph",
+                        "text": "We believe that KeRNL outperforms BPTT on the tanh nonlinearity because our Ansatz allows the sensitivity 2016 )), as schematized in Fig. 1c .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_40aad3ea",
+                        "type": "paragraph",
+                        "text": "To investigate the importance of learning the kernel timescales, we implemented KeRNL without training the sensitivity weights (\u03b2) or the inverse timescales (\u03b3). When these parameters are not learned, KeRNL is still able to perform the task for the shorter 200-length sequence (Table 2 ) implying that a feedback-alignment-like mechanism (Lillicrap et al. (2016) , N\u00f8kland (2016) ) may be enabling learning even when the error signals are not delivered along the instantaneous gradients.",
+                        "extracted_citations": [
+                            "Citation_b9",
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b67243ab",
+                        "type": "paragraph",
+                        "text": "For longer sequences, however, learning the sensitivity and timescale parameters is important. Surprisingly, learning the inverse timescales is even more important than learning the sensitivity weights. We hypothesize that as long as the timescales over which error is correlated with outcome are appropriate, sensitivity weights are relatively less important because of feedback-alignment-like mechanisms. We show an example of how the timescales may change in Fig. 3 .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_aa46d9df",
+                "title": "PIXEL-BY-PIXEL MNIST",
+                "blocks": [
+                    {
+                        "block_id": "b_fa0c9ece",
+                        "type": "paragraph",
+                        "text": "Our second task is pixel-by-pixel MNIST (LeCun, 1998) . Here the RNN is given a stream of pixels left-to-right, top-to-bottom for a given handwritten digit from the MNIST data set. At the end of the sequence, the network is tasked with identifying the digit it was shown. This problem is difficult, as the RNN must remember an long sequence of 784 singly-presented pixels. We tuned over the same hyperparameters as in the adding problem, looking at performance after 100, 000 minibatches. Neither KeRNL nor BPTT worked well with a tanh nonlinearity, but both performed relatively well on an IRNN, Fig. 3 . KeRNL preferred a slightly lower learning rate \u03b7 than BPTT.",
+                        "extracted_citations": [
+                            "Citation_b8"
+                        ]
+                    },
+                    {
+                        "block_id": "b_59090cff",
+                        "type": "paragraph",
+                        "text": "Learning Rule Algorithm \u03b7 gc \u03b7 m BPTT RMSProp 10 -5 100.0 -KeRNL RMSProp 10 -6 100.0 10 -8",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_995d26d3",
+                        "type": "paragraph",
+                        "text": "Table 3 : Hyperparameters for pixel-by-pixel MNIST.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4a34a3c8",
+                        "type": "paragraph",
+                        "text": "While the KeRNL algorithm is able to learn almost as quickly on pixel-by-pixel MNIST, it does not reach as high an asymptotic performance. Still, it performs reasonably well relative to BPTT on the task.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fc6f8371",
+                "title": "ONLINE KERNL",
+                "blocks": [
+                    {
+                        "block_id": "b_1d83ec8f",
+                        "type": "paragraph",
+                        "text": "While KeRNL is comparable in speed to BPTT for batch learning, we expect it to be significantly faster for online learning when the time-dependencies are of length T . Untruncated BPTT requires information sent back T steps in time for each weight update, thus the wallclock speed of computation of the gradients at each weight update in online learning scales as T , and the total scaling is thus of order T 2 . If BPTT updates are truncated S < T steps back in time, the scaling is ST . KeRNL requires no backward unrolling in time, thus online KeRNL requires only O(1) time per weight update, for a total scaling of T . As a result, optimized-speed online-KeRNL should run faster than truncated online BPTT by a factor T when the trunctation time is similar to the total time-dependencies in the problem.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_e14c8d36",
+                        "type": "paragraph",
+                        "text": "We tested the performance of online KeRNL against UORO, another online learning algorithm, and online BPTT on the A n , B n task, where the network must predict the next character in a stream of letters. Each stream consists first of a sequence of n As followed by a sequence of n Bs. The length, n, of the sequences is randomly generated in some range. The network cannot solve this task perfectly, as it can not predict the number of As before it has seen the sequence, but can do well by matching the number of Bs to the number of As. We generated n \u2208 {1, 32}. The minimum achievable average bit-loss for this task is 0.14.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_1f9678bc",
+                        "type": "paragraph",
+                        "text": "To compare with results in the literature, we implemented KeRNL in an LSTM layer, with h representing a concatenation of the hidden and cell states (Details in Appendix B). Instead of optimizing common hyperparameters, we simply used the values from Tallec & Ollivier (2017) , which included decaying the learning rate in time as \u03b7 t = \u03b7/(1 + \u03b1 \u221a t). However, we varied the learning rate \u03b7 m , with",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_30868204",
+                        "type": "paragraph",
+                        "text": "Results other than those for KeRNL are from Tallec & Ollivier (2017) . With very little hyperparameter tuning, online KeRNL is able to do very well on the A n , B n task, coming close to the minimum Published as a conference paper at ICLR 2019 Algorithm-Optimizer \u03b7 \u03b7 m \u03b1 KeRNL-Adam 10 -3 10 -2 0.03  To test how computation time for truncated-BPTT and KeRNL compare in the online setting, we implemented a dummy RNN, where the required tensor operations were performed using a random vector for both the input data and the error signal (",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2356bf00",
+                "title": "CONCLUSIONS, DISCUSSION & FUTURE WORK",
+                "blocks": [
+                    {
+                        "block_id": "b_45278247",
+                        "type": "paragraph",
+                        "text": "In this paper we show that KeRNL, a reduced-rank and forward-running approximation to backpropagation in RNNs, is able to perform roughly comparably to BPTT on a range of hard RNN tasks with long time-dependencies. One may view KeRNL as imposing a strong prior on the way in which neural activity from the past should be assigned credit for current performance, through the choice of the temporal kernels K in the eligibility trace, and the choice of the sensitivity weights \u03b2. This product of two rank-2 tensors in KeRNL (replacing the rank-4 sensitivity tensor for backpropagation in RNNs), assumes that the strength of influence of a neuron on another at fixed time-delay can be summarized by a simple sensitivity weight matrix, \u03b2 ki , 4 , and a decay due to the time difference given by K. This strong simplifying assumption is augmented or mitigated by the ability to (meta)learn the parameters of the sensitivity weights and kernels in the eligibility trace, giving the rule simultaneous simplicity and flexibility. The form of the KeRNL ansatz or prior, if wellsuited to learning problems in recurrent networks, serves as a regularizer on the types of solutions the network can find, and could even, for good choices of kernel K, provide better solutions than BPTT. We present limited evidence that KeRNL may combat the vanishing gradient problem with tanh units by imposing a prior of long time-dependencies through the eligibility. Finally, we show that KeRNL can be implemented online, where it has a shorter computation cycle than BPTT.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c538458b",
+                        "type": "paragraph",
+                        "text": "KeRNL is a step toward biologically plausible learning. It eschews the segmented two phase backpropagation algorithm for a computation that is largely feedforward. It does not require the segmentation and storage of all past states, instead using an integrated activity or eligibility trace, and it gives rise to a naturally asymmetric structure that is more similar to the brain.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b31581e2",
+                        "type": "paragraph",
+                        "text": "While we show empirically that KeRNL performs hill-climbing, there is no guarantee that the gradients computed by KeRNL are unbiased. In the future, we hope to show empirically that KeRNL is able to perform well on more realistic tasks, and obtain some analytical guarantees on the performance of KeRNL. We hope the present contribution inspires more work on training RNNs with shorter, more plausible feedback paths. More generally, we hope that the present work shows how, with the use of reduced-rank tensor products and eligibility traces, to construct entire nested families of relaxed approximations to gradient learning in RNNs.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2c353e7f",
+                "title": "A IMPLEMENTATION DETAILS",
+                "blocks": [
+                    {
+                        "block_id": "b_b15a1ed0",
+                        "type": "paragraph",
+                        "text": "For the adding problem and pixel-by-pixel MNIST, we tested performance by varying \u03b7 and gc over several orders of magnitude: \u03b7 = {1e -03, 1e -04, 1e -05, 1e -06, 1e -07}, gc = {1, 10, 100}, using both Adam (Kingma & Ba (2014)) and RMSProp (Tieleman & Hinton (2012) ). We then varied \u03b7m = {1e -03, 1e -04, 1e -05, 1e -06, 1e -07} on KeRNL. We found that KeRNL was relatively robust across \u03b7m. For all sequence lengths, we used the hyperparameters that performed best on the task with sequence length 400.",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_741e6f5b",
+                        "type": "paragraph",
+                        "text": "Besides the recurrent weights of the IRNN, all other weight matrices were initialized using Xavier initialization (Glorot & Bengio (2010) ). We initialized \u03b2 with Xavier initialization for the tanh RNN, and to the identity for the IRNN. This choice was motivated by the initial sensitivity of the IRNN (",
+                        "extracted_citations": [
+                            "Citation_b2"
+                        ]
+                    },
+                    {
+                        "block_id": "b_96bb20f5",
+                        "type": "paragraph",
+                        "text": "For the kernels, we initialized \u03b3j = ( 1 sequence length ) n j where the nj \u223c U ([0, 2]) are sampled uniformly and independently. Finally we used the alternative cost function described in footnote 2. We trained on both of these tasks using the Python numpy (Walt et al. ( 2011 )) package.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_61152b77",
+                        "type": "paragraph",
+                        "text": "For the dummy RNN, we used the Python numpy package (Walt et al. (2011) ) to perform matrix algebra on a RNN with 100 hidden nodes, 100 input nodes and a tanh nonlinearity. We called \"matmul\" for matrix multiplication and \"einsum\" for other tensor operations. We used the \"tanh\" and \"cosh\" functions to compute the nonlinearity and its derivatives.",
+                        "extracted_citations": [
+                            "Citation_b17"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_20b94111",
+                "title": "B KERNL FOR LSTM NETWORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_bd75fdaf",
+                        "type": "paragraph",
+                        "text": "In this section we describe how to implement KeRNL on an LSTM Hochreiter & Schmidhuber (1997) in more detail. The dynamics of the LSTM (without peepholes) are as follows",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a67c83ed",
+                        "type": "paragraph",
+                        "text": "where h t is the hidden state, c t is the cell state and i t , f t , g t , o t are the input, forget, cell and output gates respectively. In order to implement KeRNL we consider the total hidden state H = {h, c} to be a concatenation of the hidden and cell states. This a suitable choice, as the next total hidden state can be fully determined by the current total hidden state and the parameters of the network. We let the first n indices of H be the hidden state and the next n be the cell state. Derivatives with respect to the cost function are given by",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_32ab9190",
+                        "type": "paragraph",
+                        "text": "where \u03b8 stands in for the twelve trainable weights and biases. Our sensitivity Ansatz is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5f5f9439",
+                        "type": "paragraph",
+                        "text": "\u03b2ij exp(-\u03b3j\u03c4 ). The input terms are now partial derivatives of this total hidden state with respect to the input parameters. As an example",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_73c0450f",
+                        "type": "paragraph",
+                        "text": "where \u2202h t j \u2202W f i = 0 since the hidden state only depends on these parameters through the cell state. As earlier, we train our input weights and kernels by tracking the effect of applying perturbations during the forward pass. Our sensitivity weights \u03b2 are a 2 x 2 array of matrices linking the cell and hidden states of the past to the current cell and hidden states. Since readout occurs from the hidden state, \u2202C \u2202c t i = 0, and we only need to consider \u2202h t i \u2202c t-\u03c4 j = \u03b2 hc ij exp(-\u03b3 c j \u03c4 ) and \u2202h t i \u2202h t-\u03c4 j = \u03b2 hh ij exp(-\u03b3 h j \u03c4 ). The sensitivity weights \u03b2 hc , \u03b2 hh and time scales \u03b3 c , \u03b3 h can be learned as in the case of the simple recurrent network by applying perturbations \u03be h,t , \u03be c,t to hidden and cell state and minimizing the cost function: C \u03b2,\u03b3 = i ( ht i -h t i\u03c4,j \u03b2 hc ij exp(-\u03b3 c j \u03c4 )\u03be c,t-\u03c4 j \u03c4,j \u03b2 hh ij exp(-\u03b3 h j \u03c4 )\u03be h,t-\u03c4 j ) 2 . Our example gradient with respect to the input weights of the input gate is given by dC dW where net t j represents the presynaptic input to f t j . The other gradients can be calculated in an analogous manner.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_995db151",
+                "title": "C KERNL ON PENNTREEBANK",
+                "blocks": [
+                    {
+                        "block_id": "b_259b9d41",
+                        "type": "paragraph",
+                        "text": "In the interest of full disclosure, we note that KeRNL did not perform well on next word prediction on the Pen-nTreebank dataset. We tested an LSTM network across a wide variety of learning rates and gradient clippings and were not able to achieve near state of the art performance using KeRNL.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Stdp as presynaptic activity times rate of change of postsynaptic activity Yoshua Bengio Thomas Mesnard Asja Fischer Saizheng Zhang Yuhuai Wu arXiv:1509.05936 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Gradient learning in spiking neural networks by dynamic perturbation of conductances R Ila H Fiete Seung Sebastian Physical review letters 97 4 48104 2006",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Understanding the difficulty of training deep feedforward neural networks Xavier Glorot Yoshua Bengio Proceedings of the thirteenth international conference on artificial intelligence and statistics the thirteenth international conference on artificial intelligence and statistics 2010",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Memory-efficient backpropagation through time Audrunas Gruslys R\u00e9mi Munos Ivo Danihelka Marc Lanctot Alex Graves Advances in Neural Information Processing Systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Long short-term memory Sepp Hochreiter J\u00fcrgen Schmidhuber Neural computation 9 8 1997",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Gradient flow in recurrent nets: the difficulty of learning long-term dependencies Sepp Hochreiter Yoshua Bengio Paolo Frasconi J\u00fcrgen Schmidhuber 2001",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Max Jaderberg Wojciech Marian Czarnecki Simon Osindero Oriol Vinyals Alex Graves David Silver Koray Kavukcuoglu arXiv:1608.05343 Decoupled neural interfaces using synthetic gradients 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "P Diederik Jimmy Kingma Ba arXiv:1412.6980 Adam: A method for stochastic optimization 2014 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Gradient-based learning applied to document recognition Yann Lecun L\u00e9on Bottou Yoshua Bengio Patrick Haffner Proceedings of the IEEE 86 11 1998",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Random synaptic feedback weights support error backpropagation for deep learning Daniel Timothy P Lillicrap Douglas B Cownden Colin J Tweed Akerman Nature communications 7 13276 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Direct feedback alignment provides learning in deep neural networks Arild N\u00f8kland Advances in neural information processing systems 2016",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Training recurrent networks online without backtracking Yann Ollivier Corentin Tallec Guillaume Charpiat arXiv:1507.07680 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "On the difficulty of training recurrent neural networks Razvan Pascanu Tomas Mikolov Yoshua Bengio International Conference on Machine Learning 2013",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "Learning internal representations by error propagation Geoffrey E David E Rumelhart Ronald J Hinton Williams 1985 California Univ San Diego La Jolla Inst for Cognitive Science Technical report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Equilibrium propagation: Bridging the gap between energy-based models and backpropagation Benjamin Scellier Yoshua Bengio Frontiers in computational neuroscience 11 24 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Unbiased online recurrent optimization Corentin Tallec Yann Ollivier arXiv:1702.05043 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Lecture 6.5-rmsprop: Divide the gradient by a running average of its recent magnitude Tijmen Tieleman Geoffrey Hinton 2012 4 COURSERA: Neural networks for machine learning",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "The numpy array: a structure for efficient numerical computation Chris St\u00e9fan Van Der Walt Gael Colbert Varoquaux Computing in Science & Engineering 13 2 2011",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Backpropagation through time: what it does and how to do it Werbos Paul Proceedings of the IEEE 78 10 1990",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Simple statistical gradient-following algorithms for connectionist reinforcement learning Williams Ronald Machine learning 8 3-4 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "A learning algorithm for continually running fully recurrent neural networks J Ronald David Williams Zipser Neural computation 1 2 1989",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "The proposed kernel recurrent learning (KeRL) provides an alternative way to train recurrent neural network with backpropagation through time (BPTT) where the propagation of gradients can be skipped over different layers.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The authors directly assume the sensitivity function between two layers with a distance of tau in a form of Eq.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "The algorithm of BPTT is then approximated due to this assumption.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "The model parameters are changed to learn the network dynamics.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "The optimization problem turns out to estimate beta and gamma of the kernel function.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "The learned parameters are intuitive.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "There are a set of timescales to describe the memory of each neuron and a set of sensitivity weights to describe how strongly the neurons interact on average.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "The purpose of this study is to save the memory cost and to reduce the time complexity for online learning with comparable performance.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "KeRL only needs to compute a few tensor operations at each time step, so online KeRL learns faster than online BPTT for the case with a reasonably long truncation length.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Biologically plausible statements are addressed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "A prior is imposed for the temporal sensitivity kernel.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "The issue of gradient vanishing is mitigated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "Theoretical illustration for KeRL in Sections 3 and 4 is clear and interesting.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "The proposed method is an approximation to BPTT training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_14",
+                    "text": "Suppose the system performance is constrained.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_15",
+                    "text": "Some guesses are made.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_16",
+                    "text": "The system performance can be further improved.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_17",
+                    "text": "The experiment on time cost due to online learning is required so that the reduction of time complexity can be illustrated.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_18",
+                    "text": "The format of tables 1 and 2 can be improved.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_19",
+                    "text": "Caption is required in Table 1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_20",
+                    "text": "Overlarge size of Table 2 can be fixed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_21",
+                    "text": "A number of assumptions in Sections 3 and 4 are assumed.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_22",
+                    "text": "When addressing Section 3, some assumptions in Section 4 are used.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_23",
+                    "text": "The organization of Sections 3 and 4 can be improved.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.6129,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "This paper proposes a simple method for performing temporal credit assignment in RNN training.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "While it seems somewhat naive and unlikely to work (in my opinion), the experimental results surprisingly show reasonable performance on several reasonably challenging artificial tasks.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "The core of the approach is based on equation 7, which approximates the Jacobian between different hidden states at different time-steps as a single adaptively-learned matrix times a decay factor that depends on the time gap.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "While this seems like a very severe approximation to make the authors speculate that some kind of feedback alignment-like mechanism might be at play.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "The presentation needs work in several areas, and the experimental results require more explanation, but otherwise this seems like a solid paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "I would probably increase my rating if the authors could address my issues satisfactorily.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "See below for more detailed comments:\n\nAbstract & Section 1: \n\nIs \"sensitivity tensor\" or \"credit assignment tensor\" common term?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "Because I've never heard them before.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "Consider defining them before you discuss it, and using consistent jargon.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "Later in Section 2 you seem to call this the \"RTRL tensor\" (whose meaning I can infer).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Section 2:\n\nGradient vanishing isn't so much a problem in itself, but a symptom that the sensitivity of the network's output to the action of some neuron in the past is very low.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "Ths gradient is just relaying this information, so I don't really see vanishing gradients as the problem to overcome, but rather low sensitivity on past activations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "Section 3: \n\nDid you mean to write (W^out h^t + b^out) instead of (W^out h + b^out)^t ?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "\"[equation] represents the gradient of the cost with respect to the current hidden state\".",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "The RHS of this equation makes no sense to me.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "Not only does this not depend on the nonlinearity in any way, it doesn't include any consideration of future outputs on which the current h surely depends.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "It would make the paper much more pleasant to read if you gave your derivation of the learning rule before you stated it in gory detail.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "It feels almost completely arbitrary reading it first without any justification.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "This might be fine if it were compact and elegant, but it's not.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "Consider using exp(x) instead of e^x since the symbol e already means something else in your notation.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "Section 4:\n\nPlease define \"temporal variation\"\n\n\nSection 5:\n\nYou should elaborate on the experimental setup you used.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_21",
+                    "text": "Especially for the Addition and MNIST problems.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_22",
+                    "text": "For example, what consistutes a \"step\" in figure 2?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_23",
+                    "text": "Does KeRL take \"one\" step per time-step?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_24",
+                    "text": "Or does \"step\" mean a complete gradient computation from running from t = 1 to t= T?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_25",
+                    "text": "Is the BPTT truncated?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_26",
+                    "text": "Are you counting one step of BPTT to be one complete forwards and backwards pass?",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_27",
+                    "text": "You should include some basic description of what an IRNN is.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_28",
+                    "text": "When you say that for MNIST that KeRL \"does not converge to as good of an optimum\" this seems like unjustified inference.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_29",
+                    "text": "You don't really know that it is converging to a minimum of the original objective at all.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_30",
+                    "text": "It could be converging to the minimum of some other objective it is implicitly optimizing due to your approximations (if one even exists).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_31",
+                    "text": "Or it could be simply cycling around and failing to converge.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_32",
+                    "text": "The fact that the loss plateaus isn't direct evidence of convergence in any sense.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_33",
+                    "text": "If you wanted to measure this more directly you could look at the (true) gradient magnitude.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_34",
+                    "text": "\"only requires a few tensor operations at each time step\" -> this is also true of UORO",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "sec_c5583b2a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1f648bf9"
+        },
+        {
+            "source": "b_e6cba737",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b18"
+        },
+        {
+            "source": "sec_c5583b2a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e6cba737"
+        },
+        {
+            "source": "sec_c5583b2a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_12a53463"
+        },
+        {
+            "source": "sec_c5583b2a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a428031c"
+        },
+        {
+            "source": "sec_c5583b2a",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_809aa6ec"
+        },
+        {
+            "source": "b_78b6c9bf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_78b6c9bf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "b_78b6c9bf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_78b6c9bf",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_ca0aa433",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_78b6c9bf"
+        },
+        {
+            "source": "sec_ca0aa433",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e8d6e0cf"
+        },
+        {
+            "source": "b_79ed6215",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_79ed6215",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b11"
+        },
+        {
+            "source": "b_79ed6215",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "sec_ca0aa433",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_79ed6215"
+        },
+        {
+            "source": "sec_ca0aa433",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6ff9e10f"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a65bdd33"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6a57a683"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e258b867"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7f06a269"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c0a31566"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_af52c8ba"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_93b34293"
+        },
+        {
+            "source": "b_f3cc41c2",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f3cc41c2"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b70fb987"
+        },
+        {
+            "source": "b_11529a93",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_11529a93"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a4c2ecf8"
+        },
+        {
+            "source": "sec_643d13e0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_0e3c13e8"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_84288a25"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f36dc178"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2fecc15b"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_417c61a9"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c0a3b39d"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8b94e4f9"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5c5410a2"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_94be3ab2"
+        },
+        {
+            "source": "sec_c35b8af6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09a2a0a1"
+        },
+        {
+            "source": "b_efc1d967",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b4"
+        },
+        {
+            "source": "b_efc1d967",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_efc1d967",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_efc1d967",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "b_efc1d967",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b12"
+        },
+        {
+            "source": "sec_1500e85f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_efc1d967"
+        },
+        {
+            "source": "b_33ce0ea8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_1500e85f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_33ce0ea8"
+        },
+        {
+            "source": "sec_06a28a36",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_63ec24bb"
+        },
+        {
+            "source": "sec_06a28a36",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1bd085ef"
+        },
+        {
+            "source": "sec_06a28a36",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fe01b2eb"
+        },
+        {
+            "source": "sec_06a28a36",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_acaa4dbd"
+        },
+        {
+            "source": "b_40aad3ea",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "b_40aad3ea",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_06a28a36",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_40aad3ea"
+        },
+        {
+            "source": "sec_06a28a36",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b67243ab"
+        },
+        {
+            "source": "b_fa0c9ece",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b8"
+        },
+        {
+            "source": "sec_aa46d9df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fa0c9ece"
+        },
+        {
+            "source": "sec_aa46d9df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_59090cff"
+        },
+        {
+            "source": "sec_aa46d9df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_995d26d3"
+        },
+        {
+            "source": "sec_aa46d9df",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4a34a3c8"
+        },
+        {
+            "source": "sec_fc6f8371",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1d83ec8f"
+        },
+        {
+            "source": "sec_fc6f8371",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e14c8d36"
+        },
+        {
+            "source": "b_1f9678bc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_fc6f8371",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1f9678bc"
+        },
+        {
+            "source": "b_30868204",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_fc6f8371",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_30868204"
+        },
+        {
+            "source": "sec_2356bf00",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_45278247"
+        },
+        {
+            "source": "sec_2356bf00",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c538458b"
+        },
+        {
+            "source": "sec_2356bf00",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b31581e2"
+        },
+        {
+            "source": "b_b15a1ed0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_2c353e7f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b15a1ed0"
+        },
+        {
+            "source": "b_741e6f5b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "sec_2c353e7f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_741e6f5b"
+        },
+        {
+            "source": "sec_2c353e7f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_96bb20f5"
+        },
+        {
+            "source": "b_61152b77",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b17"
+        },
+        {
+            "source": "sec_2c353e7f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_61152b77"
+        },
+        {
+            "source": "sec_20b94111",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bd75fdaf"
+        },
+        {
+            "source": "sec_20b94111",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a67c83ed"
+        },
+        {
+            "source": "sec_20b94111",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_32ab9190"
+        },
+        {
+            "source": "sec_20b94111",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5f5f9439"
+        },
+        {
+            "source": "sec_20b94111",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_73c0450f"
+        },
+        {
+            "source": "sec_995db151",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_259b9d41"
+        }
+    ]
+}

@@ -1,0 +1,1872 @@
+{
+    "paper_metadata": {
+        "paper_id": "rylqooRqK7",
+        "source": "OpenReview_ICLR_2019",
+        "year": "2019",
+        "decision": "Unknown",
+        "total_reviews_available": 2
+    },
+    "paper_DOM": {
+        "sections": [
+            {
+                "section_id": "sec_907bd104",
+                "title": "INTRODUCTION",
+                "blocks": [
+                    {
+                        "block_id": "b_dbbc872d",
+                        "type": "paragraph",
+                        "text": "The trend to seek for state-of-the-art neural network architecture automatically has been growing since Zoph & Le (2016) , given the enormous effort needed in scientific research. Normally, a Neural Architecture Search (NAS) pipeline comprises architecture sampling, parameter learning, architecture validation, credit assignment and search direction update.",
+                        "extracted_citations": [
+                            "Citation_b34"
+                        ]
+                    },
+                    {
+                        "block_id": "b_f86dc3dd",
+                        "type": "paragraph",
+                        "text": "There are basically three existing frameworks for neural architecture search. Evolution-based NAS like NEAT (Stanley & Miikkulainen, 2002) employs evolution algorithm to simultaneously optimize topology alongside with parameters. However, it takes enormous computational power and could not leverage the efficient gradient back-propagation in deep learning. To achieve the state-of-the-art performance as human-designed architectures, Real et al. (2018) takes 3150 GPU days for the whole evolution. Reinforcement-learning-based NAS is end-to-end for gradient back-propagation, among which the most efficient one, ENAS (Pham et al., 2018) learns optimal parameters and architectures together just like NEAT. However, as NAS is modeled as a Markov Decision Process, credits are assigned to structural decisions with temporal-difference (TD) learning (Sutton et al., 1998) , whose efficiency and interpretability suffer from delayed rewards (Arjona-Medina et al., 2018) . To get rid of the architecture sampling process, DARTS (Liu et al., 2019) proposes deterministic attention on operations to analytically calculate expectation at each layer. After the convergence of the parent network, it removes operations with relatively weak attention. Due to the pervasive non-linearity in neural operations, it introduces untractable bias to the loss function. This bias causes inconsistency between the performance of derived child networks and converged parent networks, thus parameter retraining comes up as necessary. A more efficient, more interpretable and less biased framework is in desire, especially for future full-fledged NAS solutions on large datasets.",
+                        "extracted_citations": [
+                            "Citation_b26",
+                            "Citation_b22",
+                            "Citation_b19",
+                            "Citation_b27",
+                            "Citation_b0",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_17aa7873",
+                        "type": "paragraph",
+                        "text": "In this work, we propose a novel, efficient and highly automated framework, Stochastic Neural Architecture Search (SNAS), that trains neural operation parameters and architecture distribution parameters in same round of back propagation, while maintaining the completeness and differentiability of the NAS pipeline. One of the key motivations of SNAS is to replace the feedback mechanism triggered by constant rewards in reinforcement-learning-based NAS with more efficient gradient feedback from generic loss. We reformulate NAS with a new stochastic modeling to bypass the MDP assumption in reinforcement learning. To combine architecture sampling with computational graph of arbitrary differentiable loss, the search space is represented with a set of one-hot random variables from a fully factorizable joint distribution, multiplied as a mask to select operations in the graph. Sampling from this search space is made differentiable by relaxing the architecture distribution with concrete distribution (Maddison et al., 2016) . We name gradients w.r.t their parameters search gradient. From a global view, we prove that SNAS optimizes the same objective as reinforcement-learning-based NAS, except the training loss is used as reward. Zooming in, we provide a policy gradient equivalent of this search gradient, showing how gradients from the loss of each sample are used to assign credits to structural decisions. By interpreting this credit assignment as Taylor Decomposition (Montavon et al., 2017a) , we prove SNAS's efficiency over reinforcementlearning-based NAS. Additionally, seeing that existing methods (Liu et al., 2019 ) manually design topology in child networks to avoid complex architecture, we propose a global resource constraint to automate it, augmenting the objective with feasiblity concerns. This global constraint could be linearly decomposed for structural decisions, hence the proof of SNAS's efficiency still applies.",
+                        "extracted_citations": [
+                            "Citation_b16",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d1dac54b",
+                        "type": "paragraph",
+                        "text": "In our experiments, SNAS shows strong performance compared with DARTS and all other existing NAS methods in terms of test error, model complexity and searching resources. Specifically, SNAS discovers novel convolutional cells achieving 2.85\u00b10.02% test error on CIFAR-10 with only 2.8M parameters, which is better than 3.00\u00b10.14%-3.3M from 1st-order DARTS and 2.89%-4.6M from ENAS. It is also on par with 2.76\u00b10.09%-3.3M from 2nd-order DARTS with fewer parameters. With a more aggressive resource constraint, SNAS discovers even smaller model achieving 3.10\u00b10.04% test error on CIFAR-10 with 2.3M parameters. During the architecture search process, SNAS obtains a validation accuracy of 88% compared to around 70% of ENAS in fewer epochs. When validating the derived child network on CIFAR-10 without finetuning, SNAS maintains the search validation accuracy, significantly outperforming 54.66% by DARTS. These results validate our theory that SNAS is less biased than DARTS. The discovered cell achieves 27.3% top-1 error when transferred to ImageNet (mobile setting), which is comparable to 26.9% by 2nd-order DARTS.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5c8469d3",
+                        "type": "paragraph",
+                        "text": "Figure 1 : A conceptual visualization for a forward pass within SNAS. Sampled from p(Z), Z is a matrix whose rows Z i,j are one-hot random variable vectors indicating masks multiplied to edges (i, j) in the DAG. Columns of this matrix correspond to operations O k . In this example, there are 4 operation candidates, among which the last one is zero, i.e. removing that edge. The objective is the expectation of generic loss L of all child graphs.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_10872f9c",
+                "title": "METHODOLOGY",
+                "blocks": [
+                    {
+                        "block_id": "b_b5cc100d",
+                        "type": "paragraph",
+                        "text": "The main initiative of SNAS is to build an efficient and economical end-to-end learning system with as little compromise of the NAS pipeline as possible. In this section, we first describe how to sample from the search space for NAS in a cell, and how it motivates a stochastic reformuation for SNAS (Section 2.1). A new optimization objective is provided and the attention-based NAS's inconsistency is discussed. Then in Section 2.2, we introduce how this discrete search space is relaxed to be continuous to let gradients back-propagate through. In Section 2.3, the search gradient of SNAS is connected to the policy gradient in reinforcement-learning-based NAS (Zoph & Le, 2016; Pham et al., 2018) , interpreting SNAS's credit assignment with contribution analysis. At last, we introduce in Section 2.4 how SNAS automates the topology search to reduce the complexity of child netowrk, as well as how it decomposes this global constraint in the context of credit assignment.",
+                        "extracted_citations": [
+                            "Citation_b34",
+                            "Citation_b19"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_b72edd0b",
+                "title": "SEARCH SPACE AND ARCHITECTURE SAMPLING",
+                "blocks": [
+                    {
+                        "block_id": "b_a3fa64f8",
+                        "type": "paragraph",
+                        "text": "Searching for structure of a cell that is later stacked as building blocks for a deep architecture is an ad hoc solution to trade-off search efficiency and result optimality (Zoph et al., 2017; Liu et al., 2017a; Real et al., 2018; Pham et al., 2018; Liu et al., 2019) . As shown in the left of Figure 1 , the search space, i.e. a cell, is represented using a directed acyclic graph (DAG), which is called parent graph. Nodes x i in this DAG represent latent representation, whose dimensions are simply ignored to avoid abuse of notations. In convolutional networks, they are feature maps. Edges (i, j) represent information flows and possible operations O i,j to be selected between two nodes x i and x j . To make the skip operation included, nodes are enforced to be ordered, while edges only point from lower indexed nodes to higher ones. Thus we have intermediate nodes",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b22",
+                            "Citation_b19",
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7ed22e38",
+                        "type": "paragraph",
+                        "text": "where \u00d5i,j is the selected operation at edge (i, j). Analog to ENAS, SNAS search for operations and topology of this cell at the same time. Rather than using two distributions, this is done by introducing a zero operation, as in DARTS. Same as ENAS and DARTS, each cell is designed to have two inputs from the output of previous cells. The output of a cell is the concatenate of intermediate nodes.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_200a8b9c",
+                        "type": "paragraph",
+                        "text": "Thanks to the fact that the volume of structural decisions, which pick \u00d5i,j for edge (i, j), is generally tractable in a cell, we represent it with a distribution p(Z). Multiplying each one-hot random variable Z i,j to each edge (i, j) in the DAG, we obtain a child graph, whose intermediate nodes are",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_03eb10c5",
+                        "type": "paragraph",
+                        "text": "In terms of how to parameterize and factorize p(Z), SNAS is built upon the observation that NAS is a task with fully delayed rewards in a deterministic environment. That is, the feedback signal is only ready after the whole episode is done and all state transition distributions are delta functions. Therefore, a Markov Decision Process assumption as in ENAS may not be necessary. In SNAS, we simply assume that p(Z) is fully factorizable, whose factors are parameterized with \u03b1 and learnt along with operation parameters \u03b8. In Appendix A we connect the probability of a trajectory in the MDP of ENAS and this joint probability p(Z).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a99b600e",
+                        "type": "paragraph",
+                        "text": "Following the setting in Zoph & Le (2016) , the objective of SNAS is also",
+                        "extracted_citations": [
+                            "Citation_b34"
+                        ]
+                    },
+                    {
+                        "block_id": "b_b810f23c",
+                        "type": "paragraph",
+                        "text": "While the difference is that rather than using a constant reward from validation accuracy, we use the training/testing loss directly as reward, R(Z) = L \u03b8 (Z), such that the operation parameters and architecture parameters can be trained under one generic loss:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_6a272ee4",
+                        "type": "paragraph",
+                        "text": "The whole process of obtaining a Monte Carlo estimate of this objective is shown in Figure 1 . An intuitive interpretation of this objective is to optimize the expected performance of architectures sampled with p(Z). This differentiates SNAS from attention-based NAS like DARTS, which avoids the sampling process by taking analytical expectation at each edge over all operations. In Appendix B we illustrate the inconsistency between DARTS's loss and this objective, explaining its necessity of parameter finetuning or even retraining after architecture derivation. Resembling ENAS, SNAS does not have this constraint. We introduce in next subsection how SNAS calculates gradients w.r.t \u03b8 and \u03b1.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_725128d6",
+                "title": "PARAMETER LEARNING FOR OPERATIONS AND ARCHITECTURES",
+                "blocks": [
+                    {
+                        "block_id": "b_3687c238",
+                        "type": "paragraph",
+                        "text": "Though the objective (4) could be optimized with black-box gradient descent method as in Ranganath et al. (2014) , it would suffer from the high variance of likelihood ratio trick (Williams, 1992) and could not make use of the differentiable nature of L \u03b8 (Z). Instead, we use concrete distribution (Maddison et al., 2016) here to relax the discrete architecture distribution to be continuous and differentiable with reparameterization trick:",
+                        "extracted_citations": [
+                            "Citation_b21",
+                            "Citation_b31",
+                            "Citation_b16"
+                        ]
+                    },
+                    {
+                        "block_id": "b_7b273e25",
+                        "type": "paragraph",
+                        "text": "where Z i,j is the softened one-hot random variable for operation selection at edge (i, j),",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_098a663e",
+                        "type": "paragraph",
+                        "text": ")) is the kth Gumbel random variable, U k i,j is a uniform random variable. \u03b1 i,j is the architecture parameter, which could depend on predecessors Z h,i if p(Z i,j ) is a conditional probability. \u03bb is the temperature of the softmax, which is steadily annealed to be close to zero in SNAS. In Maddison et al. (2016) , it is proved that p(lim \u03bb\u21920 Z k i,j = 1) = \u03b1 k i,j /( n l=0 \u03b1 l i,j ), making this relaxation unbiased once converged.",
+                        "extracted_citations": [
+                            "Citation_b16"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_4e2209b7",
+                "title": "The full derivation of \u2207E",
+                "blocks": [
+                    {
+                        "block_id": "b_1ec1171c",
+                        "type": "paragraph",
+                        "text": "Here with the surrogate loss L for each sample, we provide its gradient w.r.t x j , \u03b8 k i,j and \u03b1 k i,j :",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f86eba20",
+                        "type": "paragraph",
+                        "text": "We name \u2202L \u2202\u03b1 search gradient similar to the one in Wierstra et al. (2008) , even though no policy gradient is involved. This renders SNAS a differentiable version of evolutionary-strategy-based NAS.",
+                        "extracted_citations": [
+                            "Citation_b30"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9f761df1",
+                "title": "CREDIT ASSIGNMENT",
+                "blocks": [
+                    {
+                        "block_id": "b_d78e6bc4",
+                        "type": "paragraph",
+                        "text": "With the equivalence of p(Z) in SNAS and p(\u03c4 ) in ENAS from Section 2.1 and the search gradient of SNAS from Section 2.2, we discuss in this subsection what credits SNAS search gradients assign to each structural decision.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b402ccbc",
+                        "type": "paragraph",
+                        "text": "To assign credits to actions both temporally and laterally is an important topic in reinforcement learning (Precup, 2000; Schulman et al., 2015; Tucker et al., 2018; Xu et al., 2018) . In ENAS, proximal policy optimization (PPO) (Schulman et al., 2017) is used to optimize the architecture policy, which distributes credits with TD learning and generalized advantage estimator (GAE) (Schulman et al., 2015) . However, as the reward of NAS task is only obtainable after the architecture is finalized and the network is tested for accuracy, it is a task with delayed rewards. As proved by Arjona-Medina et al. (2018) , TD learning has bias with reward delay and corrects it exponentially slowly.",
+                        "extracted_citations": [
+                            "Citation_b20",
+                            "Citation_b24",
+                            "Citation_b29",
+                            "Citation_b32",
+                            "Citation_b25",
+                            "Citation_b24",
+                            "Citation_b0"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d84d43f7",
+                        "type": "paragraph",
+                        "text": "Different from ENAS, there is no MDP assumption in SNAS, but the reward function is made differentiable in terms of structural decisions. From Section 2.2 we can derive the expected search gradient for architecture parameters at edge (i, j):",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_32011d17",
+                        "type": "paragraph",
+                        "text": "where [\u2022] c emphasizes \u2022 is constant for the gradient calculation w.r.t. \u03b1. A full derivation is provided in Appendix D. Apparently, the search gradient is equivalent to a policy gradient for distribution at this edge whose credit is assigned as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_54ecf032",
+                        "type": "paragraph",
+                        "text": "From a decision-wise perspective, this reward could be interpreted as contribution analysis of L with Taylor Decomposition (Montavon et al., 2017a) , which distributes importance scores among nodes in the same effective layer. Given the presence of skip connections, nodes may be involved into multiple effective layers, credits from which would be integrated. This integrated credit of a node j is then distributed to edges (i, j) pointing to it, weighted by \u00d5i,j (x i ). Details are given in Appendix E. Thus for each structural decision, no delayed reward exists, the credits assigned to it are valid from the beginning. This proves why SNAS is more efficient than ENAS. Laterally at each edge, credits are distributed among possible operations, adjusted with random variables Z i,j .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b7349ca4",
+                        "type": "paragraph",
+                        "text": "At the beginning of the training, Z i,j is continuous and operations share the credit, the training is mainly on neural operation parameters. With the temperature goes down and Z i,j becomes closer to one-hot, credits are given to the chosen operations, adjusting their probabilities to be sampled.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c56ea51b",
+                "title": "RESOURCE CONSTRAINT",
+                "blocks": [
+                    {
+                        "block_id": "b_867eae73",
+                        "type": "paragraph",
+                        "text": "Apart from training efficiency and validation accuracy, forwarding time of the child network is another concern in NAS in order for its feasible employment. In SNAS, this could be taken into account as a regularizer in the objective:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_8253c641",
+                        "type": "paragraph",
+                        "text": "where C(Z) is the cost of time for the child network associated with random variables Z. Rather than directly estimating the forwarding time, there are three candidates from the literature (Gordon et al., 2018; Ma et al., 2018) that can be used to approximately represent it: 1) the parameter size ; 2) the number of float-point operations (FLOPs); and 3) the memory access cost (MAC). Details about C(Z) in SNAS could be found in Appendix F. However, not like L \u03b8 (Z), C(Z) is not differentiable w.r.t. either \u03b8 or \u03b1. A natural problem to ask is, whether efficient credit assignment from C(Z) could be done with similar decomposition introduced above, such that the proof of SNAS's efficiency still applies. And the answer is positive, thanks to the fact that C(Z) is linear in terms of all one-hot random variables Z i,j :",
+                        "extracted_citations": [
+                            "Citation_b5",
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ae4b8607",
+                        "type": "paragraph",
+                        "text": "mainly because the size of feature maps at each node is not dependent on the structural decision. That is, the distribution at each edge (i, j) is optimized with local penalty, which is the conservative decomposition of the global cost, consistent with the credit assignment principle in SNAS.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_210e9e8c",
+                        "type": "paragraph",
+                        "text": "In SNAS, p \u03b1 (Z) is fully factorizable, making it possible to calculate E Z\u223cp\u03b1 [C(Z)] analytically with sum-product algorithm (Kschischang et al., 2001) . Unfortunately, this expectation is non-trivial to calculate, we optimize the Monte Carlo estimate of the final form from sum-product algorithm",
+                        "extracted_citations": [
+                            "Citation_b10"
+                        ]
+                    },
+                    {
+                        "block_id": "b_4469b8e2",
+                        "type": "paragraph",
+                        "text": "with policy gradients.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_77a5c7b5",
+                "title": "EXPERIMENTS",
+                "blocks": [
+                    {
+                        "block_id": "b_a0426c66",
+                        "type": "paragraph",
+                        "text": "Following the pipeline in DARTS, our experiments consist of three stages. First, SNAS is applied to search for convolutional cells in a small parent network on CIFAR-10 and we choose the best cells based on their search validation accuracy. Then, a larger network is constructed by stacking the learned cells (child graphs) and is retrained on CIFAR-10 to compare the performance of SNAS with other state-of-the-art methods. Finally, we show that the cells learned on CIFAR-10 is transferable to large datasets by evaluating their performance on ImageNet.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_9aad28b3",
+                "title": "ARCHITECTURE SEARCH ON CIFAR-10",
+                "blocks": [
+                    {
+                        "block_id": "b_16f9e4a0",
+                        "type": "paragraph",
+                        "text": "Motivation We apply SNAS to find convolutional cells on CIFAR-10 for image classification. Unlike DARTS, which evaluates the performance of child networks during the searching stage by training their snapshots from scratch, we directly take the search validation accuracy as the performance evaluation criterion. This evaluation method is valid in SNAS since the searching is unbiased from its objective, as introduced in Section 2.1. Dataset CIFAR-10 dataset (Krizhevsky & Hinton, 2009 ) is a basic dataset for image classification, which consists of 50,000 training images and 10,000 testing images. Data transformation is achieved by the standard data pre-processing and augmentation techniques (see Appendix G.1).",
+                        "extracted_citations": [
+                            "Citation_b9"
+                        ]
+                    },
+                    {
+                        "block_id": "b_fd8475d2",
+                        "type": "paragraph",
+                        "text": "Search Space Our setup follows DARTS, where convolutional cells (parent graphs) of 7 nodes are stacked for multiple times to form a network. The input nodes, i.e. the first and second nodes, of cell k are set equal to the outputs of cell k-2 and cell k-1, respectively, with 1 \u00d7 1 convolutions inserted as necessary, and the output node is the depthwise concatenation of all the intermediate nodes. Reduction cells are located at the 1/3 and 2/3 of the total depth of the network to reduce the spatial resolution of feature maps. Therefore the architecture distribution parameters is (\u03b1 normal , \u03b1 reduce ), where \u03b1 normal is shared by all the normal cells and \u03b1 reduce is shared by all the reduction cells. Details about all operations included are shown in Appendix G.1.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_62759e7f",
+                        "type": "paragraph",
+                        "text": "Training Settings In the searching stage, we train a small network stacked by 8 cells (parent graphs) using SNAS with three levels of resource constraint for 150 epochs. This network size is determined to fit into a single GPU. Single-level optimization is employed to optimize \u03b8 and \u03b1 over the same dataset as opposed to bilevel optimization employed by DARTS. The rest of the setup follows DARTS (Appendix G.1). The search takes 32 hours 1 on a single GPU 2 .",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b7cb00a0",
+                        "type": "paragraph",
+                        "text": "Searching Process The normal and reduction cells learned on CIFAR-10 using SNAS with mild resource constraint are shown in Figure 2 . In Figure 3 , we give the validation accuracy during the search of SNAS, DARTS and ENAS with 10 Randomly Generated Seeds. Comparing with ENAS, SNAS takes fewer epochs to converge to higher validation accuracy. Though DARTS converges faster than SNAS, this accuracy is inconsistent with the child network. Table 1 presents their comparison of the validation accuracy at the end of search and after architecture derivation without fine-tuning. While SNAS can maintain its performance, there is a huge gap between those two in DARTS. 4 and Table 1 verify our claim that searching process in SNAS is less biased from the objective, i.e. Equation ( 4 ), and could possibly save computation resources for parameter retraining when extended to NAS on large datasets.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d2626acc",
+                        "type": "paragraph",
+                        "text": "Searching Results Three levels of resource constraint, mild, moderate and aggressive are examined in SNAS. Mild resource constraint lies at the margin of the appearance of zero operation to drop edges in child graphs, as shown in Figure 2 . Interestingly, every node takes only two input edges, just as in the designed scheme in ENAS and DARTS. When the constraint level is increased to moderate, the reduction cell begins to discover similar structures as normal cells, as shown in Appendix H. When a more aggressive resource constraint is added, the structure of reduction cells is further sparsified. As shown in Figure 5 , more edges are dropped, leaving only two, which leads to the drop of some nodes, including the input node c k-1 , and two intermediate nodes x 2 and x 3 . Note that this child graph is a structure that ENAS and DARTS are not able to discover 4 .",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_5c064b2d",
+                "title": "ARCHITECTURE EVALUATION ON CIFAR-10",
+                "blocks": [
+                    {
+                        "block_id": "b_31333e81",
+                        "type": "paragraph",
+                        "text": "Motivation In the searching stage, we follow the economical setup of DARTS to use only one single GPU, which constrains the parameter size of the child network. A conventional assumption in DARTS and ENAS 5 is that the final search validation accuracy has exploited the parameter size, the ceiling of which can only be raised by allowing more parameters. For a fair comparison, we follow this assumption in evaluation stage, stacking more cells (child graphs) to build a deeper network. This network is trained from scratch as in DARTS and ENAS to report the performance of the cells learned by SNAS on CIFAR-10.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aa322e83",
+                        "type": "paragraph",
+                        "text": "Evaluation Settings A large network of 20 cells is trained from scratch for 600 epochs with batch size 96. Other hyperparameters remain the same as those for architecture search. Additional enhancements are listed in Appendix G.2. The training takes 1.5 days on a single GPU with our implementation in PyTorch. (Real et al., 2018) 3.34 \u00b1 0.06 3.2 3150 evolution complete AmoebaNet-B + cutout (Real et al., 2018) 2.55 \u00b1 0.05 2.8 3150 evolution complete Hierarchical Evo (Liu et al., 2017b) 3.75 \u00b1 0.12 15.7 300 evolution complete PNAS (Liu et al., 2017a) 3.41 \u00b1 0.09 3.2 225 SMBO complete ENAS + cutout (Pham et al., 2018) 2.89 4.6 0.5 RL complete",
+                        "extracted_citations": [
+                            "Citation_b22",
+                            "Citation_b22",
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_2dbab99a",
+                        "type": "paragraph",
+                        "text": "Random search baseline \u2021 + cutout (Liu et al., 2019) 3.29 \u00b1 0.15 3.2 1 random -DARTS (1st order bi-level) + cutout (Liu et al., 2019) 3.00 \u00b1 0.14 3.3 0.4 gradient-based incomplete DARTS (2nd order bi-level) + cutout (Liu et al., 2019)",
+                        "extracted_citations": [
+                            "Citation_b13",
+                            "Citation_b13",
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_ae91d6a0",
+                "title": "Results",
+                "blocks": [
+                    {
+                        "block_id": "b_9479676b",
+                        "type": "paragraph",
+                        "text": "The CIFAR-10 evaluation results are presented in Table 2 . The test error of SNAS is on par with the state-of-the-art RL-based and evolution-based NAS while using three orders of magnitude less computation resources. Furthermore, with slightly longer wall-clock-time, SNAS outperforms 1st-order DARTS and ENAS by discovering convolutional cells with both a smaller error rate and fewer parameters. It also achieves a comparable error rate compared to 2nd-order DARTS but with fewer parameters. With a more aggressive resource constraint, SNAS can sparsify the architecture even further to distinguish from ENAS and DARTS with only a slight drop in performance, which is still on par with 1st-order DARTS. It is interesting to note that with same single-level optimization, SNAS significantly outperforms DARTS. Bilevel optimization could be regarded as a data-driven meta-learning method to resolve the bias proved above, whose bias from the exact meta-learning objective is still unjustified due to the ignorance of separate child network derivation scheme.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_0a675140",
+                "title": "ARCHITECTURE TRANSFERABILITY EVALUATION ON IMAGENET",
+                "blocks": [
+                    {
+                        "block_id": "b_3a16e225",
+                        "type": "paragraph",
+                        "text": "Motivation Since real world applications often involve much larger datasets than CIFAR-10, transferability is a crucial criterion to evaluate the potential of the learned cells (child graphs) (Zoph et al., 2017) . To show whether the cells learned on by SNAS CIFAR-10 can be generalized to larger datasets, we apply the same cells evaluated in Section 3.2 to the classification task on ImageNet.",
+                        "extracted_citations": [
+                            "Citation_b35"
+                        ]
+                    },
+                    {
+                        "block_id": "b_ca0c8b1a",
+                        "type": "paragraph",
+                        "text": "Dataset The mobile setting is adopted where the size of the input images is 224 \u00d7 224 and the number of multiply-add operations in the model is restricted to be less than 600M. (Zoph et al., 2017) 27.5 9.0 4.9 558 1800 RL complete AmoebaNet-A (Real et al., 2018) 25.5 8.0 5.1 555 3150 evolution complete AmoebaNet-B (Real et al., 2018) 26.0 8.5 5.3 555 3150 evolution complete AmoebaNet-C (Real et al., 2018) 24.3 7.6 6.4 570 3150 evolution complete PNAS (Liu et al., 2017a) 25 Evaluation Settings We stack a network of 14 cells using the same cells designed by SNAS (mild constraint) and evaluated on CIFAR-10 (Section 3.2) and train it for 250 epochs with other hyperparameters following DARTS (see Appendix G.3). The training takes 12 days on a single GPU.",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b22",
+                            "Citation_b22",
+                            "Citation_b22"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d2b32288",
+                        "type": "paragraph",
+                        "text": "Results Table 3 presents the results of the evaluation on ImageNet and shows that the cell found by SNAS on CIFAR-10 can be successfully transferred to ImageNet. Notably, SNAS is able to achieve competitive test error with the state-of-the-art RL-based NAS using three orders of magnitude less computation resources. And with resource constraints added, SNAS can find smaller cell architectures that achieve competitive performance with DARTS.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_fcb1bec6",
+                "title": "RELATED WORKS",
+                "blocks": [
+                    {
+                        "block_id": "b_69162201",
+                        "type": "paragraph",
+                        "text": "Improving the efficiency of NAS is a prerequisite to extending it to more complicated vision tasks like detection, as well as larger datasets. In the complete pipeline of NAS, parameter learning is a time-consuming one that attracts attention from the literature. Ideas to design auxiliary mechanisms like performance prediction (Baker et al., 2017; Deng et al., 2017) , iterative search (Liu et al., 2017a) , hypernetwork generated weights (Brock et al., 2017) successfully accelerate NAS to certain degrees. Getting rid of these auxiliary mechanisms, ENAS (Pham et al., 2018) is the state-of-the-art NAS framework, proposing parameter sharing among all possible child graphs, which is followed by SNAS. In Section 2 we introduced SNAS's relation with ENAS in details. Apart from ENAS, we are also inspired by Louizos et al. (2017) to use continuous distribution for structural decision at each edge and optimize it along with an l 0 complexity regularizer.",
+                        "extracted_citations": [
+                            "Citation_b1",
+                            "Citation_b3",
+                            "Citation_b2",
+                            "Citation_b19",
+                            "Citation_b14"
+                        ]
+                    },
+                    {
+                        "block_id": "b_e73dfc13",
+                        "type": "paragraph",
+                        "text": "The most important motivation of SNAS is to leverage the gradient information in generic differentiable loss to update architecture distribution, which is shared by DARTS (Liu et al., 2019) .",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_1bc3749d",
+                        "type": "paragraph",
+                        "text": "In Section 2 and Appendix B we have introduced SNAS's advantage over DARTS, a reward for maintaining the completeness of the NAS pipeline. Actually, the idea to make use of this gradient information to improve the learning efficiency of a stochastic model has been discussed in the literature of generative model (Gu et al., 2015; Maddison et al., 2016) and reinforcement learning (Schmidhuber, 1990; Arjona-Medina et al., 2018) . But as far as we known, we are the first one to combine the insights from these two fields to discuss possible efficiency improvement of NAS.",
+                        "extracted_citations": [
+                            "Citation_b6",
+                            "Citation_b16",
+                            "Citation_b23",
+                            "Citation_b0"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2a3bb05f",
+                "title": "CONCLUSION",
+                "blocks": [
+                    {
+                        "block_id": "b_8ab135b2",
+                        "type": "paragraph",
+                        "text": "In this work, we presented SNAS, a novel and economical end-to-end neural architecture search framework. The key contribution of SNAS is that by making use of gradient information from generic differentiable loss without sacrificing the completeness of NAS pipeline, stochastic architecture search could be more efficient. This improvement is proved by comparing the credit assigned by the search gradient with reinforcement-learning-based NAS. Augmented by a complexity regu-",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_7e385ac4",
+                "title": "A CONNECTING p(Z) IN SNAS AND p(\u03c4 ) IN ENAS",
+                "blocks": [
+                    {
+                        "block_id": "b_f7d358af",
+                        "type": "paragraph",
+                        "text": "In ENAS, the NAS task is defined as an MDP, where the observation o i = a 0 , a 1 ...a i-1 . Thus the transition probability p(o i |o i-1 , a i-1 ) = p(o i |a 0 , a 1 ...a i-2 , a i-1 ) = \u03b4(a 0 , a 1 ...a i-1 ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_365cb1dc",
+                        "type": "paragraph",
+                        "text": "(12) With the policy of RNN controller denoted as \u03c0(a i |o i ), the joint probability of a trajectory \u03c4 in this MDP is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_2f789eca",
+                        "type": "paragraph",
+                        "text": "where a is a vector of all structural decisions, which is denoted as Z in SNAS. So we have p(\u03c4 ) = p(Z).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_b514fa0f",
+                        "type": "paragraph",
+                        "text": "(14) Note that if we factorize p(Z) with conditional probability to have Markovian property as in Equation 13, we have the factor",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_2205e844",
+                "title": "B DIFFERENCE BETWEEN SNAS AND DARTS",
+                "blocks": [
+                    {
+                        "block_id": "b_d860fad3",
+                        "type": "paragraph",
+                        "text": "We take a search space with three intermediate nodes for example to exhibit the difference between SNAS and DARTS (Liu et al., 2019) , as shown in Figure 6 . This search space could be viewed as a unit search space whose property could be generalized to larger space since it contains nodes in series and in parallel.",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    },
+                    {
+                        "block_id": "b_401c9117",
+                        "type": "paragraph",
+                        "text": "The objective of a NAS task is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d3cfbf47",
+                        "type": "paragraph",
+                        "text": "where p \u03b1 (Z) is the distribution of architectures, which is previously solved with reinforcement learning. In both SNAS and DARTS, the reward function is made differentiable using the training/testing loss, R(Z) = L \u03b8 ((Z)), such that the architecture learning could leverage information in the gradients of this loss and conduct together with operation parameters training:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_076a3303",
+                        "type": "paragraph",
+                        "text": "(17) As introduced in Appendix A, SNAS solves (16) with a novel type of factorization, without relying on the MDP assumption. Though independent assumption between edges would restrict the probability distribution, there is no bias introduced. However, to avoid the sampling process and gradient back-propagation through discrete random variables, DARTS takes analytical expectation at the input of each node over operations at incoming edges and optimizes a relaxed loss with deterministic gradients. Take the cell in Figure 6 as a base case, the objective before this relaxation is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c6bd58b6",
+                        "type": "paragraph",
+                        "text": "DARTS relaxed this objective to",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5f5c15bb",
+                        "type": "paragraph",
+                        "text": "Considering that O(x) are ReLU-Conv-BN stacks as in ENAS (Pham et al., 2018) , which are nonlinear, this transformation introduces unbounded bias. Though it will not be perceivable in training, where the complete graph is used for accuracy validation, consistent this loss, the derived graph is never validated during training. Hence the training is inconsistent with the true objective maximizing the expected performance of derived architectures. After an architecture derivation introduced in DARTS, the performance falls enormously and the parameters need to be retrained. In the search space of SNAS, intermediate nodes take input from all previous nodes. We have",
+                        "extracted_citations": [
+                            "Citation_b19"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d0c1d9b7",
+                        "type": "paragraph",
+                        "text": "Let \u03b8 k i,j be the parameters in O k i,j , we have",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_04f6f129",
+                        "type": "paragraph",
+                        "text": "As we use concrete disctribution here to make the sampling differentiable with reparametrization trick:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5b456e04",
+                        "type": "paragraph",
+                        "text": "where G k i,j = -log(-log(U k i,j )) is the kth Gumbel random variable, U k i,j is a uniform random variable, the gradient w.r.t. \u03b1 i,j is:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_f44fcafe",
+                        "type": "paragraph",
+                        "text": "Published as a conference paper at ICLR 2019",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_973b5ab2",
+                        "type": "paragraph",
+                        "text": "The partial derivative",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9d664b99",
+                        "type": "paragraph",
+                        "text": "(24) Substitute it back to (23), we obtain",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_4a96a5b5",
+                        "type": "paragraph",
+                        "text": "We can also derive \u2202xm \u2202xj for chain rule connection:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c098d3f6",
+                        "type": "paragraph",
+                        "text": "Thus the gradient from the surrogate loss L to x j , \u03b8 k i,j and \u03b1 k i,j respectively are",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_727f79d0",
+                "title": "D CREDIT ASSIGNMENT FOR EQUIVALENT POLICY GRADIENT",
+                "blocks": [
+                    {
+                        "block_id": "b_cd3c9918",
+                        "type": "paragraph",
+                        "text": "From Appendix C we can see that the expected search gradient for architecture parameters at each edge is:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_a0420761",
+                        "type": "paragraph",
+                        "text": "where [\u2022] c denotes \u2022 is a constant for the gradient calculation w.r.t. \u03b1. Note that in this derivation we stop the gradient from successor nodes, with an independence assumption enforced in backpropagation.",
+                        "extracted_citations": []
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_83afb450",
+                "title": "E TAYLOR DECOMPOSITION FOR CONTRIBUTION ANALYSIS",
+                "blocks": [
+                    {
+                        "block_id": "b_70f8c403",
+                        "type": "paragraph",
+                        "text": "With d neurons (pixels) x i in the same layer of a deep neural network, whose output is f (x), Montavon et al. (2017a) decomposes f (x) as a sum of individual credits for x i . This decomposition is obtained by the first-order Taylor expansion of the function at some root point x for which f ( x) = 0:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_28880f5a",
+                        "type": "paragraph",
+                        "text": "where the individual credits",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c7b7f3dd",
+                        "type": "paragraph",
+                        "text": "are first-order terms and O(xx T ) is for higher-order information. When ReLU is chosen as the activation function, O(xx T ) can be omitted (Montavon et al., 2017b) . Thus ones can always find a root point x = lim \u21920 x that incidentally lies on the same linear region as point x, in which case the function can be written as",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_11dd47a4",
+                        "type": "paragraph",
+                        "text": "Noticing the similarity between ( 8 ) and ( 31 ), we try using Taylor Decomposition to interpret the credit assignment in SNAS. Given a sample x 0 , ones can iterate all effective layers of the DAG and distribute credits from network output f among nodes x j in each layer. In Figure 1 for example, DAG(Z (1) ) has 2 effective layers, while DAG(Z (2) ) has 3 effective layers. Given the presence of the skip connection, nodes may be involved into multiple layers and thus obtain integrated credits",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_eb6c45cd",
+                        "type": "paragraph",
+                        "text": "e.g. x 1 in DAG(2) integrates credits from x 2 and x 3 . According to (1), multiple edges (i, j) are pointing to j, which decompose (32) as:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_5143fe81",
+                        "type": "paragraph",
+                        "text": "Ri,j = \u2202f \u2202x j \u00d5i,j (x i ).",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_d895b01f",
+                        "type": "paragraph",
+                        "text": "Adjusting the weight of this sample with \u2202L/\u2202f and taking the optimization direction into account, we have",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_168438aa",
+                        "type": "paragraph",
+                        "text": "F CANDIDATES FOR LOCAL RESOURCE CONSTRAINTS",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_bc2ebf3b",
+                        "type": "paragraph",
+                        "text": "In the case of a convolutional layer, H, W and f , k correspond to the output spatial dimensions and the filter dimensions respectively and we use I, O to denote the number of input and output channels. Since group convolution is also adopted in this paper to reduce the computational complexity, g is the number of groups.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fc9e4618",
+                        "type": "paragraph",
+                        "text": "Thus, the parameter size and the number of float-point operations (FLOPs) of a single convolutional layer is",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_9028444a",
+                        "type": "paragraph",
+                        "text": "By assuming the computing device has enough cache to store the feature maps and the parameters, we can simplify the memory access cost (MAC) to be the sum of the memory access for the input/output feature maps and kernel weights (Ma et al., 2018) .",
+                        "extracted_citations": [
+                            "Citation_b15"
+                        ]
+                    },
+                    {
+                        "block_id": "b_d8adb23d",
+                        "type": "paragraph",
+                        "text": "In SNAS, because all the operations on a single edge share the same output spatial dimensions and the input/output channels, FLOPs of a convolutional operation is directly proportional to its parameter size. And although the memory access cost for the input/output feature maps HW (I +O) does not depend on the parameter size, since both are positively correlated to the number of layers used in the operation, we may say there is a positive correlation between MAC and the parameter size. Thus, when only considering the convolution operations, solely using the parameter size as the resource constraint is sufficient. However, in SNAS, we also have the pooling operation and the skip connection, which are parameter free. The equations to calculate the resource criteria of a pooling operation or a skip connection are as follows.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_ed4b6401",
+                        "type": "paragraph",
+                        "text": "FLOPs of skip connection:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_c818b0e0",
+                        "type": "paragraph",
+                        "text": "MAC of pooling and skip connection:",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_aa9dd488",
+                        "type": "paragraph",
+                        "text": "We can see that MAC is the same for pooling and skip connection since they need to access the same input/output feature maps, therefore, to distinguish between pooling and skip connection, FLOPs need to be included in the resource constraint. Similarly, to distinguish between skip connection and none (free, no operation), MAC also need to be included.",
+                        "extracted_citations": []
+                    },
+                    {
+                        "block_id": "b_fef9a78b",
+                        "type": "paragraph",
+                        "text": "In conclusion, to construct a resource constraint which fully distinguishes the four types of operations, all three locally decomposable criteria, the parameter size, FLOPs and MAC, need to be combined. Implementation Details of Operations The operations include: 3 \u00d7 3 and 5 \u00d7 5 separable convolutions, 3 \u00d7 3 and 5 \u00d7 5 dilated separable convolutions, 3 \u00d7 3 max pooling, 3 \u00d7 3 average pooling, skip connection and zero operation. All operations are of stride one (excluded the ones adjacent to the input nodes in the reduction cell, which are of stride two) and the convolved feature maps are padded to preserve their spatial resolution. Convolutions are applied in the order of ReLU-Conv-BN, and the depthwise separable convolution is always applied twice (Zoph et al., 2017; Real et al., 2018; Liu et al., 2017a; 2019) .",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b22",
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_c12f1b71",
+                "title": "Detailed Training Settings",
+                "blocks": [
+                    {
+                        "block_id": "b_c00420a7",
+                        "type": "paragraph",
+                        "text": "We follow the training settings as in Liu et al. (2019) . The neural operation parameters \u03b8 are optimized using momentum SGD, with initial learning rate \u03b7 \u03b8 = 0.025 (annealed down to zero following a cosine schedule), momentum 0.9, and weight decay 3 \u00d7 10 -4 . The architecture distribution parameters \u03b1 are optimized by Adam, with initial learning rate \u03b7 \u03b1 = 3 \u00d7 10 -4 , momentum \u03b2 = (0.5, 0.999) and weight decay 10 -3 . The batch size employed is 64 and the initial number of channels is 16.",
+                        "extracted_citations": [
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_53c73c43",
+                "title": "G.2 ARCHITECTURE EVALUATION ON CIFAR-10",
+                "blocks": [
+                    {
+                        "block_id": "b_31d27200",
+                        "type": "paragraph",
+                        "text": "Additional Enhancement Techniques Following existing works (Zoph et al., 2017; Liu et al., 2017a; Pham et al., 2018; Real et al., 2018; Liu et al., 2019) , we employ the following additional enhancements: cutout (DeVries & Taylor, 2017), path dropout of probability 0.2 (same as DARTS in the code publicly released by its authors) and auxiliary towers with weight 0.4.",
+                        "extracted_citations": [
+                            "Citation_b35",
+                            "Citation_b19",
+                            "Citation_b22",
+                            "Citation_b13"
+                        ]
+                    }
+                ]
+            },
+            {
+                "section_id": "sec_edae67cd",
+                "title": "G.3 ARCHITECTURE TRANSFERABILITY EVALUATION ON CIFAR-10",
+                "blocks": [
+                    {
+                        "block_id": "b_09f8482c",
+                        "type": "paragraph",
+                        "text": "Detailed Training Settings The network is trained with batch size 128, weight decay 3 \u00d7 10 -5 and initial SGD learning rate 0.1, which is decayed by a factor of 0.97 after each epoch. Auxiliary towers with weight 0.4 are adopted as additional enhancements.",
+                        "extracted_citations": []
+                    }
+                ]
+            }
+        ],
+        "bibliography": [
+            {
+                "cite_id": "Citation_b0",
+                "raw_text": "Michael Jose A Arjona-Medina Michael Gillhofer Widrich arXiv:1806.07857 Thomas Unterthiner, and Sepp Hochreiter. Rudder: Return decomposition for delayed rewards 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b1",
+                "raw_text": "Accelerating neural architecture search using performance prediction Bowen Baker Otkrist Gupta Ramesh Raskar Nikhil Naik arXiv:1705.10823 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b2",
+                "raw_text": "Smash: one-shot model architecture search through hypernetworks Andrew Brock Theodore Lim James M Ritchie Nick Weston arXiv:1708.05344 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b3",
+                "raw_text": "Boyang Deng Junjie Yan Dahua Lin Peephole arXiv:1712.03351 Predicting network performance before training 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b4",
+                "raw_text": "Improved regularization of convolutional neural networks with cutout Terrance Devries Graham W Taylor arXiv:1708.04552 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b5",
+                "raw_text": "Morphnet: Fast & simple resource-constrained structure learning of deep networks Ariel Gordon Elad Eban Ofir Nachum Bo Chen Hao Wu Tien-Ju Yang Edward Choi IEEE Conference on Computer Vision and Pattern Recognition (CVPR) 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b6",
+                "raw_text": "Shixiang Gu Sergey Levine Ilya Sutskever Andriy Mnih Muprop arXiv:1511.05176 Unbiased backpropagation for stochastic neural networks 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b7",
+                "raw_text": "Menglong Andrew G Howard Bo Zhu Dmitry Chen Weijun Kalenichenko Tobias Wang Marco Weyand Hartwig Andreetto Adam arXiv:1704.04861 Mobilenets: Efficient convolutional neural networks for mobile vision applications 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b8",
+                "raw_text": "Densely connected convolutional networks Gao Huang Zhuang Liu Laurens Van Der Maaten Kilian Q Weinberger CVPR 2017 1 3",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b9",
+                "raw_text": "Learning multiple layers of features from tiny images Alex Krizhevsky Geoffrey Hinton 2009 Citeseer Technical report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b10",
+                "raw_text": "Factor graphs and the sum-product algorithm Brendan J Frank R Kschischang H-A Frey Loeliger IEEE Transactions on information theory 47 2 2001",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b11",
+                "raw_text": "Chenxi Liu Barret Zoph Jonathon Shlens Wei Hua Li-Jia Li Li Fei-Fei Alan Yuille Jonathan Huang Kevin Murphy arXiv:1712.00559 Progressive neural architecture search 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b12",
+                "raw_text": "Hanxiao Liu Karen Simonyan Oriol Vinyals Chrisantha Fernando Koray Kavukcuoglu arXiv:1711.00436 Hierarchical representations for efficient architecture search 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b13",
+                "raw_text": "DARTS: Differentiable architecture search Hanxiao Liu Karen Simonyan Yiming Yang International Conference on Learning Representations 2019",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b14",
+                "raw_text": "Christos Louizos Max Welling Diederik P Kingma arXiv:1712.01312 Learning sparse neural networks through l 0 regularization 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b15",
+                "raw_text": "Shufflenet v2: Practical guidelines for efficient cnn architecture design Ningning Ma Xiangyu Zhang Hai-Tao Zheng Jian Sun arXiv:1807.11164 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b16",
+                "raw_text": "Andriy Chris J Maddison Yee Whye Mnih Teh arXiv:1611.00712 The concrete distribution: A continuous relaxation of discrete random variables 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b17",
+                "raw_text": "Explaining nonlinear classification decisions with deep taylor decomposition Gr\u00e9goire Montavon Sebastian Lapuschkin Alexander Binder Wojciech Samek Klaus-Robert M\u00fcller Pattern Recognition 65 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b18",
+                "raw_text": "Methods for interpreting and understanding deep neural networks Gr\u00e9goire Montavon Wojciech Samek Klaus-Robert M\u00fcller Digital Signal Processing 2017",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b19",
+                "raw_text": "Efficient neural architecture search via parameter sharing Hieu Pham Melody Y Guan Barret Zoph Quoc V Le Jeff Dean ICML 2018",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b20",
+                "raw_text": "Eligibility traces for off-policy policy evaluation Doina Precup Computer Science Department Faculty Publication Series 80 2000",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b21",
+                "raw_text": "Black box variational inference Rajesh Ranganath Sean Gerrish David Blei Artificial Intelligence and Statistics 2014",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b22",
+                "raw_text": "Regularized evolution for image classifier architecture search Esteban Real Alok Aggarwal Yanping Huang Quoc V Le arXiv:1802.01548 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b23",
+                "raw_text": "Making the world differentiable: On using fully recurrent self-supervised neural networks for dynamic reinforcement learning and planning in non-stationary environments Schmidhuber FKI-126 1990 90 Institut f\u00fcr Informatik, Technische Universit\u00e4t M\u00fcnchen Technical Report",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b24",
+                "raw_text": "Highdimensional continuous control using generalized advantage estimation John Schulman Philipp Moritz Sergey Levine Michael Jordan Pieter Abbeel arXiv:1506.02438 2015 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b25",
+                "raw_text": "John Schulman Filip Wolski Prafulla Dhariwal Alec Radford Oleg Klimov arXiv:1707.06347 Proximal policy optimization algorithms 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b26",
+                "raw_text": "Evolving neural networks through augmenting topologies O Kenneth Risto Stanley Miikkulainen Evolutionary computation 10 2 2002",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b27",
+                "raw_text": "Reinforcement learning: An introduction Andrew G Richard S Sutton Barto 1998 MIT press",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b28",
+                "raw_text": "Going deeper with convolutions Christian Szegedy Wei Liu Yangqing Jia Pierre Sermanet Scott Reed Dragomir Anguelov Dumitru Erhan Vincent Vanhoucke Andrew Rabinovich Proceedings of the IEEE conference on computer vision and pattern recognition the IEEE conference on computer vision and pattern recognition 2015",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b29",
+                "raw_text": "The mirage of action-dependent baselines in reinforcement learning George Tucker Surya Bhupatiraju Shixiang Gu Richard E Turner Zoubin Ghahramani Sergey Levine arXiv:1802.10031 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b30",
+                "raw_text": "Natural evolution strategies Daan Wierstra Tom Schaul Jan Peters Juergen Schmidhuber Evolutionary Computation IEEE World Congress on Computational Intelligence IEEE 2008. 2008. 2008",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b31",
+                "raw_text": "Simple statistical gradient-following algorithms for connectionist reinforcement learning Williams Ronald Reinforcement Learning Springer 1992",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b32",
+                "raw_text": "Zhongwen Xu Hado Van Hasselt David Silver arXiv:1805.09801 Meta-gradient reinforcement learning 2018 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b33",
+                "raw_text": "Shufflenet: An extremely efficient convolutional neural network for mobile devices X Zhang M Zhou Lin Sun arXiv:1707.01083 2017 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b34",
+                "raw_text": "Barret Zoph V Quoc Le arXiv:1611.01578 Neural architecture search with reinforcement learning 2016 arXiv preprint",
+                "semantic_scholar_verified": null
+            },
+            {
+                "cite_id": "Citation_b35",
+                "raw_text": "Learning transferable architectures for scalable image recognition Barret Zoph Vijay Vasudevan Jonathon Shlens Quoc V Le arXiv:1707.07012 2017 2 arXiv preprint",
+                "semantic_scholar_verified": null
+            }
+        ]
+    },
+    "human_ground_truth": [
+        {
+            "review_id": "human_rev_0",
+            "type": "Human",
+            "liang_alpha_score": 0.345,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_0_s_0",
+                    "text": "This work refines the NAS method for efficient neural architecture search.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_1",
+                    "text": "The paper brings new methods for gradient/reward updates and credit assignment.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_2",
+                    "text": "An improvement on gradient calculation and reward back-propagation mechanism\n2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_3",
+                    "text": "Good experiment results and fair comparisons\n\ncons:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_4",
+                    "text": "Missing details on how to use the gradient information to generate child network structures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_5",
+                    "text": "In eq.2, multiplying each one-hot random variable Zij to each edge (i, j) in the DAG can obtain a child graph whose intermediate nodes are xj.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_6",
+                    "text": "However, it is still unclear how to generate the child graph.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_7",
+                    "text": "More details on generating child network based on gradient information is expected.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_8",
+                    "text": "In SNAS, P(z) is assumed fully factorizable.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_9",
+                    "text": "Factors are parameterized with alpha and learnt along with operation parameters theta.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_10",
+                    "text": "The factorization of p(Z) is based on the observation that NAS is a task with fully delayed rewards in a deterministic environment.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_11",
+                    "text": "That is, the feedback signal is only ready after the whole episode is done and all state transitions distributions are delta functions.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_12",
+                    "text": "3, the authors use the training/testing loss directly as reward, while the previous method uses a constant reward from validation accuracy.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_0_s_13",
+                    "text": "It is unclear why using the training/testing loss can improve the results?",
+                    "author_label": "HUMAN"
+                }
+            ]
+        },
+        {
+            "review_id": "human_rev_1",
+            "type": "Human",
+            "liang_alpha_score": 0.0,
+            "aspect_scores": {
+                "originality": "Not Discussed",
+                "substance": "Not Discussed",
+                "clarity": "Not Discussed",
+                "impact": "Not Discussed"
+            },
+            "review_sentences": [
+                {
+                    "sentence_id": "human_rev_1_s_0",
+                    "text": "Summary:\nThis paper proposes Stochastic Neural Architecture Search (SNAS), a method to automatically and efficiently search for neural architectures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_1",
+                    "text": "It is built upon 2 existing works on these topics, namely ENAS (Pham et al 2018) and DARTS (Liu et al 2018).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_2",
+                    "text": "SNAS provides nice theory and explanation of gradient computations, unites the strengths and avoid the weaknesses of ENAS and DARTS.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_3",
+                    "text": "There are many details in the paper, including the Appendix.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_4",
+                    "text": "The idea is as follows:\n+------------+---------------------+-------------------------+\n| Method | Differentiable | Directly Optimize |\n|                |                           |    NAS reward       |\n+------------+---------------------+-------------------------+\n| ENAS     |      No                |        Yes                   |\n| DARTS   |      Yes               |        No                    |\n| SNAS     |      Yes               |        Yes                   |\n+------------+---------------------+-------------------------+\nSNAS inherits the idea of ENAS and DARTS by superpositioning all possible architectures into a Directed Acyclic Graph (DAG), effectively sharing the weights among all architectures.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_5",
+                    "text": "However, SNAS improves over ENAS and DARTS as follows (Section 2.2):\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_6",
+                    "text": "SNAS improves over ENAS in that it allows independent sampling at edges in the shared DAG, leading to a more tractable gradient at the edges of the DAG, which in turn allows more tractable Monte Carlo estimation of the gradients with respect to the architectural parameters.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_7",
+                    "text": "While DARTS also has the property (1), DARTS implements this by computing the expected value at each node in the DAG, with respect to the joint distribution of the input edges and the operations.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_8",
+                    "text": "This makes DARTS not optimize the direct NAS objective.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_9",
+                    "text": "SNAS, due to their smart manipulation of architectural gradients using Gumbel variables, still optimizes the same objective with NAS and ENAS, but has a smoother gradients.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_10",
+                    "text": "Experimental results in the paper show that SNAS finds architectures on CIFAR-10 that are comparable to those found by ENAS and DARTS, using a reasonable amount of computing resource.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_11",
+                    "text": "These architectures can also be transferred to learn competent models on ImageNet, like those of DARTS.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_12",
+                    "text": "Furthermore, experimental observations (Figure 3) are consistent with the theory above, that is:\n\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_13",
+                    "text": "The search process of SNAS is more stable than that of ENAS (as SNAS samples with a smaller variance).",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_14",
+                    "text": "Architectures found by SNAS perform better than those of DARTS, as SNAS searches directly for the NAS reward of the sampled models.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_15",
+                    "text": "Strengths:\n1.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_16",
+                    "text": "SNAS unites the strengths and avoids the weaknesses of ENAS and DARTS\n\n2.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_17",
+                    "text": "SNAS provides a nice theory, which is verified through their experimental results.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_18",
+                    "text": "Weaknesses:\nI don\u2019t really have any complaints about this paper.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_19",
+                    "text": "Some presentations of the paper might have been improved, e.g.",
+                    "author_label": "HUMAN"
+                },
+                {
+                    "sentence_id": "human_rev_1_s_20",
+                    "text": "the discussion on the ZERO operation in other comments should have been included.",
+                    "author_label": "HUMAN"
+                }
+            ]
+        }
+    ],
+    "adversarial_reviews": [],
+    "heterogeneous_edges": [
+        {
+            "source": "b_dbbc872d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "sec_907bd104",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_dbbc872d"
+        },
+        {
+            "source": "b_f86dc3dd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b26"
+        },
+        {
+            "source": "b_f86dc3dd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_f86dc3dd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_f86dc3dd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b27"
+        },
+        {
+            "source": "b_f86dc3dd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "b_f86dc3dd",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_907bd104",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f86dc3dd"
+        },
+        {
+            "source": "b_17aa7873",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_17aa7873",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_907bd104",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_17aa7873"
+        },
+        {
+            "source": "sec_907bd104",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d1dac54b"
+        },
+        {
+            "source": "sec_907bd104",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5c8469d3"
+        },
+        {
+            "source": "b_b5cc100d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "b_b5cc100d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_10872f9c",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b5cc100d"
+        },
+        {
+            "source": "b_a3fa64f8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_a3fa64f8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_a3fa64f8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_a3fa64f8",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_b72edd0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a3fa64f8"
+        },
+        {
+            "source": "sec_b72edd0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7ed22e38"
+        },
+        {
+            "source": "sec_b72edd0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_200a8b9c"
+        },
+        {
+            "source": "sec_b72edd0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_03eb10c5"
+        },
+        {
+            "source": "b_a99b600e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b34"
+        },
+        {
+            "source": "sec_b72edd0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a99b600e"
+        },
+        {
+            "source": "sec_b72edd0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b810f23c"
+        },
+        {
+            "source": "sec_b72edd0b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_6a272ee4"
+        },
+        {
+            "source": "b_3687c238",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b21"
+        },
+        {
+            "source": "b_3687c238",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b31"
+        },
+        {
+            "source": "b_3687c238",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_725128d6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3687c238"
+        },
+        {
+            "source": "sec_725128d6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_7b273e25"
+        },
+        {
+            "source": "b_098a663e",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "sec_725128d6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_098a663e"
+        },
+        {
+            "source": "sec_4e2209b7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1ec1171c"
+        },
+        {
+            "source": "b_f86eba20",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b30"
+        },
+        {
+            "source": "sec_4e2209b7",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f86eba20"
+        },
+        {
+            "source": "sec_9f761df1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d78e6bc4"
+        },
+        {
+            "source": "b_b402ccbc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b20"
+        },
+        {
+            "source": "b_b402ccbc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_b402ccbc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b29"
+        },
+        {
+            "source": "b_b402ccbc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b32"
+        },
+        {
+            "source": "b_b402ccbc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b25"
+        },
+        {
+            "source": "b_b402ccbc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b24"
+        },
+        {
+            "source": "b_b402ccbc",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_9f761df1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b402ccbc"
+        },
+        {
+            "source": "sec_9f761df1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d84d43f7"
+        },
+        {
+            "source": "sec_9f761df1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_32011d17"
+        },
+        {
+            "source": "sec_9f761df1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_54ecf032"
+        },
+        {
+            "source": "sec_9f761df1",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b7349ca4"
+        },
+        {
+            "source": "sec_c56ea51b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_867eae73"
+        },
+        {
+            "source": "b_8253c641",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b5"
+        },
+        {
+            "source": "b_8253c641",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_c56ea51b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8253c641"
+        },
+        {
+            "source": "sec_c56ea51b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ae4b8607"
+        },
+        {
+            "source": "b_210e9e8c",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b10"
+        },
+        {
+            "source": "sec_c56ea51b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_210e9e8c"
+        },
+        {
+            "source": "sec_c56ea51b",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4469b8e2"
+        },
+        {
+            "source": "sec_77a5c7b5",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a0426c66"
+        },
+        {
+            "source": "b_16f9e4a0",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b9"
+        },
+        {
+            "source": "sec_9aad28b3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_16f9e4a0"
+        },
+        {
+            "source": "sec_9aad28b3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fd8475d2"
+        },
+        {
+            "source": "sec_9aad28b3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_62759e7f"
+        },
+        {
+            "source": "sec_9aad28b3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b7cb00a0"
+        },
+        {
+            "source": "sec_9aad28b3",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d2626acc"
+        },
+        {
+            "source": "sec_5c064b2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_31333e81"
+        },
+        {
+            "source": "b_aa322e83",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_aa322e83",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_aa322e83",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_5c064b2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aa322e83"
+        },
+        {
+            "source": "b_2dbab99a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_2dbab99a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "b_2dbab99a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_5c064b2d",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2dbab99a"
+        },
+        {
+            "source": "sec_ae91d6a0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9479676b"
+        },
+        {
+            "source": "b_3a16e225",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "sec_0a675140",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_3a16e225"
+        },
+        {
+            "source": "b_ca0c8b1a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_ca0c8b1a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_ca0c8b1a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_ca0c8b1a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "sec_0a675140",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ca0c8b1a"
+        },
+        {
+            "source": "sec_0a675140",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d2b32288"
+        },
+        {
+            "source": "b_69162201",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b1"
+        },
+        {
+            "source": "b_69162201",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b3"
+        },
+        {
+            "source": "b_69162201",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b2"
+        },
+        {
+            "source": "b_69162201",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_69162201",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b14"
+        },
+        {
+            "source": "sec_fcb1bec6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_69162201"
+        },
+        {
+            "source": "b_e73dfc13",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_fcb1bec6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_e73dfc13"
+        },
+        {
+            "source": "b_1bc3749d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b6"
+        },
+        {
+            "source": "b_1bc3749d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b16"
+        },
+        {
+            "source": "b_1bc3749d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b23"
+        },
+        {
+            "source": "b_1bc3749d",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b0"
+        },
+        {
+            "source": "sec_fcb1bec6",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_1bc3749d"
+        },
+        {
+            "source": "sec_2a3bb05f",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_8ab135b2"
+        },
+        {
+            "source": "sec_7e385ac4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f7d358af"
+        },
+        {
+            "source": "sec_7e385ac4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_365cb1dc"
+        },
+        {
+            "source": "sec_7e385ac4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_2f789eca"
+        },
+        {
+            "source": "sec_7e385ac4",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_b514fa0f"
+        },
+        {
+            "source": "b_d860fad3",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d860fad3"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_401c9117"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d3cfbf47"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_076a3303"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c6bd58b6"
+        },
+        {
+            "source": "b_5f5c15bb",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5f5c15bb"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d0c1d9b7"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_04f6f129"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5b456e04"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_f44fcafe"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_973b5ab2"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9d664b99"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_4a96a5b5"
+        },
+        {
+            "source": "sec_2205e844",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c098d3f6"
+        },
+        {
+            "source": "sec_727f79d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_cd3c9918"
+        },
+        {
+            "source": "sec_727f79d0",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_a0420761"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_70f8c403"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_28880f5a"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c7b7f3dd"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_11dd47a4"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_eb6c45cd"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_5143fe81"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d895b01f"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_168438aa"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_bc2ebf3b"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fc9e4618"
+        },
+        {
+            "source": "b_9028444a",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b15"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_9028444a"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_d8adb23d"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_ed4b6401"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c818b0e0"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_aa9dd488"
+        },
+        {
+            "source": "b_fef9a78b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_fef9a78b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_fef9a78b",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_83afb450",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_fef9a78b"
+        },
+        {
+            "source": "b_c00420a7",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_c12f1b71",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_c00420a7"
+        },
+        {
+            "source": "b_31d27200",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b35"
+        },
+        {
+            "source": "b_31d27200",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b19"
+        },
+        {
+            "source": "b_31d27200",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b22"
+        },
+        {
+            "source": "b_31d27200",
+            "relation": "CITES_INLINE",
+            "target": "Citation_b13"
+        },
+        {
+            "source": "sec_53c73c43",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_31d27200"
+        },
+        {
+            "source": "sec_edae67cd",
+            "relation": "CONTAINS_BLOCK",
+            "target": "b_09f8482c"
+        }
+    ]
+}
