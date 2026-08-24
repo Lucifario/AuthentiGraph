@@ -1,0 +1,1131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">PHYSICS OF LANGUAGE MODELS: PART 2.2, HOW TO LEARN FROM MISTAKES ON GRADE-SCHOOL MATH PROBLEMS</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<author>
+							<persName><forename type="first">Zicheng</forename><surname>Xu</surname></persName>
+							<email>zichengxu@meta.com</email>
+						</author>
+						<author>
+							<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+							<email>yuanzhi.li@mbzuai.ac.ae</email>
+						</author>
+						<author>
+							<persName><forename type="first">Zeyuan</forename><surname>Allen-Zhu</surname></persName>
+							<email>zeyuanallenzhu@meta.com</email>
+						</author>
+						<author>
+							<affiliation key="aff0">
+								<orgName type="department">Tian Ye FAIR at Meta</orgName>
+								<orgName type="institution">Carnegie Mellon University</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<affiliation key="aff1">
+								<orgName type="institution">Zayed University of AI</orgName>
+							</affiliation>
+						</author>
+						<title level="a" type="main">PHYSICS OF LANGUAGE MODELS: PART 2.2, HOW TO LEARN FROM MISTAKES ON GRADE-SCHOOL MATH PROBLEMS</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">DAFB9EAFF8D455BFFBD3D47158FF83E7</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:13+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Language models have demonstrated remarkable performance in solving reasoning tasks; however, even the strongest models still occasionally make reasoning mistakes. Recently, there has been active research aimed at improving reasoning accuracy, particularly by using pretrained language models to "self-correct" their mistakes via multi-round prompting. In this paper, we follow this line of work but focus on understanding the usefulness of incorporating "error-correction" data directly into the pretraining stage. This data consists of erroneous solution steps immediately followed by their corrections. Using a synthetic math dataset, we show promising results: this type of pretrain data can help language models achieve higher reasoning accuracy directly (i.e., through simple auto-regression, without multi-round prompting) compared to pretraining on the same amount of error-free data. We also delve into many details, such as (1) how this approach differs from beam search, (2) how such data can be prepared, (3) whether masking is needed on the erroneous tokens, (4) the amount of error required, (5) whether such data can be deferred to the fine-tuning stage, and many others. * The first six papers in the Physics of Language Models series were presented as a two-hour tutorial at ICML 2024 in Austria (youtu.be/yBL7J0kgldU). A 50-min deep dive into Part 2.2 is available at youtu.be/yBgxxvQ76 E. Full and future editions of Part 2.2, including code release, are available at physics. allen-zhu.com, github.com, and ssrn.com/abstract=5250631.  </p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>Language models have achieved near-human-level performance in various tasks, including math solving, coding, and natural language understanding (Allen-Zhu &amp; Li, 2023; Olsson et al., 2022;  Ahn et al., 2024; Zhou et al., 2023; Raghu et al., 2021), and have been argued to have reached an L2 or L3-level of intelligence (Allen-Zhu &amp; Xu, 2025). However, their problem-solving skills are still imperfect, sometimes resulting in logical errors. Recently, there have been numerous attempts to improve the reasoning accuracy of language models.</p><p>Each box Y has a box Q inside it. Each box Q has a box A inside it. Each box Q has a box O inside it. Each box L has a box K inside it. Each box Q weights 0 pounds on its own. Each box R weights 8 pounds on its own. Each box X weights 6 pounds on its own. Each box Q has a box L inside it. Each box Y has a box L inside it. Each box A weights 1 pounds on its own. Each box O has a box L inside it. Each box Y has a box K inside it. Each box A has a box L inside it. Each box L weights 2 pounds on its own. Each box O weights 3 pounds on its own. Each box A has a box R inside it. Each box K has a box R inside it. Each box Y weights 9 pounds on its own. Each box Q has a box R inside it. Each box O has a box K inside it. Each box K weights 0 pounds on its own. Each box A has a box O inside it. Each box A has a box K inside it. Each box X has a box Y inside it.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>What is the total weight of box X?</head><p>To determine the total weight of box X, we need to calculate the weight of each box inside it, starting from the innermost boxes and working our way out. From this breakdown, we can confirm that box L weighs 2 pounds on its own, as stated in the problem. My initial calculation for the weight of box L was correct.</p><p>Go over the problem statement sentence by sentence to verify your Line 1. Verify your answer. This is not correct.</p><p>Let's go through the problem again and recalculate the total weight of box X, ensuring we account for all the contents and their weights correctly. Observation: Correcting mistakes during generation, rather than after, can save inference tokens (the model avoids generating useless tokens following an erroneous step) and simplify the inference process (eliminating the need for multiple rounds of verification and correction).</p><p>One promising approach is to use a verifier to check the correctness of the language model's output (Li et al., 2023a; Cobbe et al., 2021; Zhang et al., 2024; Skreta et al., 2023; Yang et al., 2022). Interestingly, some studies show that language models can "self-verify" (Weng et al., 2022; Madaan  et al., 2024): They can be prompted to verify the correctness of their own generation, thereby improving overall accuracy. An illustrative example is shown in Figure <ref type="figure" target="#fig_1">1</ref>.</p><p>This leads to the following fundamental questions:</p><p>If a language model can correct its own mistakes after generation, (1) Why does it make those mistakes to begin with? (2) Why doesn't it correct the mistakes immediately during generation, instead of waiting until after?</p><p>There are many works that attempt to understand question (1). Notably, studies such as (Shu &amp; Yu,  2024; Miller et al., 2020; Anil et al., 2022) show that many mistakes arise due to "distribution shift" -the training distribution of the language model differs from the prompts used during testing. Thus, even if the training data is error-free, language models can still make mistakes during generation.</p><p>Much less work focuses on question (2). While correcting mistakes after generation is a valid approach to improve a language model's accuracy, it is more desirable to correct mistakes immediately as they occur, such as "A ⇒ B, oh I made a mistake, actually A ⇒ C." Doing so during generation can save inference tokens (the model does not need to continue generating based on an erroneous step) and simplify the inference framework (eliminating the need to call the model multiple times to verify and correct the answer), see Figure <ref type="figure" target="#fig_1">1</ref>. Thus, can we train language models to directly perform (2)?</p><p>A natural conjecture for why current language models cannot perform (2) is an alignment issue: There might be little to no training data in the language model's corpus to teach it to correct errors immediately. After all, people are unlikely to write an erroneous sentence followed by immediate correction in internet articles.<ref type="foot" target="#foot_0">1</ref> However, even if we are given enough such "retry" training data (i.e., error + immediate correction such as "A ⇒ B, oh I made a mistake, actually A ⇒ C"), is it clear that the language model can improve its overall reasoning correctness?</p><p>• Potential harm of next-token prediction on data with mistakes: Training on data with mistakes can be dangerous. By minimizing the next-token prediction objective, the model might learn to generate mistakes (such as "A ⇒ B") instead of writing the correct steps (i.e., A ⇒ C).</p><p>One could try to mitigate this by masking out the erroneous steps. However, unlike the "error correction after entire generation" type of training data where we can simply mask out the entire generation,<ref type="foot" target="#foot_1">2</ref> here, the error and correction steps are intertwined, making it much harder to mask out the error only.</p><p>• Unclear benefits over training on "perfectly error-free" data: In this paper, we provide initial results towards understanding the usefulness of including training data in the language model's corpus that teaches it to correct errors immediately. Specifically, we ask the following question:</p><p>Can training on retry data (errors and immediate corrections) successfully teach the language model to perform error correction? Can a language model achieve higher reasoning accuracy compared to training on the same amount of perfectly error-free data?</p><p>To initiate our study and perform a controlled experiment, we need a setting where we can reliably collect data with errors and corrections. While it is tempting to use language models such as GPT-4 to synthesize such data, there is no evidence that GPT-4 can robustly generate errors or make those corrections consistently. <ref type="bibr">3</ref> To avoid complicating our conclusions with the success rate and reliability of GPT-4, we need a different setting where we can 100% reliably generate errors and corrections.</p><p>In this work, we choose to use the iGSM dataset (Ye et al., 2025), which consists of a large number of program-generated (not LLM-generated) elementary-school level math reasoning problems. We discuss the dataset and provide examples in Section 2 to make this paper self-contained. Due to the generation procedure, we can also easily construct erroneous steps (simulating the reasoning mistakes that GPT-4 can make on such problems) and make 100% correct corrections to those steps. We choose this setting because mathematical reasoning errors are among the most widely observed errors made by language models. We outline our results in the following section.</p><p>Results 0-1: retry upon regret. We begin with a warmup result. After pretraining the model on perfectly error-free math data, one can finetune it with a small number of trainable parameters (e.g., a rank-8 update on its embedding layer) to detect errors in its solution steps. This finetuning process is remarkably lightweight and essentially indicates that the model "already knows" it has made a mistake (i.e., its internal states exhibit regretful behavior).<ref type="foot" target="#foot_3">4</ref> </p><p>Next, we consider a "retry upon regret" generation process. During the inference phase, if the model detects an error in its generated solution step, it will "regenerate" from the end of its previous sentence. We demonstrate that this process leads to improved accuracy on this math dataset, surpassing what can be achieved using beam search.</p><p>Remark 1.1. This should not be confused with the "self-correction" works (Pan et al., 2023; Huang  et al., 2023; Madaan et al., 2024), where the model evaluates its own output through careful prompting. Here, we finetune the pretrained model for error detection (&gt; 99% accuracy), and this error detection accuracy is significantly higher than that achieved through prompting.</p><p>While this provides strong evidence that language models "regret" their mistakes, improving final accuracy relies solely on randomness (for re-generation) to correct errors -similar to beam search. <ref type="bibr">5</ref> This can take many rounds to re-generate, which is inefficient and requires the error detector to be highly accurate. It also alters the generation process, which might not align with the "general intelligence" framework, where the goal is typically for one model to perform all tasks using the same (autoregressive) decoding algorithm.</p><p>Results 2-6: pretrain with retry data. We now turn our attention to retry data. If the pretraining data includes errors and their immediate corrections (which we call "retry data"), the model can learn to not only detect errors but also correct them, achieving much higher accuracy compared to "retry upon regret" in Section 3. This differs from the "self-correction" line of work: the model learns to automatically retry after detecting an error, without requiring additional prompting or multi-stage generation.</p><p>Furthermore, we discover that even when the model is pretrained entirely on retry data with high error rate (e.g., for the iGSM data, p = 20% or even p = 50%, meaning roughly half of the solution steps have an inserted error), it does not tend to produce erroneous steps during generation. The model still strives to generate "perfectly correct" solutions most of the time and only corrects itself on the rare occasions when it makes a mistake, leading to an overall improvement in accuracy. In fact, within a reasonable range, the higher the p value in the pretraining data, the better the model performs in reasoning accuracy. <ref type="bibr">6</ref> We also observe that it is not necessary to perform label masking on the errors, so the vanilla autoregressive (causal masking) training simply works.</p><p>Result 7: finetune with retry data. In contrast, if a model is already pretrained with error-free data, even using sufficiently many (additional) retry data, with a wide range of LoRA finetuning configurations, label masking or not, the model's accuracy does not significantly improve. This indicates that the skill of error correction can be very different from the original error-free reasoning, and thus requires major weight changes, potentially beyond what parameter-efficient fine-tuning (PEFT) can handle. For comparison, we show that full finetuning is effective when sufficiently many retry data is available, though this resembles continued pretraining.</p><p>Thus, unlike error detection (see Section 3, where even a rank-8 adaptation on the embedding layer suffices), error correction is not a skill that can be easily adapted from a model pretrained with only error-free data. This implies that retry data should be included in the pretraining stage for practical LLM training, rather than in the finetuning (alignment) stage.</p><p>Result 8: prepare fake retry data. Retry data can be difficult to obtain, so we explore practical methods to automatically augment correct math solutions with "fake" mistakes, ideally without needing to semantically parse or understand the correct solution. The most effective method we found is to introduce a random future step B as a "fake error" at each step A in the solution, followed by A as its "correction." This approach encourages the model not to skip steps, even though some solution steps may be interchangeable in order so these may not be true errors. In the synthetic iGSM setting, this method is nearly as effective as retry data with perfectly designed errors and corrections, and it could potentially be adapted to real-life math problems.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Conclusion.</head><p>By utilizing fully-controllable synthetic data (e.g., controlling error rates or label masking), conducting controlled experiments (e.g., beam search vs. retry vs. error-free; pretrain vs. finetune), and performing fair comparisons (e.g., same number of training tokens), the goal of this paper is to try to predict the needs of future LLMs. We do not claim that the synthetic data used here can directly aid in building future LLMs. However, given that commercial LLMs already employ synthetic data (Team, 2024; Marah Abdin et al., 2024) and future LLMs are rumored to use Q ⋆ , it is perhaps crucial to understand how to best prepare and use such data effectively to teach models to learn from the mistakes. We give a more detailed conclusion section in Section 6.  <ref type="formula">2025</ref>) introduced a family of controllable, synthetic datasets of math problems with stepby-step solutions. These data simulate GSM8K (Cobbe et al., 2021), while removing arithmetic difficulties (by restricting computations to integers modulo 23) and common sense knowledge (e.g., a candle burns and its length decreases). What remains is "logic reasoning." The dataset has much larger diversity (over 90 trillion solution templates), and the solutions are fully verifiable. We briefly summarize it to make the paper self-contained, emphasizing some important aspects.</p><p>An example from their dataset is in Figure <ref type="figure">2</ref>. The structure graph describes the set of instance parameters, such as "the number of school daypacks in each film studio." They also allow for abstract parameters, such as "the (total) number of backpacks in central high," which requires hierarchical computation.<ref type="foot" target="#foot_6">7</ref> </p><p>The exact data construction is not important for this paper. What matters is that the parameters form a dependency graph, as shown in Figure <ref type="figure">2</ref>, where a parameter can be computed only when its predecessors have all been computed. To remove arithmetic difficulty, the computations are broken into binary operations -such as 12 + 13 + 7 is broken into (12 + 13) + 7 -ensuring that failure to solve the problems is not due to arithmetic difficulties. They use op to denote the number of operations needed in the solution and prepared four families of data:</p><p>• iGSM-med pq/qp uses op ≤ 15 for train; op ∈ {20, 21, 22, 23} for OOD (out-of-distribution) test. • iGSM-hard pq/qp uses op ≤ 21 for training and op ∈ {28, 29, 30, 31, 32} for OOD testing.</p><p>Here, pq denotes the problem description comes before the question, and qp otherwise. They also introduce reask data for evaluation purposes: for instance, iGSM-med op=20,reask pq is a dataset constructed by first creating iGSM-med op=20 pq and then re-sampling a parameter to query -this greatly changes their math data distribution, making it a good candidate for OOD evaluation. (After reask, the problem's op value may change.) They showed that GPT-4/4o cannot solve such problems for op &gt; 10 (even with few-shot learning and their best efforts to remove English and arithmetic difficulties), indicating that the datasets are of some non-trivial difficulty. For completeness, we include in Figure <ref type="figure">9</ref> on Page 16 an example with op = 21 to illustrate that these problems require non-trivial reasoning even for humans.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">RESULT 0-1: LANGUAGE MODELS CAN RETRY UPON REGRET</head><p>Generative models solve math problems step by step in a chain-of-thought (CoT) manner. Each step in our math problems is a single sentence formatted as "Define [param] as X; so ...", as shown in Figure <ref type="figure">2</ref>. How do generative models make mistakes in this CoT process?</p><p>The most common reasoning mistake<ref type="foot" target="#foot_7">8</ref> occurs when the model generates a [param] that is not yet ready for computation (i.e., the model has not determined the values of all parameters that [param] depends on, also known as "skipping steps", a frequent error even in GPT-4 (Bubeck et al., 2023)).</p><p>For example, in Figure <ref type="figure">2</ref>, if the model generates "Define Central High's Film Studio" as the first few words in its solution, it cannot go back and erase this sentence, leading to a mistake. Ye et al. (2025)  confirmed that not only do language models pretrained using the iGSM datasets make mistakes in this manner, but even GPT-4/GPT-4o make such mistakes (when using few-shot). It's worth noting that the failure example in Figure <ref type="figure" target="#fig_1">1</ref> is also in this spirit.</p><p>3.1 RESULT 0: MODELS CAN BE "REGRETFUL" AFTER MAKING MISTAKES Interestingly, their same paper also implies the following: Result 0. [corollary of (Ye et al., 2025)]For models pretrained on iGSM (with correct solutions only!), during their solution generation process, after writing "Define [param] as" for a wrong [param], they often "realize" such a mistake, showing a regretful pattern in their internal states.</p><p>To see this, one can apply their probing technique (illustrated in Figure <ref type="figure">3</ref>(a)) to extract information from the model's last hidden layer after "Define [param A] as" to see if the model knows A can truly be computed next. This probing task is denoted as can next(A) ∈ {true, false}. They found:</p><p>• When A ranges over all possible parameters, the probing 99% accurately predicts can next(A), meaning the model knows if A can be computed next, even for the hardest op = 32 problems. • When the model makes a mistake, the first sentence with a mistake usually has can next(A) = false. Probing shows the model has ∼60% chance of knowing can next(A) = false, indicating it often knows it has made a mistake, right after stating the parameter name in full.<ref type="foot" target="#foot_8">9</ref> </p><p>This indicate that the model's internal states exhibit some "regretful" pattern, which can be detected via probing such as can next, which is almost just a linear classifier on top of its hidden states. <ref type="bibr">10</ref> In other words, error detection is easy and is a skill almost already embedded within the model's internal states, even when pretrained on correct math problems only.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">RESULT 1: LET MODELS RETRY UPON REGRET</head><p>If a model knows it is a mistake, why does it generate the wrong [param A] in the first place? The issue lies in the generation process. Before explicitly stating "Define [param A] as", the model might falsely think A is ready to compute among all the parameters it can focus on. After stating it, the model shifts its focus to the actual computation of A, and this is the moment it can better realize that A is not ready for computation (using its attention mechanism).<ref type="foot" target="#foot_10">11</ref> Now that we know the model exhibits some "regret" towards the mistake, can we use this to improve accuracy?</p><p>Retry upon regret. We conducted an experiment using the probing result to guide the model's generation process. After generating each solution sentence, we use the can next probing to   (b) Retry upon regret vs. original accuracies. Version1/2 uses the can next probing to detect regret (see Section 3.2, they can detect errors to 99% accuracy), and versionP uses a perfect error detector to decide when to retry.</p><p>Figure <ref type="figure">3</ref>: The can next probing and using it to assist the model's generation process.</p><p>determine if the model knows it has made a mistake. If so, we revert to the end of the previous sentence and regenerate. We use multinomial sampling (i.e., beam=1 and dosample=true) during this regeneration process, with a maximum of 10 total retries for generating each solution. <ref type="bibr">12</ref> We call this method "retry upon regret", and we carefully compare a few different versions (details are in Appendix G.2).</p><p>• The original can next probing (Ye et al., 2025) freezes the pretrained model and fine-tunes a rank-8 update on the embedding layer -we call this "version1", and it can 99% accurately detect errors.<ref type="foot" target="#foot_12">13</ref> • We additionally consider a different can next probing that fine-tunes more parameters but with only 0.25% data -we call this "version2", and it can also 99% accurately detect errors. • For comparison, we also consider the perfect, ground-truth can next error detector and call this "versionP"; and we use "versionP50" to indicate using a maximum of 50 total retries.</p><p>The goal of version1 is to check if we can use extremely small parameter changes from the pretrained model for error detection and use this towards higher accuracies. The goal of version2 is to check if we can use a small number of fine-tuning samples for error detection. The goal of versionP/P50 is for comparison purposes; after all, allowing perfect error detection can enable the model to correct nearly all mistakes if retried infinitely.</p><p>We compared this with the original generation (with beam=1, 4, 16, and 32); and we used beam=1 or 4 for all versions of "retry upon regret." The results give rise to the following:</p><p>Result 1 (Figure <ref type="figure">3(b)</ref>). The idea of "retry upon regret" can improve reasoning accuracy, to an extent better than beam search. However, the accuracy gain can be limited unless the error detector is highly accurate. This also alters the inference process and increases the inference complexity.</p><p>We explain the three sentences in detail below:</p><p>• Comparing version1/2 with beam32, we see "retry upon regret" improves upon beam search. However, even though error detection is 99% accurate, this improvement is still marginal: about 2% for the op = 23 (resp. op = 32) case for iGSM-med (resp. iGSM-hard). (a) A solution example identical to Figure <ref type="figure">2</ref> but with retry rate = 0.5. The strikethrough like "Define Central High's Backpack as" is for illustration purpose,and the actual data is normal English text without strikethrough symbols. 94.9 100 99.8 96.6 94.2 91.5 87.5 96.9 100 99.8 96.0 93.8 89.9 84.0 92.5 100 99.9 97.3 96.6 94.6 91.8 87.9 92.9 100 99.9 97.2 96.0 94.8 91.9 89.2 92.4 94.8 100 99.9 97.9 96.8 95.2 91.6 96.0 100 99.8 96.7 94.5 92.0 88.3 93.4 100 99.8 97.9 96.6 95.8 93.7 91.7 95.6 100 99.9 98.4 97.0 96.4 95.0 92.1 92.9 96.2 100 99.9 97.2 95.5 93.0 87.8 95.8 100 99.9 97.4 96.2 94.4 90.9 93.7 100 99.9 98.6 97.1 96.5 95.0 92.9 95.3 100 99.9 98.5 97.5 96.8 95.3 94.0 91.3 96.3 100 99.8 97.6 95.8 94.3 90.6 97.6 100 99.9 97.7 95.4 93.4 90.2 93.4 100 99.9 99.1 98.1 97.8 96.7 94.8 97.3 100 99.8 97.1 95.4 94.3 93.0 89.3 93.1 96.4 100 99.9 98.3 96.8 95.8 93.6 96.1 100 99.9 98.7 98.0 96.9 94.5 96.0 100 99.9 98.9 98.1 97.1 95.6 93.9 98.8 100 99.9 98.3 97.2 96.3 94.9 93.7 97.0 97.5 100 100 98.8 97.9 96.8 94.8 96.0 100 99.8 97.9 96.9 95.2 93.2 91.5 100 100 99.1 98.9 98.4 96.6 96.2 97.3 100 100 99.5 98.9 98.4 97.5 95.8 96.9 97.7</p><p>(b) Comparison of models pretrained using iGSM data with retry rate &gt; 0. For a stronger comparison, the model is pretrained on the retry vs original (error-free) data using the same number of tokens (i.e., retry data has fewer problems than original data) and identical training parameters, see Appendix G.1.</p><p>Figure <ref type="figure">4</ref>: Pretrain language models on error-free vs retry data. Observation: especially on the hardest tasks (op = 23 or 32), models pretrained from retry data exhibit the greatest improvements for larger retry rate.</p><p>• Comparing version1/2 with versionP, we see that the success of "retry upon regret" largely depends on an extremely accurate error detector -increasing the error detection success rate from 99% to 100% can significantly improve the final reasoning accuracy, but this is too ideal.<ref type="foot" target="#foot_13">14</ref> • The idea of "retry upon regret" increases the inference complexity because one needs to keep an error detector model alongside and keep checking the correctness of the generated solution steps. In the event of an error, the model needs to regenerate using randomness (possibly multiple times) until it passes the error detector. Ideally, one wishes to have just one model to achieve "general intelligence" using the simplest autoregressive decoding algorithm, without multi-round error corrections.</p><p>4 RESULT 2-6: PRETRAIN WITH RETRY DATA</p><p>In this section, we prepare pretrain data to teach the model to directly correct mistakes.</p><p>Math data with retry. Since we use a controllable, synthetic math dataset, we can, at the beginning of each solution sentence, with probability retry rate ∈ [0, 1), insert a wrong parameter that cannot be computed next, followed by a special token [BACK]. <ref type="bibr">15</ref> We repeat this process, so with probability (retry rate) 2 , it may generate another wrong parameter at the same location, and so on. We provide an extreme example with retry rate = 0.5 in Figure <ref type="figure">4</ref>(a), and a more complex example with op = 21 and retry rate = 0.2 in Figure <ref type="figure">9</ref>. We call this the retry data (with error and correction), to distinguish that from the original (error-free) data.</p><p>• Can a language model be pretrained using retry data to improve its reasoning accuracy compared with language models pretrained on the error-free data?</p><p>We conduct experiments on the iGSM-med pq/qp and iGSM-hard pq/qp datasets for retry rate ranging from 0.01 to 0.5. For a controlled comparison, we compare models when they are pretrained using the same number of tokens (along with other parameters). <ref type="bibr">16</ref> This means, when pretrained with retry data, the model sees fewer math problems compared to the original training; when pretrained with larger retry rate, the model also sees fewer math problems.</p><p>Another important question when pretraining with retry data is that:</p><p>• Is it necessary to introduce label masks to prevent the model from learning the mistakes?</p><p>Adding masking might make intuitive sense because we do not want the model to learn the mistakes -we only want it to learn to correct errors if needed. To answer this, we also perform controlled experiment to compare (1) standard auto-regressive pretraining and (2) pretraining with masking: adding label masks to ignore the auto-regressive loss on the wrong parameter tokens (i.e., ignoring text with strikethrough in Figure <ref type="figure">4</ref>(a)).</p><p>Result 2-3. Our results in Figure <ref type="figure">4</ref>(b) strongly support that:</p><p>• Within a reasonable range, 17 the more mistakes the better. Especially on hard problems, such as on iGSM-med op=23 qp , the accuracy jumps from 78% to 94% by using retry rate = 0.5.</p><p>• Masking mistakes is unnecessary. We observe that it is generally not needed to introduce label masking on the error data even for large retry rate = 0.5.</p><p>A reader seeing this for the first time may find the above results unbelievable: if the pretrain data is full of mistakes (even with retry rate = 0.5), doesn't this interfere with the model's learning and encourage it to make lots of mistakes? To address this, we compute the statistics on how many times the pretrained model performs retries (i.e., how many [BACK] tokens it uses) during evaluation. We discover that (Figure <ref type="figure">6</ref> deferred to full paper):</p><p>Result 4 (Figure <ref type="figure">6</ref>). Models pretrained on retry data hardly retry (unless retry rate is very high).</p><p>For instance, Figure <ref type="figure">6</ref>(a) shows if retry rate = 0.2, even when pretrained without label masking, the model retries an average of &lt; 0.3 times even for math problems with large op. This is because at each solution step, the retry data still has a higher 1 -0.2 = 0.8 chance to produce an error-free step. Thus, a model pretrained from such data is still incentivized to generate correct steps (e.g., using a low temperature). <ref type="bibr">18</ref> If retry rate = 0.5, this average retry count becomes 2 ∼ 4, but can be mitigated using label masking. Only on those wrong solutions does the model try its best to retry and fail in the end, see Figure <ref type="figure">6</ref>(b).</p><p>Another concern with the retry data is whether the model can still output shortest solutions. Ye et al.  (2025) discovered that language models can learn to produce shortest solutions without computing any unnecessary parameters. <ref type="bibr">19</ref> Does the introduction of math data with errors increase the solution length? We discover that:</p><p>Result 5 (Figure <ref type="figure">7</ref>). Models pretrained on retry data can still output shortest math solutions.</p><p>(Defer Figure <ref type="figure">7</ref> to full paper, which shows that when pretrained using retry data, model's generated solutions compute the same (small) number of unnecessary parameter as using original data.)</p><p>Combining Results 2-5, we see that it is safe to include retry data of this format as pretrain data to improve the model's reasoning accuracy. There is no change to the pretrain or inference process, no need to increase training time, and the solutions still satisfy many desirable properties.</p><p>Finally, it is tempting to compare retry data with beam search, which lets the model generate multiple solutions at each step and pick the most likely continuation based on the log-likelihood. As long as the model is pretrained on error-free data, even with 16 or 32 beams, its accuracy does not noticeable improve in all the cases (recall Figure <ref type="figure">3(b</ref>)); while in contrast, if the model is pretrained with retry data, the accuracy easily goes up in Figure <ref type="figure">4</ref>(b) (and this holds even for beam=1). 20</p><p>17 Naturally, retry rate cannot approach 1. Exploring such extreme failure settings is not particularly interesting. For instance, retry rate = 0.5 is already sufficiently extreme, indicating that half of the solution steps contain errors.</p><p>18 Even when retry rate = 0.5, if errors are sufficiently random (say, in a step there are 2 correct possibilities but 8 possible errors), the model is still incentivized to say correct sentences. This could be reminiscent of language model's learning on context-free grammars with mistakes (Allen-Zhu &amp; Li, 2023): even though the model is trained only using data with grammar mistakes, it can output sentences correctly respecting the grammar at lower temperature.</p><p>19 They discover the model achieves so via non-trivial mental planning to precompute the set of necessary parameters, before it starts to even generate the first solution sentence. <ref type="bibr">20</ref> To present the cleanest result, in Figure <ref type="figure">4</ref>(b) we present the best accuracy among beam=1 or 4; one can still observe a high accuracy boost for beam=1 when pretrained with retry data.</p><p>Similarly, "retry upon regret" lets the model re-generate another solution step if error is detected, and this for instance gives only accuracy gain 78% ⇒ 80% in the iGSM-med op=23 pq case (recall Figure <ref type="figure">3</ref>(b)), while pretrain with retry data can give 78% ⇒ 95%. This is strong signal that: Result 6. Error correction is a skill that can be fundamentally different from beam search or retry based on the model's randomness.</p><p>Therefore, to truly improve the model's reasoning capability, it is crucial to modify the training data to include mistakes and their corrections.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">RESULTS 7-8</head><p>Due to space limitation, we omit the technical details for Results 7-8 in this ICLR version to encourage readers to refer to our full paper at ssrn.com/abstract=5250631. We remark that the full paper underwent the ICLR 2025 review process, but we elected to present this camera-ready version as an extended abstract, aligning with the tradition in the theory community.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6">CONCLUSION</head><p>In this paper, we investigate whether language models can benefit from pretraining on data containing mistakes, followed by immediate error correction. Using a fully controllable synthetic setting, we demonstrate that models trained on such data outperform those trained on the same amount of error-free data.</p><p>In addition to the accuracy gain, Section 4 shows that using retry data is very safe: the model rarely makes mistakes even after pretraining with high error-rate retry data, and it is unnecessary to change the training process (simply autoregressive, no need to label-mask the errors). Retry data teaches models how to correct errors if needed, rather than encouraging mistakes.</p><p>It is important to note that such error correction skill does not come easily. A model pretrained with only error-free data cannot use (1) beam search or (2) retry based on error detection ("retry upon regret") to achieve comparable performance, see Section 3, unless the error detection is nearly perfect. This error correction skill is also very different from the original error-free reasoning and thus cannot be learned during parameter-efficient fine-tuning (PEFT) such as LoRA, see Result 7. This implies the necessity of adding retry data to the pretrain data for language models to truly learn the capability to correct errors.</p><p>While grade-school level math problems have many other difficulties (including arithmetic or common sense), following Ye et al. (2025), we have focused on the (logic-following) reasoning aspect, which is one of the weakest aspects of  While it is unlikely that iGSM retry data will be directly used for pretraining future commercial-level LLMs, this paper aims to find guiding principles for necessary ingredients. We strongly discourage using fine-tuning to teach a model to correct errors (or using beam search, or letting the model regenerate upon encountering a mistake) as these are not effective. We advocate for adding mistakes and corrections at the pretrain level. While commercial LLMs use synthetic data (Team, 2024;  Marah Abdin et al., 2024) and future LLMs are rumored to use Q ⋆ , it remains a question of how to prepare such synthetic data for the model to best learn error correction. Our Result 8 suggests that it is critical to teach a model not to skip steps. This can be done either through naively creating retry weak data like ours or using more advanced prompting methods to encourage an auxiliary model to rewrite math data into such a format. We cannot explore such follow-up directions due to GPU resource limitations.</p><p>Finally, Part 2 of this work series focuses on how language models solve grade-school math level reasoning problems (including Part 2.1 (Ye et al., 2025)). We also cover how language models learn language structures in Part 1 (Allen-Zhu &amp; Li, 2023) and learn world knowledge in Part 3 (Allen-Zhu  &amp; Li, 2024; 2025a;b), as well as how these may impact architecture design (Allen-Zhu, 2025).</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head></head><label></label><figDesc>*Box K**: Weighs 0 pounds on its own, but contains a box R. … … … 8. **Box X**: Weighs 6 pounds on its own, contains a box Y. -Total weight of box X = 6 + 74 (box Y) = 80 pounds. Therefore, the total weight of box X is 80 pounds. User GPT-4o (2024-08-06 version): Certainly! Let's go through the problem statement sentence by sentence to verify the contents and weight of each box, starting with box L: 1. **"Each box Y has a box Q inside it."** -This tells us that box Y contains box Q. … … … 4. **"Each box L has a box K inside it."** -This tells us that box L contains box K. … … … 14. **"Each box L weights 2 pounds on its own."** -This tells us the weight of box L is 2 pounds. … … … 24. **"Each box X has a box Y inside it."** -This tells us that box X contains box Y.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 1 :</head><label>1</label><figDesc>Figure 1: An illustration of how GPT-4o self-verifies and corrects its own mistakes.Observation: Correcting mistakes during generation, rather than after, can save inference tokens (the model avoids generating useless tokens following an erroneous step) and simplify the inference process (eliminating the need for multiple rounds of verification and correction).</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>[</head><label></label><figDesc>BOS] The number of each Riverview High ... How many Backpack …? [SOL] Define … Define Central High's Film Studio as B; so B = p + W = 17 + 13 = 7. Define Film Studio's School Daypack as decoder layer (attention + MLP) … decoder layer (attention + MLP) problem question some parameter A a prefix of solution Predict can_next(A) ∈ {True, False} (a) can next probing(Ye et al., 2025). After pretraining, V-probing technique can detect if the model's internal states exhibit a regretful pattern: right after "Define param A as," the model no longer thinks A is ready for compute.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head></head><label></label><figDesc>retry upon regret | version1 | beam1 retry upon regret | version1 | beam4 retry upon regret | version2 | beam1 retry upon regret | version2 | beam4 retry upon regret | versionP | beam1 retry upon regret | versionP | beam4 retry upon regret | versionP50 | beam1 retry upon regret | versionP50</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>(</head><label></label><figDesc>Solution -retry rate 0.5) Define Dance Studio's School Daypack as p; so p = 17. Define Film Studio's School Daypack as [BACK]. Define Film Studio's Messenger Backpack as W; so W = 13. Define Central High's Classroom as [BACK]. Define Central High's Backpack as [BACK]. Define Central High's Film Studio as B; so B = p + W = 17 + 13 = 7. Define Film Studio's School Daypack as g; R = W + B = 13 + 7 = 20; so g = 12 + R = 12 + 20 = 9. Define Riverview High's Dance Studio as [BACK]. Define Film Studio's Backpack as w; so w = g + W = 9 + 13 = 22. Define Riverview High's Dance Studio as [BACK]. Define Central High's Backpack as c; so c = B * w = 7 * 22 = 16.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head></head><label></label><figDesc>The number of each Riverview High's Film Studio equals 5 times as much as the sum of each Film Studio's Backpack and each Dance Studio's School Daypack. The number of each Film Studio's School Daypack equals 12 more than the sum of each Film Studio's Messenger Backpack and each Central High's Film Studio. The number of each Central High's Film Studio equals the sum of each Dance Studio's School Daypack and each Film Studio's Messenger Backpack. The number of each Riverview High's Dance Studio equals the sum of each Film Studio's Backpack, each Film Studio's Messenger Backpack, each Film Studio's School Daypack and each Central High's Backpack. The number of each Dance Studio's School Daypack equals 17. The number of each Film Studio's Messenger Backpack equals 13. How many Backpack does Central High have? An example of a math problem with op = 7 operations needed to compute its solution. A much harder example with op = 20 is in Figure 9.</figDesc><table><row><cell cols="6">(Solution) Define Dance Studio's School Daypack as p; so p = 17. Define Film Studio's Messenger Backpack as W; so W = 13. Define</cell></row><row><cell cols="6">Central High's Film Studio as B; so B = p + W = 17 + 13 = 7. Define Film Studio's School Daypack as g; R = W + B = 13 + 7 = 20; so g =</cell></row><row><cell cols="6">12 + R = 12 + 20 = 9. Define Film Studio's Backpack as w; so w = g + W = 9 + 13 = 22. Define Central High's Backpack as c; so c = B * w</cell></row><row><cell cols="2">= 7 * 22 = 16. Answer: 16.</cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell cols="2">Structure Graph</cell><cell></cell><cell>Dependency Graph</cell><cell></cell></row><row><cell>School</cell><cell>Central High</cell><cell>Riverview High</cell><cell>&amp;HQWUDO+LJ KV)LOP6W XGLR</cell><cell>)LOP6WXGLR V0HVVHQJHU %DFNSDFN</cell><cell>)LOP6WXGLR V%DFNSDFN</cell></row><row><cell>Classroom</cell><cell>Dance Studio</cell><cell>Film Studio</cell><cell>)LOP6WXGLR V6FKRRO 'D\SDFN</cell><cell>51*</cell><cell>'DQFH6WXGL RV6FKRRO 'D\SDFN</cell></row><row><cell>Backpack</cell><cell>School Dayp-ack</cell><cell>Messenger Backpack</cell><cell>&amp;HQWUDO+LJ KV%DFNSDFN neccesary paramter abstract dependency</cell><cell>5LYHUYLHZ +LJKV)LOP 6WXGLR unused paramter instance dependency</cell><cell>5LYHUYLHZ +LJKV'DQFH 6WXGLR question paramter</cell></row><row><cell>Figure 2:</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row></table><note><p><p><p>(Problem) </p>2 SYNTHETIC MATH DATA FROM PRIOR WORK</p>Ye et al. (</p></note></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="1" xml:id="foot_0"><p>If they make an error when writing an article and realize it afterward, they will simply delete the error line in the final article.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="2" xml:id="foot_1"><p>For example, we can have training data like [MaskStart] A wrong math solution [MaskEnd] What is the error in the above solution? ...</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="3" xml:id="foot_2"><p>Although GPT-4 can sometimes "verify" the correctness of a generated solution, its verification accuracy is far from 100%. In the example of Figure1, using prompts such as "Please verify carefully and correct your solution," "Please check your solution line by line carefully, matching it to the problem description," or even "You made a mistake in Line 1, please correct it," or "I am very sure you made a mistake in Line 1, please correct it by checking it against the problem statement carefully," GPT-4o can insist that its solution is correct and makes no correction (using the 2024-08-06 version with temperature 0).</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="4" xml:id="foot_3"><p>Similar observations have been made in<ref type="bibr" target="#b15">(Liu et al., 2023;</ref> Li et al., 2023b; Wang et al., 2024), where a pretrained transformer can be easily finetuned to effectively verify its own solutions (true or false).</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="5" xml:id="foot_4"><p>Beam search does not have the "error detection" subroutine but uses the model's next-token prediction probability distribution to simulate a re-generation process.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="6" xml:id="foot_5"><p>To provide a strong comparison, for different p we pretrain over the same number of tokens; so a higher p means we pretrain over a smaller number of problems, because solutions with a larger p are longer.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="7" xml:id="foot_6"><p>In this example, it equals A × (B1 + B2) for A = central high's number of film studios, B1, B2 = each film studio's number of school daypacks / messenger backpacks.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="8" xml:id="foot_7"><p>In practice, language models can make other mistakes such as in arithmetic or common sense (see Section 2); however, the design of the iGSM datasets has removed such difficulties, allowing us to focus solely on the reasoning aspect.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="9" xml:id="foot_8"><p>Note that 60% accuracy is significant. If it were a random guess, 50% accuracy would be trivial. However, the probing method is 99% accurate in predicting true or false, and only on a small set of examples (i.e., when making mistakes), it has a 60% chance of correctly predicting can next(A) = false.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="10" xml:id="foot_9"><p>This aligns with observations that detecting mistakes is usually easy: in works like<ref type="bibr" target="#b15">(Liu et al., 2023;</ref> Li  et al., 2023b; Wang et al., 2024), they show pretrained transformers can be easily fine-tuned to effectively verify their own solutions (true or false).</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="11" xml:id="foot_10"><p>Similar phenomenon also occurs in knowledge partial retrieval(Allen-Zhu &amp; Li, 2025a).</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="12" xml:id="foot_11"><p>It is necessary to limit the maximum number of retries to avoid infinite loops.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="13" xml:id="foot_12"><p>See their reported probing accuracy table, where the can next(A) probing accuracies can be 99% even for op = 23 on iGSM-med or for op = 32 on iGSM-hard.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="14" xml:id="foot_13"><p>After all, a false negative in error detection results in a wrong answer, and having a false positive can result in the model regenerating too many times.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="15" xml:id="foot_14"><p>This parameter is uniformly randomly chosen from all such parameters, except those already appearing.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="16" xml:id="foot_15"><p>The same training parameters such as batch size, total steps, learning rates, see Appendix G. In particular, we adopt the learning rate from<ref type="bibr" target="#b29">(Ye et al., 2025)</ref> (which was best tuned for the original error-free data) directly to the retry data.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="21" xml:id="foot_16"><p>In contrast, arithmetic such as 10-digit multiplications can be (and perhaps should be) handled by calculators to save the model's capacity for other skills.</p></note>
+		</body>
+		<back>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<analytic>
+		<title level="a" type="main">Transformers learn to implement preconditioned gradient descent for in-context learning</title>
+		<author>
+			<persName><forename type="first">Kwangjun</forename><surname>Ahn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiang</forename><surname>Cheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hadi</forename><surname>Daneshmand</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Suvrit</forename><surname>Sra</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<analytic>
+		<title level="a" type="main">Physics of Language Models: Part 4.1, Architecture Design and the Magic of Canon Layers</title>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Allen-Zhu</surname></persName>
+		</author>
+		<idno type="DOI">10.2139/ssrn.5240330</idno>
+		<ptr target="https://ssrn.com/abstract=5240330" />
+	</analytic>
+	<monogr>
+		<title level="j">SSRN Electronic Journal</title>
+		<imprint>
+			<date type="published" when="2025-05">May 2025</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Physics of Language Models: Part 1, Learning Hierarchical Language Structures</title>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Allen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">-Zhu</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<ptr target="https://ssrn.com/abstract=5250639" />
+	</analytic>
+	<monogr>
+		<title level="j">SSRN Electronic Journal</title>
+		<imprint>
+			<date type="published" when="2023-05">May 2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Physics of Language Models: Part 3.1, Knowledge Storage and Extraction</title>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Allen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">-Zhu</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<ptr target="https://ssrn.com/abstract=5250633" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 41st International Conference on Machine Learning, ICML 2024</title>
+		<meeting>the 41st International Conference on Machine Learning, ICML 2024</meeting>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<analytic>
+		<title level="a" type="main">Physics of Language Models: Part 3.2, Knowledge Manipulation</title>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Allen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">-Zhu</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<ptr target="https://ssrn.com/abstract=5250621" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 13th International Conference on Learning Representations, ICLR 2025, 2025a. Full version</title>
+		<meeting>the 13th International Conference on Learning Representations, ICLR 2025, 2025a. Full version</meeting>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title level="a" type="main">Physics of Language Models: Part 3.3, Knowledge Capacity Scaling Laws</title>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Allen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">-Zhu</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<ptr target="https://ssrn.com/abstract=5250617" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 13th International Conference on Learning Representations, ICLR 2025, 2025b. Full version available at</title>
+		<meeting>the 13th International Conference on Learning Representations, ICLR 2025, 2025b. Full version available at</meeting>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">DOGE: Reforming AI Conferences and Towards a Future Civilization of Fairness and Justice</title>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Allen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">-Zhu</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaoli</forename><surname>Xu</surname></persName>
+		</author>
+		<idno type="DOI">10.2139/ssrn.5127931</idno>
+		<ptr target="https://ssrn.com/abstract=5127931" />
+	</analytic>
+	<monogr>
+		<title level="j">SSRN Electronic Journal</title>
+		<imprint>
+			<date type="published" when="2025-02">February 2025</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Exploring length generalization in large language models</title>
+		<author>
+			<persName><forename type="first">Cem</forename><surname>Anil</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuhuai</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anders</forename><surname>Andreassen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aitor</forename><surname>Lewkowycz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vedant</forename><surname>Misra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vinay</forename><surname>Ramasesh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ambrose</forename><surname>Slone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guy</forename><surname>Gur-Ari</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ethan</forename><surname>Dyer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Behnam</forename><surname>Neyshabur</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="38546" to="38556" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">GPT-NeoX-20B: An open-source autoregressive language model</title>
+		<author>
+			<persName><forename type="first">Sid</forename><surname>Black</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stella</forename><surname>Biderman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Hallahan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quentin</forename><surname>Anthony</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Leo</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laurence</forename><surname>Golding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Horace</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Connor</forename><surname>Leahy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kyle</forename><surname>Mcdonell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><surname>Phang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Pieler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shivanshu</forename><surname>Usvsn Sai Prashanth</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laria</forename><surname>Purohit</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Reynolds</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ben</forename><surname>Tow</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Samuel</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Weinbach</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2204.06745" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the ACL Workshop on Challenges &amp; Perspectives in Creating Large Language Models</title>
+		<meeting>the ACL Workshop on Challenges &amp; Perspectives in Creating Large Language Models</meeting>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<monogr>
+		<author>
+			<persName><forename type="first">Sébastien</forename><surname>Bubeck</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Varun</forename><surname>Chandrasekaran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ronen</forename><surname>Eldan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Johannes</forename><surname>Gehrke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Horvitz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ece</forename><surname>Kamar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yin</forename><surname>Tat Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Scott</forename><surname>Lundberg</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2303.12712</idno>
+		<title level="m">Sparks of artificial general intelligence: Early experiments with gpt-4</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<title level="m" type="main">Training verifiers to solve math word problems</title>
+		<author>
+			<persName><forename type="first">Karl</forename><surname>Cobbe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vineet</forename><surname>Kosaraju</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mohammad</forename><surname>Bavarian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heewoo</forename><surname>Jun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukasz</forename><surname>Kaiser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthias</forename><surname>Plappert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jerry</forename><surname>Tworek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Hilton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Reiichiro</forename><surname>Nakano</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2110.14168</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">Lora: Low-rank adaptation of large language models</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Edward</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Phillip</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Wallis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Allen-Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shean</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Chen</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICLR</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<monogr>
+		<title level="m" type="main">Large language models cannot self-correct reasoning yet</title>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinyun</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Swaroop</forename><surname>Mishra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Huaixiu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adams</forename><forename type="middle">Wei</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinying</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Denny</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zhou</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.01798</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<analytic>
+		<title level="a" type="main">Making language models better reasoners with step-aware verifier</title>
+		<author>
+			<persName><forename type="first">Yifei</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeqi</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shizhuo</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiang</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian-Guang</forename><surname>Lou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Chen</surname></persName>
+		</author>
+		<idno type="DOI">10.18653/v1/2023.acl-long.291</idno>
+		<ptr target="https://aclanthology.org/2023.acl-long.291" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics</title>
+		<editor>
+			<persName><forename type="first">Anna</forename><surname>Rogers</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Jordan</forename><surname>Boyd-Graber</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Naoaki</forename><surname>Okazaki</surname></persName>
+		</editor>
+		<meeting>the 61st Annual Meeting of the Association for Computational Linguistics<address><addrLine>Toronto, Canada</addrLine></address></meeting>
+		<imprint>
+			<publisher>Association for Computational Linguistics</publisher>
+			<date type="published" when="2023-07">July 2023</date>
+			<biblScope unit="volume">1</biblScope>
+			<biblScope unit="page" from="5315" to="5333" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Making language models better reasoners with step-aware verifier</title>
+		<author>
+			<persName><forename type="first">Yifei</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeqi</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shizhuo</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiang</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian-Guang</forename><surname>Lou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Chen</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics</title>
+		<meeting>the 61st Annual Meeting of the Association for Computational Linguistics</meeting>
+		<imprint>
+			<publisher>Long Papers</publisher>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">1</biblScope>
+			<biblScope unit="page" from="5315" to="5333" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<monogr>
+		<author>
+			<persName><forename type="first">Bingbin</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sebastien</forename><surname>Bubeck</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ronen</forename><surname>Eldan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Janardhan</forename><surname>Kulkarni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anh</forename><surname>Nguyen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rachel</forename><surname>Ward</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Zhang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2312.09241</idno>
+		<title level="m">TinyGSM: achieving &gt; 80% on GSM8k with small language models</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">Self-refine: Iterative refinement with self-feedback</title>
+		<author>
+			<persName><forename type="first">Aman</forename><surname>Madaan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Niket</forename><surname>Tandon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prakhar</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Skyler</forename><surname>Hallinan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luyu</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sarah</forename><surname>Wiegreffe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Uri</forename><surname>Alon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nouha</forename><surname>Dziri</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shrimai</forename><surname>Prabhumoye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yiming</forename><surname>Yang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<monogr>
+		<author>
+			<persName><forename type="first">Marah</forename><surname>Abdin</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.14219</idno>
+		<title level="m">Phi-3 technical report: A highly capable language model locally on your phone</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">The effect of natural distribution shift on question answering models</title>
+		<author>
+			<persName><forename type="first">John</forename><surname>Miller</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karl</forename><surname>Krauth</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Recht</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ludwig</forename><surname>Schmidt</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="6905" to="6916" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<monogr>
+		<author>
+			<persName><forename type="first">Catherine</forename><surname>Olsson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nelson</forename><surname>Elhage</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Neel</forename><surname>Nanda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicholas</forename><surname>Joseph</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nova</forename><surname>Dassarma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Henighan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ben</forename><surname>Mann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Askell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuntao</forename><surname>Bai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anna</forename><surname>Chen</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2209.11895</idno>
+		<title level="m">-context learning and induction heads</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<monogr>
+		<author>
+			<persName><forename type="first">Liangming</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Saxon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenda</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deepak</forename><surname>Nathani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinyi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wang</forename></persName>
+		</author>
+		<idno type="arXiv">arXiv:2308.03188</idno>
+		<title level="m">Automatically correcting large language models: Surveying the landscape of diverse selfcorrection strategies</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<analytic>
+		<title level="a" type="main">Language models are unsupervised multitask learners</title>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rewon</forename><surname>Child</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Luan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dario</forename><surname>Amodei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Sutskever</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">OpenAI blog</title>
+		<imprint>
+			<biblScope unit="volume">1</biblScope>
+			<biblScope unit="issue">8</biblScope>
+			<biblScope unit="page">9</biblScope>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Do vision transformers see like convolutional neural networks?</title>
+		<author>
+			<persName><forename type="first">Maithra</forename><surname>Raghu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Unterthiner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Simon</forename><surname>Kornblith</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chiyuan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Dosovitskiy</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="page" from="12116" to="12128" />
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">Distribution shifts are bottlenecks: Extensive evaluation for grounding language models to knowledge bases</title>
+		<author>
+			<persName><forename type="first">Yiheng</forename><surname>Shu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiwei</forename><surname>Yu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 18th Conference of the European Chapter</title>
+		<meeting>the 18th Conference of the European Chapter</meeting>
+		<imprint>
+			<publisher>Student Research Workshop</publisher>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="page" from="71" to="88" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<monogr>
+		<title level="m" type="main">Errors are useful prompts: Instruction guided task programming with verifier-assisted iterative prompting</title>
+		<author>
+			<persName><forename type="first">Marta</forename><surname>Skreta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naruki</forename><surname>Yoshikawa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sebastian</forename><surname>Arellano-Rubach</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhi</forename><surname>Ji</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lasse</forename><surname>Bjørn Kristensen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kourosh</forename><surname>Darvish</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alán</forename><surname>Aspuru-Guzik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Florian</forename><surname>Shkurti</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Animesh</forename><surname>Garg</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2303.14100</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<monogr>
+		<title level="m" type="main">Roformer: Enhanced transformer with rotary position embedding</title>
+		<author>
+			<persName><forename type="first">Jianlin</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengfeng</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Wen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunfeng</forename><surname>Liu</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<monogr>
+		<author>
+			<persName><forename type="first">Llama</forename><surname>Team</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">; Fei</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chao</forename><surname>Shang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sarthak</forename><surname>Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuai</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiang</forename><surname>Ning</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bonan</forename><surname>Min</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vittorio</forename><surname>Castelli</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2407.21783</idno>
+		<idno>arXiv:2403.06326</idno>
+		<title level="m">Yassine Benajiba, and Dan Roth. From instructions to constraints: Language model alignment with automatic constraint verification</title>
+		<imprint>
+			<date type="published" when="2024">2024. 2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+	<note>The llama 3 herd of models</note>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<monogr>
+		<title level="m" type="main">Large language models are better reasoners with self-verification</title>
+		<author>
+			<persName><forename type="first">Yixuan</forename><surname>Weng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Minjun</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fei</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bin</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shizhu</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengping</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bin</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Zhao</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2212.09561</idno>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<monogr>
+		<title level="m" type="main">Generating natural language proofs with verifier-guided search</title>
+		<author>
+			<persName><forename type="first">Kaiyu</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jia</forename><surname>Deng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Danqi</forename><surname>Chen</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2205.12443</idno>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Physics of Language Models: Part 2.1, Grade-School Math and the Hidden Reasoning Process</title>
+		<author>
+			<persName><forename type="first">Tian</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zicheng</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Allen-Zhu</surname></persName>
+		</author>
+		<ptr target="https://ssrn.com/abstract=5250629" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 13th International Conference on Learning Representations, ICLR 2025</title>
+		<meeting>the 13th International Conference on Learning Representations, ICLR 2025</meeting>
+		<imprint>
+			<date type="published" when="2025">2025</date>
+		</imprint>
+	</monogr>
+	<note>Full version available at</note>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<title level="m" type="main">Small language models need strong verifiers to self-correct reasoning</title>
+		<author>
+			<persName><forename type="first">Yunxiang</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Muhammad</forename><surname>Khalifa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lajanugen</forename><surname>Logeswaran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jaekyeom</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Moontae</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Honglak</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.17140</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<monogr>
+		<title level="m" type="main">What algorithms can transformers learn? a study in length generalization</title>
+		<author>
+			<persName><forename type="first">Hattie</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arwen</forename><surname>Bradley</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Etai</forename><surname>Littwin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Razin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Omid</forename><surname>Saremi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Josh</forename><surname>Susskind</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Samy</forename><surname>Bengio</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Preetum</forename><surname>Nakkiran</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.16028</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

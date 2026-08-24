@@ -7,11 +7,10 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 INPUT_DIR = "data/processed_graphs/"
 MODEL_ID  = "maxidl/Llama-OpenReviewer-8B"
-DEVICE    = "mps" if torch.backends.mps.is_available() else "cpu"
+DEVICE    = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 print(f"Loading {MODEL_ID} on {DEVICE}...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID,
     dtype=torch.bfloat16,
@@ -59,11 +58,9 @@ Your reviews contain the following sections:
 
 Your response must only contain the review in markdown format with sections as defined above."""
 
-
 def naive_sentence_split(text):
     sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
     return sentences if sentences else [text.strip()]
-
 
 def extract_paper_text(dom_data):
     """
@@ -78,16 +75,13 @@ def extract_paper_text(dom_data):
                 text = block.get("text", "").strip()
                 if text:
                     text_blocks.append(text)
-
     if not text_blocks:
         for section in dom_data.get("sections", [])[:3]:
             for block in section.get("blocks", []):
                 text = block.get("text", "").strip()
                 if text:
                     text_blocks.append(text)
-
     return "\n\n".join(text_blocks)[:6000]
-
 
 def generate_text(messages):
     input_ids = tokenizer.apply_chat_template(
@@ -95,7 +89,6 @@ def generate_text(messages):
         add_generation_prompt=True,
         return_tensors="pt"
     ).to(model.device)
-
     with torch.no_grad():
         outputs = model.generate(
             input_ids,
@@ -104,12 +97,10 @@ def generate_text(messages):
             do_sample=True,
             pad_token_id=tokenizer.eos_token_id
         )
-
     return tokenizer.decode(
         outputs[0][input_ids.shape[-1]:],
         skip_special_tokens=True
     )
-
 
 def atomic_save(filepath, data):
     """Write to a temp file then rename — prevents corruption on crash."""
@@ -118,28 +109,21 @@ def atomic_save(filepath, data):
         json.dump(data, f, indent=4)
     os.replace(tmp_path, filepath)
 
-
 def process_pass_1():
     json_files = glob.glob(os.path.join(INPUT_DIR, "*.json"))
     print(f"Found {len(json_files)} graphs to process.")
-
     for idx, filepath in enumerate(json_files):
         print(f"\n[{idx+1}/{len(json_files)}] Pass 1: {os.path.basename(filepath)}")
-
         with open(filepath, 'r') as f:
             data = json.load(f)
-
         paper_text = extract_paper_text(data.get("paper_DOM", {}))
         if len(paper_text) < 500:
             print("  -> Skipped: Not enough paper text extracted.")
             continue
-
         if "adversarial_reviews" not in data:
             data["adversarial_reviews"] = []
-
         existing_modes = {r.get("mode") for r in data["adversarial_reviews"]}
         changed = False
-
         try:
             if "Zero-Shot" not in existing_modes:
                 print("  -> Generating Mode 1: Zero-Shot...")
@@ -169,7 +153,6 @@ def process_pass_1():
                     if r.get("mode") == "Zero-Shot"
                     for s in r.get("review_sentences", [])
                 )
-
             if "Paraphrased" not in existing_modes:
                 print("  -> Generating Mode 2: Paraphrased...")
                 paraphrased_text = generate_text([
@@ -199,14 +182,11 @@ def process_pass_1():
                 changed = True
             else:
                 print("  -> Mode 2 already exists. Skipping.")
-
         except Exception as e:
             print(f"  -> Error: {e}")
-
         if changed:
             atomic_save(filepath, data)
             print("  -> Saved.")
-
 
 if __name__ == "__main__":
     process_pass_1()

@@ -1,0 +1,967 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 RETHINK MAXIMUM STATE ENTROPY</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 RETHINK MAXIMUM STATE ENTROPY</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">6B471B2A603AF6030A211708E57C4D6F</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:10+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>In the absence of specific tasks or extrinsic reward signals, a key objective for an agent is the efficient exploration of its environment. A widely adopted strategy to achieve this is maximizing state entropy, which encourages the agent to uniformly explore the entire state space. Most existing approaches for maximum state entropy (MaxEnt) are rooted in two foundational approaches, which were proposed by Hazan and Liu &amp; Abbeel, respectively. However, a unified perspective on these methods is lacking within the community.</p><p>In this paper, we analyze these two foundational approaches within a unified framework and demonstrate that both methods share the same reward function when employing the kNN density estimator. We also show that the η-based policy sampling method proposed by Hazan is unnecessary and that the primary distinction between the two lies in the frequency with which the locally stationary reward function is updated. Building on this analysis, we introduce MaxEnt-(V)eritas, which combines the most effective components of both methods: iteratively updating the reward function as defined by Liu &amp; Abbeel, and training the agent until convergence before updating the reward functions, akin to the procedure used by Hazan. We prove that MaxEnt-V is an efficient ε-optimal algorithm for maximizing state entropy, where the tolerance ε decreases as the number of iterations increases. Empirical validation in three Mujoco environments shows that MaxEnt-Veritas significantly outperforms the two MaxEnt frameworks in terms of both state coverage and state entropy maximization, with sound explanations for these results.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>Reinforcement Learning (RL) has demonstrated remarkable success in domains such as robotics <ref type="bibr" target="#b19">(Mnih et al., 2015)</ref> and games <ref type="bibr" target="#b25">(Silver et al., 2016)</ref>. Nevertheless, a fundamental challenge in RL is the effective exploration of the state space in the absence of extrinsic reward signals. Recently, state entropy H(s) has emerged as a robust metric for quantifying the diversity of state coverage, thereby making the maximum state entropy (MaxEnt) framework a widely adopted paradigm for exploration <ref type="bibr" target="#b18">(Liu &amp; Abbeel, 2021;</ref><ref type="bibr" target="#b20">Mutti et al., 2021;</ref><ref type="bibr" target="#b24">Seo et al., 2021;</ref><ref type="bibr" target="#b31">Yuan et al., 2023;</ref><ref type="bibr" target="#b14">Hazan et al., 2019;</ref><ref type="bibr" target="#b32">Zhang et al., 2021;</ref><ref type="bibr" target="#b21">Nedergaard &amp; Cook, 2022;</ref><ref type="bibr" target="#b30">Yarats et al., 2021;</ref><ref type="bibr" target="#b28">Tiapkin et al., 2023;</ref><ref type="bibr" target="#b16">Kim et al., 2024)</ref>. The principal objective of the MaxEnt framework is to derive a policy that facilitates uniform exploration of all possible states.</p><p>Most existing approaches to state entropy maximization are grounded in two foundational works: the first, proposed by Hazan <ref type="bibr" target="#b14">(Hazan et al., 2019)</ref> (MaxEnt-H), introduces a provably efficient ε-optimal algorithm for maximizing the entropy of visited states, assuming access to (sub)-optimal planning policies (e.g., by training deep reinforcement learning agents to convergence). Building on this foundation, subsequent work has focused on reducing computational complexity <ref type="bibr" target="#b28">(Tiapkin et al., 2023)</ref>, extending the approach to Rényi entropy <ref type="bibr" target="#b32">(Zhang et al., 2021)</ref>, and other advancements <ref type="bibr" target="#b21">(Nedergaard &amp; Cook, 2022;</ref><ref type="bibr" target="#b30">Yarats et al., 2021)</ref>. While these importance sampling-based methods have made significant theoretical contributions, they operate under the assumption that we can "compute the (approximately) optimal policy" to solve a MDP at each iteration given the locally stationary reward function. This assumption is often unrealistic in non-tabular settings. The other type, introduced by Liu &amp; Abbeel (2021) (MaxEnt-LA), decomposes k-nearest neighbor (kNN) entropy estimation into "particles" and uses these as non-stationary dense rewards to train a deep reinforcement learning (DRL) agent. These kNN-based methods <ref type="bibr" target="#b26">(Singh et al., 2003)</ref> have been widely applied to improve Under review as a conference paper at ICLR 2025 sample efficiency, facilitate unsupervised pre-training for downstream tasks, and more. Although lacking theoretical guarantees, MaxEnt-LA and its subsequent developments achieve state-of-theart performance in complex environments <ref type="bibr" target="#b18">(Liu &amp; Abbeel, 2021;</ref><ref type="bibr" target="#b24">Seo et al., 2021;</ref><ref type="bibr" target="#b31">Yuan et al., 2023;</ref><ref type="bibr" target="#b16">Kim et al., 2024)</ref>. Given the prominence of these two methods and their following variants, a natural question arises: Is there a connection between them for exploration, particularly in the absence of extrinsic rewards? In this paper, we provide an explicit answer to this question.</p><p>Algorithm 1 Pipeline of MaxEnt frameworks. Blue text represents steps specific to MaxEnt-H, while red text corresponds to steps for MaxEnt-LA. Require:</p><p>Step size η and the set of sampling probability A 0 = {α 0 }. Initialize RL agent as π 0 .</p><p>1: for t = 0, 1</p><formula xml:id="formula_0">• • • T -1 do 2:</formula><p>MaxEnt-H samples {π 0 , π 1 • • • π t } with probability {α 0 , α 1 • • • α t } to induce states. MaxEnt-LA samples {π 0 , π 1 • • • π t } uniformly to induce states.</p><p>3:</p><p>Define intrinsic reward functions r H t (s) or r LA t (s) based on states induced by {π 0 , π 1 • • • π t }.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>4:</head><p>MaxEnt-H initializes π and trains it with r H t (s) until convergence to get π t+1 . MaxEnt-LA continues to train π with r LA t (s) for one step to get π t+1 .</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>5:</head><p>MaxEnt-H updates the set of sampling probabilities as A t+1 = (1 -η)A t ∪ {α t+1 = η}. 6: end for 7: return {π 0 , π</p><formula xml:id="formula_1">1 • • • π T }, {α 0 , α 1 • • • α T }.</formula><p>We present a unified framework for both approaches in Algorithm 1: at each iteration, both MaxEnt frameworks <ref type="bibr" target="#b14">(Hazan et al., 2019;</ref><ref type="bibr" target="#b18">Liu &amp; Abbeel, 2021)</ref> begin by defining an intrinsic reward function based on the state distributions induced by previous policies, followed by training the current policy using this reward function. Subsequently, MaxEnt-H updates the sampling strategy for previous policies using a hyper-parameter η. Both methods then proceed to the next iteration. Three distinctions can be summarized as follows: (D1) They employ different methods for defining the reward function r t (Step 3). (D2) The policy sampling strategies diverge: MaxEnt-H utilizes an evolving distribution based on η, whereas MaxEnt-LA samples policies uniformly (Steps 2 and 5). (D3) The frequency of reward function updates during the training process also differs: MaxEnt-H trains the agent to convergence (or until a tolerance level is reached) before updating the reward function, while MaxEnt-LA updates the reward function after each individual training step (Step 4).</p><p>For D1, we prove that the reward function in MaxEnt-LA <ref type="bibr" target="#b18">(Liu &amp; Abbeel, 2021;</ref><ref type="bibr" target="#b24">Seo et al., 2021)</ref> is proportional to the reward function defined by Hazan when the kNN density estimator is employed. Concerning D2, we show that the η-based approach is superfluous for achieving a meaningful tolerance ε, especially in non-tabular state spaces; sampling previous policies randomly, as in MaxEnt-LA, is sufficiently effective. Consequently, the primary distinction lies in the frequency of reward function updates (D3). In this context, we argue that frequent updates to the reward function are suboptimal, as they cause the RL agent to continuously maximize a non-stationary reward function. Instead, the RL agent should be allowed to train until it performs satisfactorily, as evaluated by the current reward function, similar to the approach taken by MaxEnt-H.</p><p>Building on this rethinking, we propose that state maximization in non-tabular environments can be achieved with a highly simplified algorithm by integrating key elements from both approaches: all you need is to iteratively update the reward function as defined in MaxEnt-LA and to train the RL agent until convergence (or until a predefined tolerance is reached), given the locally stationary reward function. We refer to this method as MaxEnt-(V)eritas. Theoretically, we demonstrate that MaxEnt-V is a provably efficient ε-optimal algorithm for maximizing state entropy, where the tolerance ε decreases at an approximate rate of B+β log T T , with B and β representing the bounds of the reward functional, which is assumed to be β-smooth and B-bounded. Empirically, we evaluate MaxEnt-V against the methods of <ref type="bibr" target="#b14">Hazan et al. (2019)</ref> and <ref type="bibr" target="#b18">Liu &amp; Abbeel (2021)</ref> in the Mujoco robotic simulation environments, and it consistently outperforms both approaches in terms of state coverage and state entropy maximization. Our primary contributions are as follows:</p><p>• We elucidate the relationship between the two seminal MaxEnt frameworks proposed by <ref type="bibr">Hazan and</ref> Liu&amp;Abbeel. Specifically, we demonstrate that both approaches share an intrinsic reward function, that the η-based sampling method introduced by Hazan is redundant, and that the principal distinction between the two lies in the frequency with which the reward function is updated.</p><p>• Building on the analysis, we introduce a novel intrinsically motivated policy learning method, termed MaxEnt-Veritas, which leverages the reward function proposed by Liu&amp;Abbeel and sample policies randomly to facilitate pure exploration in non-tabular environments.</p><p>• MaxEnt-V is evaluated against the two MaxEnt frameworks across three exploration environments based on Mujoco. It consistently outperforms all competing approaches in experiments focused on exploring novel states.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">PRELIMINARY</head><p>Markov decision process: an infinite-horizon Markov decision process (MDP) is defined by a 5tuple (S, A, P, r, γ), where S is the set of all possible states, A is the set of actions, P (s i+1 |s i , a i ) : S × A → S is the transition probability density function. γ ∈ [0, 1) is a discount factor. r(s i , a i ) : S × A → R is a stationary reward function. The performance of an infinite trajectory τ of states and actions is judged through the (discounted) cumulative reward it accumulates, defined as</p><formula xml:id="formula_2">V (τ = {s 0 , a 0 , s 1 , a 1 • • • }) = ∞ i=0 γ i [r(s i , a i )]</formula><p>. Induced state distributions: Given a policy π(a|s) : S → A, the probability of the π-induced trajectory can be written as P (τ |π) = P (s 0 ) ∞ i=0 π(a i |s i )P (s i+1 |s i , a i ). The i-step state distribution and the (discounted) state distribution of π are:</p><formula xml:id="formula_3">d π,i (s) = P (s i = s|π) = {τ |si=s} P (τ |π) d π (s) = ∞ i=0 γ i [d π,i (s i )] (1)</formula><p>The goal is to find an optimal policy π * that induces a state distribution with maximum entropy:</p><formula xml:id="formula_4">π * = arg min π H(d π (s)) = arg min π [-E s∈S (log(d π (s)))]<label>(2)</label></formula><p>In practice, we can execute policy π from different initial states s 0 to sample a large number of states s. The estimated distribution dπ (s) can then be approximated by the empirical probability of these sampled states.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.1">MAXENT BY HAZAN (MAXENT-H)</head><p>Mixtures of stationary policies:</p><formula xml:id="formula_5">Given k policies C = {π 0 , π 1 • • • π k-1 }, and corresponding sampling probabities A = {α 0 , α 1 • • • α k-1 }, MaxEnt-H defined π mix = (A, C</formula><p>) to be a mixture over these stationary policies. The (non-stationary) policy π mix is one where, at the first timestep t = 0, MaxEnt-H samples policy π i with probability α i and then uses this policy for all subsequent time steps. The induced state distribution is:</p><formula xml:id="formula_6">d πmix (s) = k-1 i=0 α i d πi (s)<label>(3)</label></formula><p>While the entropy objective is not smooth, MaxEnt-H considers a smoothed alternative H σ = -E s∼dπ log(d π (s) + σ). We shall assume in the following discussion that the reward functional H σ is β-smooth, B-bounded. The main theorem of MaxEnt-H for state entropy maximization is:</p><p>Lemma 1 <ref type="bibr" target="#b14">(Hazan et al., 2019)</ref> We assumes that the RL agent in Algorithm 1 (blue) converges to an ε 1 -optimal solution , given current reward function r H t (s) = ∇H( dπt (s)) := dH(X) dX | X= dπ t (s) . Meanwhile, we assume to guarantee the estimation error of state distribution∥ dπt (s) -d πt (s)∥ ∞ &lt; ε 0 .</p><p>For any ε &gt; 0, set σ = 0.1ε 2|S| , ε 1 = 0.1ε, ε 0 = 0.1ε 2 80|S| and η = 0.1ε 2 40|S| . When Algorithm 1 (blue) is run for T iterations with the reward functional H σ , where:</p><formula xml:id="formula_7">T ≥ 40|S| 0.1ε 2 log log |S| 0.1ε ,<label>(4)</label></formula><p>we have that:  <ref type="bibr" target="#b26">(Singh et al., 2003)</ref>:</p><formula xml:id="formula_8">H σ (d πmix,T ) ≥ max π H σ (d π ) -ε<label>(</label></formula><formula xml:id="formula_9">H kNN (d(s)) = 1 N N i=1 log N • ||s i -s kNN i || p 2 • π p/2 k • Γ(p/2 + 1) + C k ∝ 1 N N i=1 log ∥s i -s kNN i ∥ p 2 , (<label>6</label></formula><formula xml:id="formula_10">)</formula><p>where</p><formula xml:id="formula_11">C k = log k -Ψ(k) is a bias correction constant, in which Ψ is the digamma function; Γ is the gamma function; p is the dimentionality of s. The r LA t (s) is defined as: r LA (s) = log(∥s -s kNN ∥ p 2 )<label>(7)</label></formula><p>Notice that, s kNN is computed using all historical states. Such a reward function is not be representable as a stationary aim due to that the ∥s -s kNN ∥ 2 are no longer conditionally independent given the states.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">ANALYSIS OF MAXENT FRAMEWORKS</head><p>As illustrated in Algorithm 1, the pipeline of both MaxEnt frameworks can be described as iteratively updating the non-stationary intrinsic reward function r t (s) and training an agent to maximize the (discounted) accumulated rewards based on this function. Based on the comparison, the key differences can be summarized as follows:</p><p>• (D1) The reward functions, r LA t and r H t (Step 3). • (D2) The method for sampling policies (Steps 2 and 5). MaxEnt-V samples previous policies using a dynamic η-based distribution, while MaxEnt-LA samples them uniformly. • (D3) The frequency of reward function updates during the training process (Step 4).</p><p>MaxEnt-V trains the agent until an ε 1 -optimal solution is achieved for r H t in each iteration, whereas MaxEnt-LA updates the agent's parameters for a single step in each iteration.</p><p>In this section, we will discuss each of these points in detail. We begin by examining the definition of the reward functions, as follows:</p><p>Proposition 1 Assuming the use of the kNN density estimator to approximate d π (s) in a state distribution, we have r H (s) ∝ r LA (s). s) , we have:</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Given the definition r</head><formula xml:id="formula_12">H t (s) = ∇H( dπt (s)) := dH(X) dX | X= dπ t (</formula><formula xml:id="formula_13">r H t (s) = log( 1 dπt (s) ) -1 (8)</formula><p>when we adopt kNN density estimator, we have:</p><formula xml:id="formula_14">dπt (s) = k • Γ(p/2 + 1) N • ||s i -s kNN i || p 2 • π p/2 (9)</formula><p>Then,</p><formula xml:id="formula_15">r H t (s) = log( N • ||s i -s kNN i || p 2 • π p/2 k • Γ(p/2 + 1) ) -1<label>(10)</label></formula><p>Recall that r LA (s) = log(∥s -s kNN ∥ p 2 ), we have r H (s) ∝ r LA (s). In short, r H and r LA can be regarded as equivalent during the training process if probability values are estimated using kNNs. We now move on to the second difference. With respect to the policy sampling method in MaxEnt-H, it is essential to consider the maximum possible state entropy value, i.e., maxH(s) = log |S|, in Lemma 1. Notice that, however, the maximum state entropy value is not strictly log |S| due to the influence of the smoothness factor σ in MaxEnt-H. In this paper, we omit further discussion of this aspect given the tiny magnitude of σ. In this context, we have that:</p><p>Proposition 2 When Algorithm 1 (blue) is performed, the step size must satisfy η &lt; log 2 (|S|)</p><p>400|S| in order to achieve any tolerance ε &lt; log |S|. For any |S| ≥ 2, this implies a step size η &lt; 0.00136 to ensure a tolerance ε &lt; log |S|.</p><p>Considering the small value of η, the MaxEnt-H sampling method essentially behaves as uniform sampling when T is not significantly large (recall that probability α t = η(1 -η) t-1 when t &gt; 0). However, in practice, the T of MaxEnt-H cannot be substantial, as each iteration corresponds not to a single training step, but rather to training the agent until convergence. Another critical issue is that the probability α t = η(1 -η) t-1 , with a fixed η, can never satisfy the condition T t=0 α t = 1. In the MaxEnt-H paper, the authors addressed this issue by setting α 0 = 1 prior to iteration 1. However, this was not implemented in their experiments, as it would cause the agent to select π 0 (random action selection) most of the time if T is small. Instead, they attempt to solve an optimization problem subject to the constraint T t=0 α t = 1, subsequently normalizing the probabilities by dividing by the sum T t=0 α t . Further details can be found in Section 5.1. In this context, η becomes a dynamic value and thus contradicts the theoretical framework established by MaxEnt-H. Consequently, we argue that η-based sampling is redundant in the context of MaxEnt framework.</p><p>Given the analysis of D1 and D2, the only substantial difference between MaxEnt-H and MaxEnt-LA lies in the frequency of reward function updates. We argue that it is preferable to train the RL agent until convergence (as in MaxEnt-H), rather than after each individual step (as in MaxEnt-LA), before updating the reward function. This approach intuitively improves the stationarity of the reward function (or goal) that the agent seeks to maximize. If the reward function is updated after every training step, the agent will be encouraged to learn different reward functions at each step.</p><p>Unfortunately, training agents to convergence in each iteration naturally limits T to a small value in practice, as it is infeasible to train millions of DRL agents. This leads to another gap between theoretical guarantees given by MaxEnt-H and real-world applications:</p><p>Proposition 3 When Algorithm 1 (blue) is run for T iterations, for any tolerance ε &lt; log |S|, we have the number of iterations T &gt; 1329|S| log 2 |S| .</p><p>Under review as a conference paper at ICLR 2025</p><p>Algorithm 2 Pipeline of MaxEnt-Veritas Require: Initialize the RL agent as π 0 . 1:</p><formula xml:id="formula_16">for t = 0, 1 • • • T -1 do 2:</formula><p>Samples {π 0 , π 1 • • • π t } uniformly to induce states.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>3:</head><p>Define intrinsic reward functions r t (s) = log(∥s -s kNN ∥ p 2 ) based on states induced by {π 0 , π 1 • • • π t }, same to r LA t (s).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>4:</head><p>Trains a RL agent to get π t+1 which can maximize r t (s) . 5: end for 6:</p><formula xml:id="formula_17">return {π 0 , π 1 • • • π T }.</formula><p>essence, the procedure involves iteratively updating r LA t (s) and then training the RL agent with this reward until convergence, as outlined in Algorithm 2. For Step 4 in Algorithm 2, we initialize the RL agent with the policy that achieves the highest score, as evaluated by the current reward function, from the set {π 0 , π 1 , . . . , π t }. . Intuitively, this algorithm encourages agents to avoid previously visited states while updating the long-term memory of "visited states" more gradually, resembling Baars' global workspace theory <ref type="bibr" target="#b1">(Baars, 1988)</ref>. Theoretically, Algorithm 2 is a provably efficient method for state entropy maximization:</p><p>Theorem 1 We assume that the reward functional R(d π (s)) = H kNN (d π (s)) is β-smooth and Bbounded, where d π (s) is approximated with kNN density estimator. Additionally, we assume that the RL agent at the iteration t in Algorithm 2 converges to a ε 1,t -optimal solution with locally stationary reward functions r t (s) = log(∥s -s kNN ∥ 2 ), and the estimation error of the state distribution is ε 0,t . When Algorithm 2 is run for T iterations , we have that:</p><formula xml:id="formula_18">R(d πmix,T +1 ) ≥ max π R(d π ) -ε (11) in which ε = B T + 2 + 2β ε0 + ε1 + β T + 2 [ρ + ln(T + 2) + ϵ T +2 ]<label>(12)</label></formula><p>where ε0 =</p><formula xml:id="formula_19">(ε0,0+ε0,1•••+ε 0,T ) T +2</formula><p>is the average estimation error of state distribution, ε1 =</p><formula xml:id="formula_20">(ε1,0+ε1,1•••+ε 1,T ) T +2</formula><p>is the average training error given reward functions over all iterations, ρ &lt; 0.58 is the Euler-Mascheroni constant and ϵ T ≤ 1 8T 2 which approaches 0 as T goes to infinity. ,</p><p>The value of ε is determined by T , ε1 , and ε0 . The gap can be reduced by either increasing the number of iterations or minimizing the training/estimation error in each iteration, which aligns well with intuition. If we further assume access to ε 0 -optimal estimation oracles and ε 1 -optimal planning oracles, as in MaxEnt-H (Lemma 1), ε0 and ε1 are constants. Under these conditions, ε decreases approximately at a rate of B+βInT T as T increases.</p><p>It is important to note that Theorem 1 differs significantly from the main theorem of MaxEnt-H, which can be expressed as ε = Be -T η + 2βε 0 + ε 1 + ηβ <ref type="bibr" target="#b14">(Hazan et al., 2019)</ref>. When η → 0 in MaxEnt-H, the policy selection method can be thought of as uniform sampling. In this scenario, however, ε does not decrease as T increases. This self-contradiction arises from the multiplication by 1 η during the derivation of ε. Furthermore, Theorem 1 provides a clear explanation as to why we assert that one-step updates, as in MaxEnt-LA, are not optimal. If only one step is updated in each iteration, with a different r t (s), it becomes exceedingly difficult to guarantee an acceptable tolerance ε 1 . Of course, when r t (s) changes much more slowly than the convergence speed of the DRL agent, it is feasible to train the RL agent for only a small number of steps in each iteration. This explains why MaxEnt-LA performs well in many scenarios. However, this trade-off between non-stationarity and the number of training steps per iteration must be carefully fine-tuned based on the specific application.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">EMPIRICAL ANALYSIS</head><p>The experimental section is organized as follow. In Section 5.1, we quantitatively illustrate that the sampling method of MaxEnt-H is redundant by conducting ablation studies on η. Afterwards, we quantitatively demonstrate that MaxEn-V outperforms other MaxEnt frameworks in maximizing state entropy (Section 5.2) and state coverage. We implement the Soft Actor Critic (SAC) <ref type="bibr" target="#b13">(Haarnoja et al., 2018b)</ref> with never-give-up regularizer <ref type="bibr" target="#b2">(Badia et al., 2020)</ref> for Mujoco environments as the respective oracle algorithms. Fig. <ref type="figure" target="#fig_0">1</ref> illustrates the environments in which we conduct our experiments. In Walker2D, the agent can only move forward or backward within a 2D spatial plane, whereas the Ant and Humanoid agent can navigate freely in all directions within a 3D space. Please see Appendix A.2 for more details on experimental settings.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Ant</head><p>Walker2D Humanoid Recall that Theorem 2 demonstrates that a very small η must be selected to achieve any meaningful tolerance with the theoretical guarantees provided by MaxEnt-H. With such a small value of η, the sampling method proposed in MaxEnt-H essentially behaves as uniform sampling when T is not significantly large. Thus, we contend that η-based sampling is redundant. In this section, we empirically validate this assertion. As discussed in Section 3, the sum of probabilities based on η is not equal to 1. Consequently, the official MaxEnt-H implementation utilizes the CVXPY Python package <ref type="bibr" target="#b8">(Diamond &amp; Boyd, 2016)</ref> to provide an approximate solution by solving the following optimization problem:  MaxEnt-H then uses the values within x t as the sampling probabilities at iteration t. We present the practical sampling probabilities x t in iterations t = 5, 10, 20 for η = [0.1, 0.01, 0.001] in Fig. <ref type="figure" target="#fig_2">2</ref>. As illustrated in Fig. <ref type="figure" target="#fig_2">2</ref>, when the official MaxEnt-H implementation selects η = 0.1, the sampling method based on η predominantly samples recent policies. However, to guarantee any meaningful tolerance (Theorem 2), the method effectively resorts to uniform sampling (see η = 0.001 in Fig. <ref type="figure" target="#fig_2">2</ref>).</p><formula xml:id="formula_21">arg min xt (x t -[α 0 , α 1 • • • α t ]) subject to x t &gt; 0, |x t | = 1<label>(</label></formula><p>Under review as a conference paper at ICLR 2025 Ant Walker2D Humanoid More critically, we perform an ablation study on η using the official MaxEnt-H implementation<ref type="foot" target="#foot_1">1</ref> . We examine η = [0.1, 0.01, 0.001] alongside uniform sampling, where η = 0.1 corresponds to the value utilized in the official MaxEnt-H implementation, and η = 0.001 guarantees a meaningful tolerance according to Theorem 2. As illustrated in Fig. <ref type="figure" target="#fig_3">3</ref>, uniform sampling consistently surpasses the other η values in terms of both entropy and the monotonicity of the learning curves. Consequently, we empirically demonstrate that the η-based sampling method is redundant.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.2">RESULTS OF STATE ENTROPY AND STATE COVERAGE</head><p>In the following, we compare our approach with the two other MaxEnt frameworks, using the number of unique visited states and the state entropy induced by all policies throughout the entire training process as evaluation metrics. Given the continuous high-dimensional state spaces, counting visited states becomes practically challenging. To address this during probability estimation, we reduced the state vectors to a 7-dimensional representation by combining the agent's location x-y or x-z in the grid with a 5-dimensional random projection of the remaining variables. The distribution d π (s) is estimated using the kNN density estimation, with k fixed at 3. For illustration, all methods are evaluated using the same histogram structure by selecting the x-y or x-z coordinates, bounded by <ref type="bibr">[[-40, 40]</ref>, <ref type="bibr">[-40, 40]</ref>] for Ant, <ref type="bibr">[[-20, 5</ref>], [0.5, 2]] for <ref type="bibr">Walker2D,</ref><ref type="bibr">10]</ref>, <ref type="bibr">[-10, 10]</ref>] for Humanoid. Within these bounds, we assign all samples to a 100 × 100 histogram and count the visited states.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Ant</head><p>Walker2D Humanoid It is important to note that we do not follow the experimental setup of MaxEnt-H in this section, as it trains the oracles with health constraints but disregards these constraints when using the mixed policy to induce states. This discrepancy leads to training and testing in different environments and allows illegal actions, which may result in unrealistic behaviors, such as the robot being "launched into the sky." To address this, we maintain the health constraints consistently in both training and testing scenarios. Although this approach reduces state coverage, the skills learned are more plausible. We include videos in the supplementary materials to demonstrate how the agents behave after or during training. We set η = 0.1 for MaxEnt-H, consistent with the official MaxEnt-H implementation. The learning curves, with the y-axis representing the number of unique visited spatial coordinates and Shannon state entropy values, are shown in Fig. <ref type="figure">4</ref>. Overall, our method outperforms the baseline approaches in terms of both exploration range and sample efficiency.</p><p>Fig. <ref type="figure">5</ref> displays the log-probability of occupancy in the two-dimensional state space, corresponding to the maximum entropy achieved by the different methods. The visualization for Ant serves as a clear illustrative example for the three approaches. In the first iteration, the states used for intrinsic reward computation are induced by a random policy π 0 , which are concentrated near the starting point. Since we adopt a kNN estimator, the optimal policy, π 1 , in iteration 1 is simply to move as far away from the starting point as possible, i.e., moving in one direction until the time limit is reached. Subsequently, π 2 is encouraged to stay away from both the starting point and the direction occupied by π 1 . As a result, in each iteration, the optimal policy consistently moves radially in a different direction. If training continues, the MaxEnt-V agent explores the state space in a radial pattern, resembling a "fireworks" effect.</p><p>In contrast, MaxEnt-H with η = 0.1 samples states using only recent policies to define r H t (s), quickly forgetting visited states, as shown in Fig. <ref type="figure" target="#fig_2">2</ref>. Consequently, its exploration traces are confined within a smaller range. For MaxEnt-LA, the issue arises from updating the intrinsic reward function too frequently, causing the agent to be discouraged from revisiting previously visited states. This method faces a fundamental limitation due to the rapid decay of rewards: once a state is visited, its reward diminishes significantly, preventing the agent from revisiting it, even if it might lead to unexplored downstream states <ref type="bibr" target="#b3">(Bellemare et al., 2016;</ref><ref type="bibr" target="#b27">Stanton &amp; Clune, 2018;</ref><ref type="bibr" target="#b9">Ecoffet et al., 2019;</ref><ref type="bibr" target="#b2">Badia et al., 2020)</ref>.</p><p>In the other two environments, although MaxEnt-V does not dramatically outperform the others in terms of spatial coverage, it learns distinct action modes compared to the other two methods. In Walker2D, MaxEnt-V is the only approach that learns to move forward, as indicated by the points with x values greater than 0 in Fig. <ref type="figure">5</ref>. In Humanoid, MaxEnt-V is the only method that learns to move backward, represented by points with x &lt; 0 in Fig. <ref type="figure">5</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6">RELATED WORKS</head><p>Before introducing reinforcement learning (RL) methods for exploration, it is essential to clarify the distinction between maximum state entropy and the well-known Soft Q-learning and Soft Actor-Critic (SAC) algorithms <ref type="bibr" target="#b11">(Haarnoja et al., 2017;</ref><ref type="bibr">2018a)</ref>. These methods hypothesize that robust policies can be learned by exploring the policy space and provide a framework for maximizing both extrinsic rewards and policy entropy H(π(a|s)), with theoretically grounded policy improvement guarantees. However, these methods <ref type="bibr" target="#b13">(Haarnoja et al., 2018b;</ref><ref type="bibr" target="#b29">Yang et al., 2021;</ref><ref type="bibr" target="#b10">Eysenbach &amp; Levine,</ref> Under review as a conference paper at ICLR 2025 2021) lack the capability to explore environments in the absence of extrinsic rewards. To address this limitation, <ref type="bibr" target="#b14">Hazan et al. (2019)</ref> has suggested that exploration agents should instead maximize a convex entropy function of the visitation distribution over the state space, i.e., H(s).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>State Entropy Maximization for Exploration</head><p>Following MaxEnt-H, several variants have been proposed in recent years. Its Rényi variant <ref type="bibr" target="#b32">(Zhang et al., 2021)</ref> follows a similar structure, with only minor adjustment on the reward function, i.e., r(s) = log p(α-1) (s). Other improvements includes integration of representation learning <ref type="bibr" target="#b21">(Nedergaard &amp; Cook, 2022;</ref><ref type="bibr" target="#b30">Yarats et al., 2021)</ref>, and efforts to reduce sample complexity <ref type="bibr" target="#b28">(Tiapkin et al., 2023)</ref>, just to name a few. In contrast, MaxEnt-LA can be considered as an intrinsic learning method. In scenarios where extrinsic rewards are unavailable intrinsic exploration aims to develop an intrinsic reward function as a substitute. This make these methods seamlessly embrace any existing RL algorithms by simply changing rewards. For non-tabular state entropy maximization without learning probability density models, RE3 <ref type="bibr" target="#b24">(Seo et al., 2021)</ref> propose to implement random encoder instead of a pre-trained one via contrastive learning. After that, RISE <ref type="bibr" target="#b31">(Yuan et al., 2023)</ref> extends it to Rényi entropy. Recently, Kim proposed to maximize the value-conditional state entropy, which separately estimates the state entropies that are conditioned on the value estimates of each state, then maximizes their average <ref type="bibr" target="#b16">(Kim et al., 2024)</ref>.</p><p>Another type of related approaches to "maximum state entropy" <ref type="bibr" target="#b20">(Mutti et al., 2021;</ref><ref type="bibr">Jain et al., 2024)</ref> focuses on maximizing trajectory-wise state entropy, which intuitively encourages visiting diverse states within a finite number of steps or within a single episode. Although these methods share a similar name with state entropy maximization, their objectives are fundamentally different. Therefore, in this work, we do not delve deeply into them.</p><p>Parametric Methods for Exploration In addition to MaxEnt-based non-parametric exploration methods, deep neural network-based parametric methods <ref type="bibr" target="#b22">(Pathak et al., 2017;</ref><ref type="bibr" target="#b9">Ecoffet et al., 2019;</ref><ref type="bibr" target="#b6">Burda et al., 2019;</ref><ref type="bibr" target="#b2">Badia et al., 2020;</ref><ref type="bibr" target="#b7">Dewan et al., 2024)</ref> have garnered significant attention in recent years. These methods encourage agents to explore novel states in a non-stationary manner by assigning greater rewards to states that are less frequently visited by estimating predictive forward models and use the prediction error as the intrinsic motivation. These curiosity-driven approaches have their roots traced back to the 1970's when Pfaffelhuber introduced the concept of "observer's information" <ref type="bibr" target="#b23">(Pfaffelhuber, 1972)</ref> and <ref type="bibr" target="#b17">Lenat (Lenat, 1976)</ref> introduced the concept of "interestingness" in mathematics to promote the novel hypotheses and concepts <ref type="bibr" target="#b0">(Amin et al., 2021)</ref>. Recently, popular prediction error-based approaches fall under this category. The recent surge in popularity of these networks is strongly related to advancements in deep neural networks (DNNs). For instance, ICM <ref type="bibr" target="#b22">(Pathak et al., 2017)</ref> and RND <ref type="bibr" target="#b6">(Burda et al., 2019)</ref>, utilize a CNN as the internal model to predict the next image, while GIRIL implements a variational autoencoder (VAE) to model transitions in environments. After that, some approaches find the novelty vanishing problem and try to solve it by introducing an episodic mechanism <ref type="bibr" target="#b9">(Ecoffet et al., 2019;</ref><ref type="bibr" target="#b2">Badia et al., 2020)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="7">CONCLUSION</head><p>In this paper, we analyze two fundamental approaches for state entropy maximization in reinforcement learning. We find that the η-based sampling, a key procedure in MaxEnt-H, is superfluous for achieving any meaningful tolerance. In contrast, MaxEnt-LA updates its intrinsic reward function too frequently, resulting in the agent being encouraged to maximize different reward functions at each step, which makes it difficult to explore a broader state space.</p><p>This rethinking leads to a simple method that incorporates only the efficient components of both approaches, which we term MaxEnt-(V)eritas. Compared to MaxEnt-H, it mainly replaces the ηbased sampling with uniform sampling. For MaxEnt-LA, MaxEnt-V updates the reward function gradually rather than at every training step.</p><p>We empirically validate our analysis and evaluate MaxEnt-V in three robotic Mujoco environments. An ablation study on η demonstrates that better results are achieved as η → 0, corresponding to uniform sampling. Additionally, MaxEnt-V significantly outperforms the baseline methods in terms of state coverage and state entropy maximization. Given Lemma 1, we have η = 0.1ε 2 40|S| . To obtain any ε &lt; log |S|, we have:</p><formula xml:id="formula_22">η &lt; log 2 (|S|) 400|S|<label>(14)</label></formula><p>For any |S| ≥ 2, we find the maximum value of log 2 (|S|) 400|S| in the following. Let x = |S|, we first find the first and second derivative of the function f (x) = log 2 (x) 400x :</p><formula xml:id="formula_23">f ′ (x) = 2 log(x) -(log(x)) 2 400x 2 (15) f ′′ (x) = 3 log(x) -1 200x 3 (16)</formula><p>The function is convex when:</p><formula xml:id="formula_24">f ′′ (x) = 3 log(x) -1 200x 3 ≥ 0 (17)</formula><p>That is:</p><p>x ≥ e 1/3 ≈ 1.37 (18) Thus, for any x = |S| ≥ 2, the function is convex. Let f ′ (x) = 0, we have the maximum value of the function to be:</p><formula xml:id="formula_25">f (e 2 ) = log 2 (e 2 ) 400e 2 &lt; 0.00136 (19) So, η &lt; log 2 (|S|) 400|S| &lt; max[ log 2 (|S|) 400|S| ] &lt; 0.00136<label>(20)</label></formula><p>A.1.2 PROOFS OF PROPOSITION 3</p><p>Proof.</p><p>Given Lemma 1, we have T &gt; 40|S| 0.1ε 2 log log |S| 0.1ε to guarantee the tolerance ε. To obtain any ε &lt; log |S|, we have:</p><formula xml:id="formula_26">T &gt; 40|S| 0.1 log 2 |S| log log |S| 0.1 log |S| T &gt; 1329|S| log 2 |S|<label>(21)</label></formula><p>A.1.3 PROOFS OF THEOREM 1</p><p>Proof.</p><p>We assume that the reward functional R = H kN N is β-smooth, B-bounded, for all X, Y .</p><formula xml:id="formula_27">∥∇R(X) -∇R(Y )∥ ∞ ≤ β∥X -Y ∥ ∞ (22) -βI ⪯ ∇ 2 R(X) ⪯ βI; ∥∇R(X)∥ ∞ ≤ B<label>(23)</label></formula><p>Let π * be the optimal policy, we have <ref type="bibr" target="#b14">(Hazan et al., 2019)</ref>:</p><formula xml:id="formula_28">R(d πmix,t+1 ) = R((1 - 1 t + 2 )d πmix,t + 1 t + 2 d πt+1 ) Equation 3 ≥ R(d πmix,t ) + 1 t + 2 ⟨d πt+1 -d πmix,t , ∇R(d πmix,t )⟩ -( 1 t + 2 ) 2 β∥d πt+1 -d πmix,t ∥ 2 2 smoothness where ⟨d πt+1 , ∇R(d πmix,t )⟩ ≥ ⟨d πt+1 , ∇R( dπmix,t )⟩ -β∥d πmix,t -dπmix,t ∥ ∞ ≥ ⟨d π * , ∇R( dπmix,t )⟩ -βε 0,t -ε 1,t ≥ ⟨d π * , ∇R(d πmix,t )⟩ -2βε 0,t -ε 1,t</formula><p>The first and last inequalities is from Eq. ( <ref type="formula">22</ref>) <ref type="bibr" target="#b5">(Bubeck et al., 2015)</ref>, while the second inequality above is given by the conclusion of Theorem 1 which is ∇R( dπmix,t ) = r H t ∝ r LA t and the definition of training error ε 1,t . For the optimal policy π * :</p><formula xml:id="formula_29">V πt+1 = ⟨d πt+1 , r LA t ⟩ ≥ V π * -ε 1,t = ⟨d π * , r LA t ⟩ -ε 1,t<label>(24)</label></formula><p>Reconsider R(d πmix,t+1 ), we have:</p><formula xml:id="formula_30">R(d πmix,t+1 ) ≥ R(d πmix,t ) + 1 t + 2 ⟨d π * -d πmix,t , ∇R(d πmix,t )⟩ - 2 t + 2 βε 0,t - 1 t + 2 ε 1,t -( 1 t + 2 ) 2 β ≥ (1 - 1 t + 2 )R(d πmix,t ) + 1 t + 2 R(d π * ) - 2 t + 2 βε 0,t - 1 t + 2 ε 1,t -( 1 t + 2 ) 2 β Then, R(d π * ) -R(d πmix,t+1 ) ≤ (1 - 1 t + 2 )(R(d π * ) -R(d πmix,t )) + 2 t + 2 βε 0,T + 1 t + 2 ε 1,T + ( 1 t + 2 ) 2 β.</formula><p>Thus far, the steps are largely analogous to those in MaxEnt-H. The key differences lie in the definition of r t and the sampling strategy: we sample each policy with probabilities α 0 = α 1 = ... = α t+1 = 1/(t + 2), whereas MaxEnt-H defines the probabilities as α t = η t . This distinction leads to markedly different conclusions when telescoping the inequality above:</p><formula xml:id="formula_31">R(d π * ) -R(d π mix,T +1 ) ≤(1 - 1 T + 2 )(R(d π * ) -R(d π mix,T )) + 2 T + 2 βε 0,T + 1 T + 2 ε 1,T + ( 1 T + 2 ) 2 β. ≤ T + 1 T + 2 [ T T + 1 (R(d π * ) -R(d π mix,T -1 )) + 2 T + 1 βε 0,T -1 + 1 T + 1 ε 1,T -1 + ( 1 T + 1 ) 2 β] + 2 T + 2 βε 0,T + 1 T + 2 ε 1,T + ( 1 T + 2 ) 2 β. • • • =( T + 1 T + 2 × T T + 1 • • • × 1 2 )(R(d π * ) -R(d πmix,0 )) + 2β T + 2 T t=0 ε 0,t + 1 T + 2 T t=0 ε 1,t + β T + 2 1 T + 2 + 1 T + 1 • • • + 1 2 + 1 .</formula><p>The last term is a harmonic series, so we have:</p><formula xml:id="formula_32">R(d π * ) -R(d π mix,T +1 ) ≤ B T + 2 + 2β T t=0 ε 0,t T + 2 + T t=0 ε 1,t T + 2 + β T + 2 [ρ + ln(T + 2) + ϵ T +2 ]</formula><p>where ρ &lt; 0.58 is the Euler-Mascheroni constant and and ϵ T ≤ 1 8T 2 which approaches 0 as T goes to infinity.</p><p>Under review as a conference paper at ICLR 2025 A.2 DETAILS OF EXPERIMENTAL SETTING All experiments are conducted on single V-100 GPUs, where the maximum memory usage is up to 5G for each single training process. In Walker2D, the agent can only move forward or backward within a 2D spatial plane, whereas the Ant and Humanoid agent can navigate freely in all directions within a 3D space. Both agents are reset to starting points near (0, 0) if they fail to meet the health conditions specified by the default setting <ref type="bibr" target="#b4">(Brockman et al., 2016)</ref>. The default number of steps for truncation id fixed as default setting 1000, without any fine-tuning. The details of the three environments are given below.</p><p>Ant is a three-dimensional robot composed of a single torso, which is a freely rotating body, and four legs connected to it. Each leg consists of two links. The observation is a 29D vector. The 29-dimensional state space was first reduced to dimension 7, combining the agent's x and y location in the gridspace with a 5-dimensional random projection of the remaining 27 states.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Walker2D</head><p>The walker2D is a two-dimensional two-legged figure that consist of seven main body parts -a single torso at the top (with the two legs splitting after the torso), two thighs in the middle below the torso, two legs in the bottom below the thighs, and two feet attached to the legs on which the entire body rests. The observation is a 18D vector. The 18-dimensional state space was first reduced to dimension 7, combining the agent's x and z location in the gridspace with a 5-dimensional random projection of the remaining 16 states.</p><p>Humanoid The 3D bipedal robot is designed to simulate a human. It has a torso (abdomen) with a pair of legs and arms. The legs each consist of three body parts, and the arms 2 body parts (representing the knees and elbows respectively). The observation is a 378D vector. The 378dimensional state space was first reduced to dimension 7, combining the agent's x and y location in the gridspace with a 5-dimensional random projection of the remaining 376 states.</p><p>The random encoders implemented in this work have been widely adopted by previous methods <ref type="bibr" target="#b24">(Seo et al., 2021;</ref><ref type="bibr" target="#b14">Hazan et al., 2019;</ref><ref type="bibr" target="#b16">Kim et al., 2024</ref> We adopt SAC as backbones. For the SAC<ref type="foot" target="#foot_2">2</ref> oracle, we summarizes our hyper-parameters in Table <ref type="table" target="#tab_1">1</ref>.</p><p>In this paper, particularly in the experiment section, we choose Soft Actor-Critic (SAC) as our oracles. Here, we will succinctly outline the key equations of SAC. Diverging from the standard MDP, SAC incorporates a policy entropy term to enhance exploration within the conditioned action space, i.e., max[r + βH(π(a|s))] where β is temperature.It is crucial to note that the policy entropy term used in SAC is distinct from the state entropy concept discussed in our study. This distinction arises from the different domains in which these two entropy forms operate. While the policy entropy in SAC focuses on the conditional action-selection process, the state entropy we examine pertains to the diversity of state visitations. This clarification is essential for understanding the unique con-Under review as a conference paper at ICLR 2025 tributions and applications of each entropy type within the realm of reinforcement learning. SAC iteratively update critic using soft Q function Q ϕ and actor π θ by minimizing the KL divergence between the soft value function and policy distribution. Besides, temperature is also adaptive. More formally, three objective functions are:</p><formula xml:id="formula_33">J Q (Q ϕ , r) = E {st+1,st,at,rt}∼D [ Q ϕ (s t , a t ) -r t -γ(Q φ(s t+1 , π θ (s t+1 )) -βlogπ θ (s t+1 )) 2 ]<label>(25)</label></formula><p>J π (π θ ) = E st∼D [-γ(Q ϕ (s t , π θ (s t )) -βlogπ θ (s t ))] (26)</p><formula xml:id="formula_34">J(β) = E st∼D [-β( Ĥ + logπ θ (s t ))]<label>(27)</label></formula><p>where D denotes replay buffer, Ĥ is the expected target policy entropy, Q φ is the target critic deep neural network.</p><p>In practice, we found that the Never-Give-Up regularizer <ref type="bibr" target="#b2">(Badia et al., 2020)</ref> is highly effective in preventing SAC from converging to local optima. Specifically, a kNN-based term, s kN N ∈τ ∥ss kNN ∥ 2 , is introduced to the reward functions of MaxEnt-H, MaxEnt-LA, and MaxEnt-V.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 1 :</head><label>1</label><figDesc>Figure 1: Visual interfaces of Mujoco robotic simulations</figDesc><graphic coords="7,270.36,218.72,71.28,71.09" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Figure 2 :</head><label>2</label><figDesc>Figure2: The practical sampling probabilities of MaxEnt-H given different η at iteration 5, 10, and 20. Smaller the η, closer to the uniform sampling. If we wants a meaningful guarentee where η &lt; 0.00136, the sampling method is already very close to uniform sampling.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: Results of different η. The Y-axis shows the state entropy of the policy evolving with the number of epochs. The experimental settings are identical to the official MaxEnt-H implementation.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Figure 4 :Figure 5 :</head><label>45</label><figDesc>Figure 4: Performance of state entropy maximization and state coverage. Evaluated by discrete Shannon entropy and total unique visited states in the training process.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 1 :</head><label>1</label><figDesc>). Hyper-parameters of SAC</figDesc><table><row><cell>Hyper-parameters</cell><cell>Value</cell></row><row><cell>initial temperature</cell><cell>0.2</cell></row><row><cell>gamma</cell><cell>0.99</cell></row><row><cell>actor lr</cell><cell>3e-4</cell></row><row><cell>critic lr</cell><cell>3e-4</cell></row><row><cell>q lr</cell><cell>3e-4</cell></row><row><cell>soft update rate</cell><cell>0.005</cell></row><row><cell>hidden dim</cell><cell>256</cell></row><row><cell>memory size</cell><cell>1e+6</cell></row><row><cell>layer num</cell><cell>3</cell></row><row><cell>batch size</cell><cell>128</cell></row><row><cell>layer num</cell><cell>3</cell></row><row><cell cols="2">activation function torch.relu</cell></row><row><cell>last activation</cell><cell>None</cell></row></table></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" xml:id="foot_0"><p>This proposition demonstrates that MaxEnt requires a large T to provide a meaningful guarantee ε &lt; log |S|. For instance, if |S| = 10, MaxEnt-H would require approximately T = 4, 000 iterations to guarantee ε ≈ log |S|, which essentially corresponds to no policy improvement. In the experimental implementation of MaxEnt-H, the state spaces S were discretized into 64 to 194, 400, 000 bins, depending on the environment, yet T was set to a maximum of 30.In summary, the reward functions can be regarded as equivalent, and the η-based sampling method should be dismissed in favor of simplicity, in line with Occam's Razor. Meanwhile, we should train the agent until convergence using the locally stationary reward functions. Unfortunately, theoretical guarantees given by MaxEnt-H are not practical for guiding empirical approaches in non-tabular environments. This raises a natural question: Can we develop a novel MaxEnt algorithm with meaningful guarantees within a reasonable number of iterations? We will address this in the next section.4 TRUE MAXIMUM STATE ENTROPY (MAXENT-VERITAS)We propose MaxEnt-Veritas, a streamlined approach that peels MaxEnt algorithms to the bone by eliminating all redundancies and integrating only the effective elements from both frameworks. In</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="1" xml:id="foot_1"><p>https://github.com/abbyvansoest/maxent/tree/master</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="2" xml:id="foot_2"><p>https://github.com/seolhokim/Mujoco-Pytorch</p></note>
+		</body>
+		<back>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<title level="m" type="main">A survey of exploration methods in reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Susan</forename><surname>Amin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maziar</forename><surname>Gomrokchi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Harsh</forename><surname>Satija</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Herke</forename><surname>Van Hoof</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Doina</forename><surname>Precup</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2109.00157</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<monogr>
+		<title level="m" type="main">A Cognitive Theory of Consciousness</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Bernard</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Baars</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="1988">1988</date>
+			<publisher>Cambridge University Press</publisher>
+			<pubPlace>New York</pubPlace>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<monogr>
+		<title level="m" type="main">Never give up: Learning directed exploration strategies</title>
+		<author>
+			<persName><forename type="first">Adrià</forename><surname>Puigdomènech Badia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pablo</forename><surname>Sprechmann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Vitvitskyi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bilal</forename><surname>Piot</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Kapturowski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Olivier</forename><surname>Tieleman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Martín</forename><surname>Arjovsky</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Pritzel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andew</forename><surname>Bolt</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2002.06038</idno>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<monogr>
+		<title level="m" type="main">Unifying count-based exploration and intrinsic motivation</title>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Bellemare</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sriram</forename><surname>Srinivasan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Georg</forename><surname>Ostrovski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Schaul</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Saxton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Remi</forename><surname>Munos</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+			<biblScope unit="volume">29</biblScope>
+		</imprint>
+	</monogr>
+	<note>Advances in neural information processing systems</note>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<analytic>
+		<title/>
+		<author>
+			<persName><forename type="first">Greg</forename><surname>Brockman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vicki</forename><surname>Cheung</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ludwig</forename><surname>Pettersson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonas</forename><surname>Schneider</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><surname>Schulman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wojciech</forename><surname>Zaremba</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Openai gym</title>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title level="a" type="main">Convex optimization: Algorithms and complexity</title>
+		<author>
+			<persName><forename type="first">Sébastien</forename><surname>Bubeck</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Foundations and Trends® in Machine Learning</title>
+		<imprint>
+			<biblScope unit="volume">8</biblScope>
+			<biblScope unit="issue">3-4</biblScope>
+			<biblScope unit="page" from="231" to="357" />
+			<date type="published" when="2015">2015</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Exploration by random network distillation</title>
+		<author>
+			<persName><forename type="first">Yuri</forename><surname>Burda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Harrison</forename><surname>Edwards</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amos</forename><surname>Storkey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oleg</forename><surname>Klimov</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<monogr>
+		<author>
+			<persName><forename type="first">Anisha</forename><surname>Shaurya Dewan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zoe</forename><surname>Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lifan</forename><surname>Lalena</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Yu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.04198</idno>
+		<title level="m">Curiosity &amp; entropy driven unsupervised rl in multiple environments</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">CVXPY: A Python-embedded modeling language for convex optimization</title>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Diamond</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Boyd</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Journal of Machine Learning Research</title>
+		<imprint>
+			<biblScope unit="volume">17</biblScope>
+			<biblScope unit="issue">83</biblScope>
+			<biblScope unit="page" from="1" to="5" />
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<monogr>
+		<title level="m" type="main">Go-explore: a new approach for hard-exploration problems</title>
+		<author>
+			<persName><forename type="first">Adrien</forename><surname>Ecoffet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joost</forename><surname>Huizinga</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joel</forename><surname>Lehman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kenneth</forename><forename type="middle">O</forename><surname>Stanley</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeff</forename><surname>Clune</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1901.10995</idno>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<title level="m" type="main">Maximum entropy rl (provably) solves some robust rl problems</title>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Eysenbach</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sergey</forename><surname>Levine</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2103.06257</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">Reinforcement learning with deep energy-based policies</title>
+		<author>
+			<persName><forename type="first">Tuomas</forename><surname>Haarnoja</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haoran</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><surname>Abbeel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sergey</forename><surname>Levine</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+			<biblScope unit="page" from="1352" to="1361" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a stochastic actor</title>
+		<author>
+			<persName><forename type="first">Tuomas</forename><surname>Haarnoja</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aurick</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><surname>Abbeel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sergey</forename><surname>Levine</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+			<biblScope unit="page" from="1861" to="1870" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<title level="m" type="main">Soft actor-critic algorithms and applications</title>
+		<author>
+			<persName><forename type="first">Tuomas</forename><surname>Haarnoja</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aurick</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kristian</forename><surname>Hartikainen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">George</forename><surname>Tucker</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sehoon</forename><surname>Ha</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Tan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vikash</forename><surname>Kumar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Henry</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abhishek</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><surname>Abbeel</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1812.05905</idno>
+		<imprint>
+			<date type="published" when="2018">2018b</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Provably efficient maximum entropy exploration</title>
+		<author>
+			<persName><forename type="first">Elad</forename><surname>Hazan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sham</forename><surname>Kakade</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karan</forename><surname>Singh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abby</forename><surname>Van Soest</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="page" from="2681" to="2691" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Maximum state entropy exploration using predecessor and successor representations</title>
+		<author>
+			<persName><forename type="first">Arnav</forename><surname>Kumar Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lucas</forename><surname>Lehnert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Irina</forename><surname>Rish</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Glen</forename><surname>Berseth</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">Accelerating reinforcement learning with value-conditional state entropy exploration</title>
+		<author>
+			<persName><forename type="first">Dongyoung</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinwoo</forename><surname>Shin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><surname>Abbeel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Younggyo</forename><surname>Seo</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<monogr>
+		<title level="m" type="main">AM: an artificial intelligence approach to discovery in mathematics as heuristic search</title>
+		<author>
+			<persName><forename type="first">Douglas</forename><surname>Bruce</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lenat</forename></persName>
+		</author>
+		<imprint>
+			<date type="published" when="1976">1976</date>
+		</imprint>
+		<respStmt>
+			<orgName>Stanford University</orgName>
+		</respStmt>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">Behavior from the void: Unsupervised active pre-training</title>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><surname>Abbeel</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="page" from="18459" to="18473" />
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">Human-level control through deep reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Volodymyr</forename><surname>Mnih</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Koray</forename><surname>Kavukcuoglu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Silver</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrei</forename><forename type="middle">A</forename><surname>Rusu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joel</forename><surname>Veness</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><forename type="middle">G</forename><surname>Bellemare</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Graves</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Martin</forename><surname>Riedmiller</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andreas</forename><forename type="middle">K</forename><surname>Fidjeland</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Georg</forename><surname>Ostrovski</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">nature</title>
+		<imprint>
+			<biblScope unit="volume">518</biblScope>
+			<biblScope unit="issue">7540</biblScope>
+			<biblScope unit="page" from="529" to="533" />
+			<date type="published" when="2015">2015</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">Task-agnostic exploration via policy gradient of a non-parametric state entropy estimate</title>
+		<author>
+			<persName><forename type="first">Mirco</forename><surname>Mutti</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lorenzo</forename><surname>Pratissoli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marcello</forename><surname>Restelli</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the AAAI Conference on Artificial Intelligence</title>
+		<meeting>the AAAI Conference on Artificial Intelligence</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="9028" to="9036" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Nedergaard</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><surname>Cook</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2205.15623</idno>
+		<title level="m">k-means maximum entropy exploration</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Curiosity-driven exploration by self-supervised prediction</title>
+		<author>
+			<persName><forename type="first">Deepak</forename><surname>Pathak</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pulkit</forename><surname>Agrawal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexei</forename><forename type="middle">A</forename><surname>Efros</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Trevor</forename><surname>Darrell</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+			<biblScope unit="page" from="2778" to="2787" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">Learning and information theory</title>
+		<author>
+			<persName><surname>Pfaffelhuber</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">International journal of neuroscience</title>
+		<imprint>
+			<biblScope unit="volume">3</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<biblScope unit="page" from="83" to="88" />
+			<date type="published" when="1972">1972</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">State entropy maximization with random encoders for efficient exploration</title>
+		<author>
+			<persName><forename type="first">Younggyo</forename><surname>Seo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lili</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinwoo</forename><surname>Shin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Honglak</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><surname>Abbeel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kimin</forename><surname>Lee</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="9443" to="9454" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<analytic>
+		<title level="a" type="main">Mastering the game of go with deep neural networks and tree search</title>
+		<author>
+			<persName><forename type="first">David</forename><surname>Silver</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aja</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><forename type="middle">J</forename><surname>Maddison</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arthur</forename><surname>Guez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laurent</forename><surname>Sifre</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">George</forename><surname>Van Den</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julian</forename><surname>Driessche</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ioannis</forename><surname>Schrittwieser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Veda</forename><surname>Antonoglou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Panneershelvam</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Lanctot</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">nature</title>
+		<imprint>
+			<biblScope unit="volume">529</biblScope>
+			<biblScope unit="issue">7587</biblScope>
+			<biblScope unit="page" from="484" to="489" />
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title level="a" type="main">Nearest neighbor estimates of entropy</title>
+		<author>
+			<persName><forename type="first">Harshinder</forename><surname>Singh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Neeraj</forename><surname>Misra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vladimir</forename><surname>Hnizdo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Fedorowicz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eugene</forename><surname>Demchuk</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">American journal of mathematical and management sciences</title>
+		<imprint>
+			<biblScope unit="volume">23</biblScope>
+			<biblScope unit="issue">3-4</biblScope>
+			<biblScope unit="page" from="301" to="321" />
+			<date type="published" when="2003">2003</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<monogr>
+		<title level="m" type="main">Deep curiosity search: Intra-life exploration can improve performance on challenging deep reinforcement learning problems</title>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Stanton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeff</forename><surname>Clune</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1806.00553</idno>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<monogr>
+		<author>
+			<persName><forename type="first">Daniil</forename><surname>Tiapkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Denis</forename><surname>Belomestny</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniele</forename><surname>Calandriello</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Moulines</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Remi</forename><surname>Munos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Naumov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierre</forename><surname>Perrault</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunhao</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michal</forename><surname>Valko</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierre</forename><surname>Menard</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2303.08059</idno>
+		<title level="m">Fast rates for maximum entropy exploration</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Wcsac: Worst-case soft actor critic for safety-constrained reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Qisong</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D</forename><surname>Thiago</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Simon</forename><forename type="middle">H</forename><surname>Simão</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Tindemans</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Matthijs</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Spaan</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the AAAI Conference on Artificial Intelligence</title>
+		<meeting>the AAAI Conference on Artificial Intelligence</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="10639" to="10646" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<analytic>
+		<title level="a" type="main">Reinforcement learning with prototypical representations</title>
+		<author>
+			<persName><forename type="first">Denis</forename><surname>Yarats</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rob</forename><surname>Fergus</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alessandro</forename><surname>Lazaric</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lerrel</forename><surname>Pinto</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="11920" to="11931" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Rényi state entropy maximization for exploration acceleration in reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Mingqi</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Man-On</forename><surname>Pun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dong</forename><surname>Wang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">IEEE Transactions on Artificial Intelligence</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<analytic>
+		<title level="a" type="main">Exploration by maximizing rényi entropy for reward-free rl framework</title>
+		<author>
+			<persName><forename type="first">Chuheng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanying</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Longbo</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian</forename><surname>Li</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the AAAI Conference on Artificial Intelligence</title>
+		<meeting>the AAAI Conference on Artificial Intelligence</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="10859" to="10867" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

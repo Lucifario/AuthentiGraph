@@ -1,0 +1,1548 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">DISTILLED DECODING 1: ONE-STEP SAMPLING OF IMAGE AUTO-REGRESSIVE MODELS WITH FLOW MATCHING</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<author>
+							<persName><forename type="first">Enshu</forename><surname>Liu</surname></persName>
+						</author>
+						<author>
+							<persName><forename type="first">Xuefei</forename><surname>Ning</surname></persName>
+						</author>
+						<author>
+							<persName><forename type="first">Yu</forename><surname>Wang</surname></persName>
+							<email>yu-wang@mail.tsinghua.edu.cn</email>
+						</author>
+						<author>
+							<persName><forename type="first">Zinan</forename><surname>Lin</surname></persName>
+							<email>zinanlin@microsoft.com</email>
+						</author>
+						<author>
+							<affiliation key="aff0">
+								<orgName type="department">Department of EE</orgName>
+								<orgName type="institution">Tsinghua University</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<affiliation key="aff1">
+								<orgName type="institution">Microsoft Research</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<affiliation key="aff2">
+								<orgName type="institution">Microsoft Research</orgName>
+							</affiliation>
+						</author>
+						<title level="a" type="main">DISTILLED DECODING 1: ONE-STEP SAMPLING OF IMAGE AUTO-REGRESSIVE MODELS WITH FLOW MATCHING</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">3B33C1BABB9D1BFC5407C987985329AF</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:08+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Autoregressive (AR) models have recently achieved state-of-the-art performance in text and image generation. However, their primary limitation is slow generation speed due to the token-by-token process. We ask an ambitious question: can a pre-trained AR model be adapted to generate outputs in just one or two steps? If successful, this would significantly advance the development and deployment of AR models. We notice that existing works that attempt to speed up AR generation by generating multiple tokens at once fundamentally cannot capture the output distribution due to the conditional dependencies between tokens, limiting their effectiveness for few-step generation. To overcome this, we propose Distilled Decoding (DD), which leverages flow matching to create a deterministic mapping from Gaussian distribution to the output distribution of the pre-trained AR model. We then train a network to distill this mapping, enabling few-step generation. The entire training process of DD does not need the training data of the original AR model (as opposed to some other methods), thus making DD more practical. We evaluate DD on state-of-the-art image AR models and present promising results. For VAR, which requires 10-step generation (680 tokens), DD enables onestep generation (6.3× speed-up), with an acceptable increase in FID from 4.19 to 9.96 on ImageNet-256. Similarly, for LlamaGen, DD reduces generation from 256 steps to 1, achieving an 217.8× speed-up with a comparable FID increase from 4.11 to 11.35 on ImageNet-256. In both cases, baseline methods completely fail with FID scores &gt;100. DD also excels on text-to-image generation, reducing the generation from 256 steps to 2 for LlamaGen with minimal FID increase from 25.70 to 28.95. As the first work to demonstrate the possibility of onestep generation for image AR models, DD challenges the prevailing notion that AR models are inherently slow, and opens up new opportunities for efficient AR generation. The code and the pre-trained models will be released at https:// github.com/imagination-research/distilled-decoding. The project website is at https://imagination-research.github.io/ distilled-decoding.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>Autoregressive (AR) models <ref type="bibr" target="#b48">(Van den Oord et al., 2016;</ref><ref type="bibr" target="#b5">Chen et al., 2018;</ref><ref type="bibr" target="#b7">Esser et al., 2021;</ref><ref type="bibr" target="#b32">Razavi et al., 2019;</ref><ref type="bibr" target="#b14">Lee et al., 2022;</ref><ref type="bibr">Yu et al., 2021;</ref><ref type="bibr" target="#b3">Chang et al., 2022;</ref><ref type="bibr" target="#b16">Li et al., 2023;</ref><ref type="bibr">2024a;</ref><ref type="bibr">Touvron et al., 2023a;</ref><ref type="bibr" target="#b1">b;</ref><ref type="bibr" target="#b28">Ouyang et al., 2022)</ref> are the foundation of state-of-the-art (SOTA) models for text generation (e.g., <ref type="bibr">GPT (Brown, 2020;</ref><ref type="bibr" target="#b31">Radford et al., 2019;</ref><ref type="bibr" target="#b30">Radford, 2018;</ref><ref type="bibr" target="#b0">Achiam et al., 2023)</ref>) and image generation (e.g., VAR <ref type="bibr" target="#b17">(Tian et al., 2024)</ref>, LlamaGen <ref type="bibr" target="#b44">(Sun et al., 2024)</ref>).</p><p>Despite their impressive performance, AR models suffer from slow generation speeds due to their sequential generation process. More specifically, AR models formulate data (e.g., text, images) as a sequence of tokens and are trained to predict the conditional probability distribution of one token given all previous tokens. This means that AR models can only generate data in a token-by-token fashion, which is slow. For example, LlamaGen-343M-256×256 requires 256 steps (∼5 seconds<ref type="foot" target="#foot_0">1</ref> ) to generate one 256×256 image.</p><p>In this paper, we ask the ambitious question:</p><p>Can a pre-trained AR model be adapted to generate data in a few (e.g., one or two) steps?</p><p>If successful, this would greatly benefit both the model developers (e.g., reducing the testing and deployment cost) and the end users (e.g., reducing the latency).</p><p>Apparently, this problem is challenging. While speeding up AR models by generating multiple tokens at a time (Fig. <ref type="figure">4</ref>) is extensively studied in literature <ref type="bibr">(Ning et al., 2024a;</ref><ref type="bibr" target="#b20">Liu et al., 2024;</ref><ref type="bibr" target="#b11">Jin et al., 2024;</ref><ref type="bibr" target="#b43">Stern et al., 2018;</ref><ref type="bibr" target="#b13">Kou et al., 2024;</ref><ref type="bibr" target="#b8">Gloeckle et al., 2024;</ref><ref type="bibr" target="#b2">Cai et al., 2024;</ref><ref type="bibr" target="#b35">Santilli et al., 2023;</ref><ref type="bibr" target="#b3">Chang et al., 2022;</ref><ref type="bibr">Li et al., 2024a)</ref>, none of these works were able to generate the entire sample (i.e., all tokens) in one step. Indeed, we find that there is a fundamental reason for this limitation (Sec. 3.1). Sampling multiple tokens in parallel (given previous tokens) would have to assume that these tokens are conditionally independent with each other, which is incorrect in practice. As an extreme, generating all tokens in one step (i.e., assuming that all tokens are independent) would completely destroy the characteristics in data (Sec. 3.1). This insight suggest that few-step AR generation requires a fundamentally different approach.</p><p>In this paper, we introduce Distilled Decoding (DD) (Fig. <ref type="figure">4</ref>), a novel method for distilling a pre-trained AR model for few-step sampling. In each AR generation step, we use flow matching (FM) <ref type="bibr" target="#b21">(Liu et al., 2022;</ref><ref type="bibr" target="#b19">Lipman et al., 2022)</ref> to transform a random noisy token, sampled from an isotropic Gaussian distribution, into the generated token. FM ensures that the generated token's distribution aligns with that of the AR model. However, this generation process would be even slower than vanilla AR due to the added FM overhead. The actual benefit is that, the mapping between noisy and generated token is determinstic. Therefore, we can train a model that directly distills the mapping between the entire sequence of noisy tokens and the generated tokens. This enables one-step generation by inputting the sequence of noisy tokens into the distilled model. Moreover, this deep synergy between AR and FM allows for flexible use of additional generation steps to improve data quality without changing the model (see <ref type="bibr">Sec. 3.3)</ref>. Note that the training of DD does not need the training data of the original AR model. This makes DD more practical as training data is often not released especially for SOTA LLMs. ),'</p><p>9$5 '' ''3UHWUDLQHG9$5 3UHWUDLQHG9$5 9$5VNLSODVW 9$5RQHVWHS 10 1 10 2 10 3 10 4 7LPHSHU,PDJHPV  As the first work in this series, we focus on image AR models. We validate the effectiveness of DD on the latest and SOTA image AR models: VAR <ref type="bibr" target="#b17">(Tian et al., 2024)</ref> and LlamaGen <ref type="bibr" target="#b44">(Sun et al., 2024)</ref>.</p><p>Our key contributions are:</p><p>• We identify the fundamental limitations of existing methods that prevent them from achieving few-step sampling in AR models. • We introduce DD to distill pre-trained AR models for few-step sampling.</p><p>• For the first time, we demonstrate the feasibility of 1-step sampling with SOTA image AR models. On ImageNet, DD reduces the sampling of VAR from 10 steps to 1-step (6.3× speed-up) with an acceptable increase in FID from 4.19 to 9.96; for LlamaGen, DD cuts sampling from 256 steps to 1 (217.8× speed-up) with a comparable FID increase from 4.11 to 11.35. In both cases, baseline methods completely fail on 1 step generation and achieve FID &gt;100. For text-toimage generation with LlamaGen on LAION-COCO dataset, DD is able to reduce the sampling steps from 256 to 2 (92.9× speed-up) with minimal FID increase from 25.70 to 28.95. DD also supports more steps for better image quality (Fig. <ref type="figure" target="#fig_2">3</ref>). See Figs. 1 and 2 for visualization.</p><p>This work challenges the assumption that AR models must be slow. We hope it paves the way for efficient AR models and inspires research into one-step AR models in other areas, such as text generation, where the task is more challenging due to the higher number of steps.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">PRELIMINARIES</head><p>In this section, we introduce the preliminaries required to understand DD.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.1">AR MODELS</head><p>Given a random variable z arranged in a sequence of n tokens (q 1 , • • • , q n ), AR models learn the conditional distribution of tokens given all previous ones: p(q i |q &lt;i ) = p(q i |q i-1 , q i-2 , • • • , q 1 ).</p><p>The data likelihood is given by p(z) = n i=1 p(q i |q &lt;i ). At generation, AR models sample tokens one by one using the learned conditional distribution for each token, which is therefore slow.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.2">IMAGE AR MODELS</head><p>Image tokenizer. To apply AR models to images, we need to represent continuous images as a sequence of discrete tokens. Early works of image AR models operate on quantized pixels <ref type="bibr" target="#b48">(Van den Oord et al., 2016;</ref><ref type="bibr" target="#b5">Chen et al., 2018)</ref>. Later works propose the vector quantization (VQ) method, utilizing a encoder E, a quantizer Q, and a decoder D to quantize and reconstruct images. Specifically, after [E, Q, D] is fully trained, the encoder will transform the original image x ∈ R 3×H×W into a more compact latent space: Z = E(x), where Z = {z 1 , z 2 , • • • , z h×w } ∈ R C×h×w consists of h × w embeddings, each has a dimension of C. Then, the quantizer will look up the closest token q i in the codebook</p><formula xml:id="formula_0">V = (c 1 , c 2 , • • • , c V ) ∈ R V ×C</formula><p>for each embedding z i . AR works on the quantized sequence Z q = {q 1 , q 2 , • • • , q h×w }. Finally, one can use the decoder to reconstruct the image from the quantized sequence: x = D(Z q ). A distance loss l(x, x) is used in training for accurate reconstruction. The VQ scheme is used in many popular image AR models <ref type="bibr" target="#b16">(Li et al., 2023;</ref><ref type="bibr" target="#b3">Chang et al., 2022;</ref><ref type="bibr" target="#b17">Tian et al., 2024;</ref><ref type="bibr" target="#b44">Sun et al., 2024;</ref><ref type="bibr">Li et al., 2024a)</ref>.</p><p>The order of tokens. Another important design choice of image AR models is the order of tokens. A typical and straightforward method of ordering tokens is following the raster order of the embeddings z i , such as LlamaGen <ref type="bibr" target="#b44">(Sun et al., 2024)</ref>. Random order is a more general option <ref type="bibr" target="#b3">(Chang et al., 2022;</ref><ref type="bibr" target="#b16">Li et al., 2023;</ref><ref type="bibr">2024a)</ref>. The SOTA method VAR <ref type="bibr" target="#b17">(Tian et al., 2024)</ref> proposes a novel method where the tokens are arranged according to the resolution. Specifically, give the latent Z ∈ R C×h×w , VAR down-samples it to a series of resolutions ((h 1 , w 1 ), (h 2 , w 2 ), • • • , (h K , w K )), where h i &lt; h j , w i &lt; w j for i &lt; j. Then, VAR arranges the augmented tokens from these latents in the order of resolution. Tokens from the same resolution are sampled simultaneously. This more natural and human-aligned next scale prediction approach enables VAR to achieve excellent performance. However, it still needs 10 steps to generate a 256×256 image, making it inefficient.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.3">FLOW MATCHING</head><p>Given two random distribution π 0 (x), π 1 (x) with x ∈ R d , flow matching (FM) <ref type="bibr" target="#b21">(Liu et al., 2022;</ref><ref type="bibr" target="#b19">Lipman et al., 2022)</ref> constructs a probability path which connects the two distributions. Setting up a continuous timestep axis and putting the two distribution at t = 0 and t = 1 respectively, such probability paths can be viewed as an ordinary differential equation (ODE) trajectory. Specifically, flow matching defines a velocity field V (x, t) at any timestep t, given by:</p><formula xml:id="formula_1">V (x, t) = E x0,x1∼π0,1(x0,x1) ( ∂φ(x 0 , x 1 , t) ∂t |φ(x 0 , x 1 , t) = x),<label>(1)</label></formula><p>where π 0,1 (x 0 , x 1 ) is any joint distribution that satisfies both π 0,1 (x 0 , x 1 )dx 0 = π 1 (x 1 ) and π 0,1 (x 0 , x 1 )dx 1 = π 0 (x 0 ), and φ(x, y, t) is a trivariate bijection function for x and y, which means that at any give timestep t, knowing any two of the φ, x, y will determine the third one. φ(x, y, t) should also satisfy the boundary conditions: φ(x 0 , x 1 , 0) = x 0 , φ(x 0 , x 1 , 1) = x 1 .</p><p>The flow matching ODE has marginal preserving property. Given x 0 ∼ π 0 , we can obtain x t by stepping along the ODE trajectory: x t = x 0 + t τ =0 V (x τ , τ )dτ . It can be proved that the distribution of x t is equal to the distribution of φ(x 0 , x 1 , t) <ref type="bibr" target="#b21">(Liu et al., 2022;</ref><ref type="bibr" target="#b19">Lipman et al., 2022)</ref>: π(x t ) = π(φ(x 0 , x 1 , t)), where x 0 , x 1 ∼ π 0,1 (x 0 , x 1 ). When we step to t = 1, we will get a sample from another distribution π 1 . In practice, π 1 is usually set as the target distribution we want to sample from, while π 0 is set as a simple prior distribution, e.g., Gaussian distribution. Then flow matching enables a generative process from the prior to the target.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">METHOD</head><p>3.1 TRAINING FEW-STEP AR MODELS IS NON-TRIVIAL In this section, we explain why few-step generation is challenging for AR models and why existing approaches fundamentally cannot achieve it. To finish the sampling process of the whole token sequence (q 1 , • • • , q n ) in as few steps as possible, each step should generate as many tokens as possible. Assume our goal is to generate a set of next tokens (q k+1 , • • • , q m ) based on a subsequence (q 1 , • • • , q k ) as prefix in one step, there are several straightforward ideas to solve this problem. We discuss each method and the reason why they do not work as below:</p><p>(1) Train a neural network with the prefix sequence as input and output the subsequent tokens in one run. Actually, the information in the prefix (q 0 , • • • , q k ) is not enough to deterministically specify the (q k+1 , • • • , q m ), because there are many feasible possibilities for the subsequent tokens that can fit the prefix, leaving a one-to-many mapping for the neural network to learn. For example, we can mask the face portion of a portrait and then select another face from many choices to replace it. In this case, the neural network can only learn an average of all possibilities and output blurry image tokens, like the one in MAE <ref type="bibr" target="#b9">(He et al., 2022)</ref>. At the stage where the prefix token is insufficient to constrain the subsequent tokens (e.g., at the beginning of the AR generation process), feasible choices are even much more, leading to poor generation quality. A further potential solution is to select the choice with the highest probability as the output target of the network (e.g., <ref type="bibr" target="#b41">Song et al. (2021)</ref>). However, such a method will destroy the distribution completely by collapsing into the most likely mode, which is impractical for image generation.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Autoregressive</head><p>Decoding</p><formula xml:id="formula_2">! ! ! " ! $ ! ! ! " 0.3 0.5 0.2</formula><p>Prob. over the codebook</p><formula xml:id="formula_3">$ $ $ ! $ " 0.3 0.5 0.2</formula></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Gaussian distribution</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Mixture of Dirac delta distributions</head><p>" # ! #</p><p>Figure <ref type="figure">5</ref>: AR flow matching. Given all previous tokens, the teacher AR model gives a probability vector for the next token, which defines a mixture of Dirac delta distributions over all tokens in the codebook. We then construct a deterministic mapping between the Gaussian distribution and the Dirac delta distribution with flow matching. The next noise token ϵ 4 is sampled from the Gaussian distribution, and its corresponding token in the codebook becomes the next token q 4 .</p><p>(2) Model the distribution of all subsequent tokens. The neural network can be trained to output the probability of each subsequent token given the prefix as the input. This approach avoids the challenges caused by the one-to-many mapping and is used in mask-based AR models <ref type="bibr" target="#b3">(Chang et al., 2022;</ref><ref type="bibr" target="#b16">Li et al., 2023;</ref><ref type="bibr">2024a)</ref> and VAR <ref type="bibr" target="#b17">(Tian et al., 2024)</ref>. In this case, the sampling processes of each token are independent from each other, introducing a gap between the modeled distribution</p><formula xml:id="formula_4">m i=k+1 p(q i |q k , • • • , q 1 ) and the ground truth p(q m , • • • , q k+1 |q k , • • • , q 1 ).</formula><p>For image AR models, the gap is acceptable when m -k is small. However, when the number of new tokens is large, the gap will increase exponentially, making the performance much worse. Consider the case where the model is trained to learn to sample all tokens in one run (which is our goal). In this case, the cross-entropy loss of every token is calculated separately. The final objective can be written as</p><formula xml:id="formula_5">L = 1 N N i=1 1 n n j=1 V k=1 p ijk logp θjk , (<label>2</label></formula><formula xml:id="formula_6">)</formula><p>where V is the codebook size, N is the dataset size, p ijk is a one-hot vector along the third dimension given any (i, j), indicating the ground-truth probability distribution, and pθjk is the modeled distribution. In the following proposition, we give the optimal solution of pθjk . Proposition 3.1. The optimal solution for Eq. ( <ref type="formula" target="#formula_5">2</ref>)</p><formula xml:id="formula_7">is pθ * jk = N i=1 p ijk N</formula><p>This solution equals to occurrence frequency of the k-th token at the j-th position within the dataset. The proof can be found in App. A. Based on this proposition, consider a toy case where the dataset only contains 2 data samples: D = {(0, 0), (1, 1)}. It is easy to find the optimal one-step sampling distribution is a uniform distribution among {(0, 0), (1, 1), (0, 1), (1, 0)}, which is incorrect.</p><p>It indicates that the widely used method which predicts the next group of tokens is fundamentally impossible to apply for few-step generation. We will see such experimental evidence in Sec. 5.</p><p>Additionally, attempting to model the joint distribution by outputting the probability distribution over all possible next m-k tokens is also impractical because of the large number V m-k of possible values, where V is the codebook size, which is typically several thousands or even tens of thousands.</p><p>3.2 CONSTRUCTING DETERMINISTIC TRAJECTORIES FROM GAUSSIAN TO DATA THROUGH AR FLOW MATCHING As discussed in section Sec. 3.1, training a model to generate all the tokens in a single run is impossible due to the issue of one-to-many mapping. Therefore, constructing a one-to-one mapping is the key for training a model to generate more tokens simultaneously. The process is illustrated in Fig. <ref type="figure">5</ref>.</p><p>Construct a mapping for a single token. Consider the sampling process of a single token</p><formula xml:id="formula_8">q i ∈ R C given (q 1 , • • • , q i-1</formula><p>). Inspired by the knowledge distillation method for diffusion model <ref type="bibr" target="#b23">(Luhman &amp; Luhman, 2021;</ref><ref type="bibr" target="#b34">Salimans &amp; Ho, 2022;</ref><ref type="bibr">Song et al., 2023;</ref><ref type="bibr">Song &amp; Dhariwal, 2023;</ref><ref type="bibr" target="#b12">Kim et al., 2023)</ref> which map noise to data, we propose to use noise token as additional information to determine this single token. Specifically, we sample noise token from a prior distribution and map it to the generated token. We hope that (1) every noise token will be transferred to a deterministic data token in the codebook, and (2) the distribution of generated token equals to p θ (q i |q i-1 , • • • , q 0 ) given by the pre-trained AR model. We propose to use flow matching as the desired mapping for the single token. We operate on the continuous embedding space E C of each token given by the codebook</p><formula xml:id="formula_9">V = (c 1 , • • • , c v ) ∈ R V ×C .</formula><p>Since the distribution of the next token is a discrete probability distribution among all tokens in the codebook: P(q i = c j ) = p j , where p j ≥ 0, V j=1 p j = 1, it can also be viewed as a weighted sum of point distributions in the continuous embedding space: p(q i ) = V j=1 p j δ(q i -c j ), where δ(•) is the Dirac function. Denoting π t as the marginal distribution at timestep t, we set this weighted sum of point distributions as the target distribution π 1 and apply a standard Gaussian distribution as the source distribution π 0 . We further choose the linear interpolation used in <ref type="bibr" target="#b21">Liu et al. (2022)</ref> as the perturb function: φ(z 0 , z 1 , t) = (1 -t)z 0 + tz 1 . Then the velocity field in the flow matching framework is given as:</p><formula xml:id="formula_10">V (x, t) = V j=1 p j (c j -x)e (x-tc j ) 2 (1-t) 2 (1 -t) V j=1 p j e (x-tc j ) 2 (1-t) 2 (3)</formula><p>In this way, we construct a mapping from a noise token embedding ϵ i ∈ R C to the generated token embedding q i with the ODE dx = V (x, t)dt while keeping the distribution of q i unchanged. We denote this mapping as</p><formula xml:id="formula_11">q i = F M (ϵ i , p θ (•|q &lt;i ))<label>(4)</label></formula><p>In practice, we use numerical solvers <ref type="bibr">(Lu et al., 2022a;</ref><ref type="bibr" target="#b1">b)</ref> to solve the ODE process, so q i will not have an exact match in the codebook. To tackle that, we use the token closest to q i in the codebook.</p><p>Construct the whole trajectory along the AR generation process. After constructing a mapping from</p><formula xml:id="formula_12">(q 1 , • • • , q i-1 , ϵ i ) to (q 1 , • • • , q i-1 , q i ),</formula><p>we can extend such mapping to situations with arbitrary length of subsequent noise tokens</p><formula xml:id="formula_13">(q 1 , • • • , q i-1 , ϵ i , • • • , ϵ m</formula><p>) via an iterative way. After generating the current token q i from noise ϵ i , we can update the sequence with</p><formula xml:id="formula_14">(q 1 , • • • , q i , ϵ i+1 , • • • , ϵ n )</formula><p>and get the conditional probability p(q i+1 |q i , • • • , q 1 ). Then the same method can be applied to transfer the next noise token ϵ i+1 to data token q i+1 , until all the subsequent noise tokens are mapped to the corresponding generated data. This process imposes no constraints on the length of the prefix, so we can start from a pure noise sequence</p><formula xml:id="formula_15">(ϵ 1 , • • • , ϵ n ).</formula><p>In this way, we construct an AR trajectory {X i } n+1 i=1 from pure noise to the final data using flow matching, given as:</p><formula xml:id="formula_16">X i = (q 1 , • • • , q i-1 , ϵ i , • • • , ϵ n ) (5)</formula><p>The recurrence relation is given by Eq. (4).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.3">DISTILLING AR ALONG THE TRAJECTORY</head><p>The AR trajectory transfer the pure noise sequence progressively to the final data sequence, thus is suitable for a neural network to learn. To enable a trade-off between sample quality and sample step, we train the model to predict the final data not only at the beginning of the trajectory but also at intermediate points. Based on this, we first clarify the notation, discuss the model parameterization and training loss, and finally introduce the overall workflow of distillation and sampling.</p><formula xml:id="formula_17">Notation. Suppose X = (x 1 , • • • , x n ) and Y = (y 1 , • • • , y n ) are</formula><p>two arbitrary sequence. We denote X[: t] as a sub-sequence with the first t tokens in X and X[t + 1 :] is the rest part:</p><formula xml:id="formula_18">X[: t] = (x 1 , • • • , x t ), X[t + 1 :] = (x t+1 , • • • , x n ).</formula><p><ref type="foot" target="#foot_1">2</ref> Additionally, we define the Concat operation as concatenating two sequences:</p><formula xml:id="formula_19">Concat(X, Y ) = (x 1 , • • • , x n , y 1 , • • • , y n ).</formula><p>Model parameterization. The model takes an intermediate value</p><formula xml:id="formula_20">X t = (q 1 , • • • , q t-1 , ϵ t , • • • , ϵ n )</formula><p>of the trajectory and the position t as input, and output the final data X n+1 ∈ R n×C corresponding to the X t . Suppose we have a neural network f θ and denote its output as</p><formula xml:id="formula_21">f θ (X) = (f θ1 , • • • , f θn ).</formula><p>Since the first t -1 tokens of X t is already correct tokens, they can be directly used as the first t -1 tokens of the predicted results. We thus parameterize the model output as:</p><formula xml:id="formula_22">F θ (X t , t) = Concat(X t [: t -1], f θ (X t )[t :]) = (q 1 , • • • , q t-1 , f θt , • • • , f θn ) (6)</formula><p>Training loss. We train the model by minimizing the distance between its output and the target data sequence, which gives the following loss:</p><formula xml:id="formula_23">L = E[λ(t)d(F θ (X t , t), X n+1 )]<label>(7</label></formula><p>) Denote {t 1 , . . . , t L } as the set from which timestep t can be sampled, where</p><formula xml:id="formula_24">t i ∈ [1, n] and t 1 = 1, and X t = Concat(X n [: t -1], X 1 [t :])</formula><p>, where X n is the final generated data by the pre-trained AR model corresponding to X 1 . The expectation of Eq. ( <ref type="formula" target="#formula_23">7</ref>) is taken with respect to t ∼ Uniform{t i } L i=1 and X 1 ∼ N (0, I). λ(•) ̸ = 0 is a step-wise weighted function. d(•, •) is any distance function that satisfies d(x, y) ≥ 0 and d(x, y) = 0 if and only if x = y.</p><p>Overall distillation workflow (Fig. <ref type="figure">6</ref>). Our overall workflow consists of two parts: generating the training set and training the model. First, we iteratively draw noises from standard Gaussian distribution and calculate the deterministic generated data through the method in Sec. 3.2, to construct a dataset of noise-data pairs (see Alg. 1). Then we train the model with Eq. ( <ref type="formula" target="#formula_23">7</ref>) using the dataset (see Alg. 2). In this case, the noise-data pair (X 1 , X n ) is directly drawn from the dataset.</p><formula xml:id="formula_25">" $ " ! " " " # ! $ ! ! ! " " # ! $ " ! " " " # ! $ ! ! " " " # ! $ ! ! ! " ! # # $ # ! # " # # # % Training v v v 1-step v 2-step v v v 3-step v</formula></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Generation</head><p>Legend:</p><p>Teacher AR model Our DD model</p><p>Figure <ref type="figure">6</ref>: The training and generation workflow of DD. Given X 1 with noise tokens ϵ i , the whole trajectory X 1 , • • • , X 5 consists of data tokens q i and noise tokens ϵ i is uniquely determined (Sec. 3.2). Assuming the timesteps are set to {t 1 = 1, t 2 = 3}. During training (Sec. 3.3), we train DD model to reconstruct X 5 given X 1 or X 3 as input. The DD will then have the capability of jumping from X 1 and X 3 to any point in the later trajectory (e.g., X 1 to any of {X 2 , • • • , X 5 }). During generation (Sec. 3.3), we can either do 1-step (X 1 → X 5 ) or 2-step generation (X 1 → X 3 → X 5 ). Additionally, we can do generation with more steps by incorporating the teacher AR model in part of the generation process, such as 3-step generation X 1 → X 2 → X 3 → X 5 where X 2 → X 3 utilizes the AR model and other steps use the DD model.</p><p>Generation (Fig. <ref type="figure">6</ref>). With one trained DD model using the above workflow, we can flexibly adjust the trade-off between sample quality and the number of generation timesteps during inference (Alg. 3). Specifically, any subset of the training timesteps {t k1 , • • • , t k l } where t k1 = 1 can be chosen as a timestep path from noise to data. We can choose only the first timestep {t 1 } to do one-step generation, or leverage more timesteps to improve sample quality. Utilizing the AR property of the trajectory, jumping from step t ki to t ki+1 can be implemented by predicting all tokens at timestep t ki and only keeping the ones before t ki+1 .</p><p>Additionally, we can utilize the pre-trained AR model to achieve more flexibility in the trade-off between sample quality and timestep. Specifically, we can use the pre-trained AR model to generate from any position along the sampling process until reaching the next trained timestep for few-step sampling. Alg. 4 is an example of 2 + t k2 -t s step sampling with the pre-trained model inserted into the original two-step sampling process. We use the DD model on the first step, re-generate the last t k2 -t s tokens with the pre-trained AR model, and then apply the DD model for the second step.</p><p>Discussions. As a deep synergy between AR and flow matching, DD possesses interesting properties that none of the flow matching (which is closely related to diffusion models) and AR have.</p><p>Compared to AR, DD has the capability of adjusting the number of generation steps. Compared to flow matching (and diffusion models), DD uses AR to construct the trajectories, and therefore, DD has an easy way to jump back to any point in the trajectory by replacing the last few generated tokens with the original noise tokens, which we utilize in the sampling procedure above. This property enables DD to keep the trajectory unchanged when sampling with multi-steps, in contrast to other intermediate-to-final distillation methods for diffusion models <ref type="bibr">(Song et al., 2023;</ref><ref type="bibr">Song &amp; Dhariwal, 2023)</ref> which cannot maintain the trajectory during multi-step sampling.</p><p>Another point to mention is that the DD does not require the training data of the original AR model, as opposed to some related work <ref type="bibr">(Li et al., 2024b;</ref><ref type="bibr">Song et al., 2023)</ref>. This makes DD more practical in cases where the training data of the pre-trained AR models is not released.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">RELATED WORK</head><p>4.1 DECREASING THE NUMBER OF SAMPLING STEPS OF AR MODELS Image generation. (1) Mask-based image AR methods <ref type="bibr" target="#b3">(Chang et al., 2022;</ref><ref type="bibr" target="#b16">Li et al., 2023;</ref><ref type="bibr">2024a)</ref> adopt a random masking ratio when training, allowing them to directly perform a trade-off between performance and number of steps. Specifically, these models are trained to predict an arbitrary number of tokens given some other arbitrary number of tokens. By increasing the number of tokens generated in each step, they can sample faster at the cost of loss in generation quality. However, the fewest number of generation steps evaluated in these works is only 8 and we show in Sec. 3.1 that they fundamentally cannot support very few steps (e.g., one or two steps).</p><p>(2) For causaltransformer-based methods, how to reduce their number of steps is still unknown.</p><p>Text generation (large language models). There are already many works focusing on speeding up the generation of LLMs <ref type="bibr" target="#b24">(Zhou et al., 2024)</ref>.</p><p>(1) Speculative decoding first generates a draft of multiple following tokens and then applies the target LLM to verify these tokens in parallel. The draft tokens can either be generated (a) sequentially by another (small) AR model <ref type="bibr" target="#b4">(Chen et al., 2023;</ref><ref type="bibr" target="#b15">Leviathan et al., 2023;</ref><ref type="bibr">Li et al., 2024b)</ref> or (b) in parallel by specially trained models or heads <ref type="bibr" target="#b2">(Cai et al., 2024;</ref><ref type="bibr" target="#b8">Gloeckle et al., 2024;</ref><ref type="bibr" target="#b50">Xia et al., 2023)</ref>. Method (a) does not reduce the number of generation steps and therefore is irrelevant to our few-step generation goal. Method (b) fundamentally cannot match the distribution of the target AR model (Sec. 3.1). As a result, even when generating a small number of tokens at a time, they rely on a verification step to ensure correctness, let alone one-step generation.</p><p>(2) In contrast to token-level parallelism exploited in speculative decoding, content-based parallelism is another paradigm that exploit the weak relation between different parts of the generated content <ref type="bibr">(Ning et al., 2024a;</ref><ref type="bibr" target="#b20">Liu et al., 2024;</ref><ref type="bibr" target="#b11">Jin et al., 2024)</ref>. These methods prompt or train the LLM to generate an answer outline, enabling the LLM to generate independent points in the outline in parallel. However, these methods change the output distribution of the original AR model.</p><p>(3) Conceptually similar to our methods, CLLMs <ref type="bibr" target="#b13">(Kou et al., 2024)</ref> utilize Jacobi decoding trajectory <ref type="bibr" target="#b41">(Song et al., 2021;</ref><ref type="bibr" target="#b35">Santilli et al., 2023)</ref> and train a student model to conduct one-step sampling along the trajectory. However, CLLMs only support greedy decoding, which deviates from the (non-deterministic) generated distribution of the original AR model.</p><p>In contrast to all these methods, DD supports one-step sampling while theoretically having the potential to match the output distribution of the original AR model.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.2">DIFFUSION DISTILLATION</head><p>Similar to AR models, diffusion models <ref type="bibr" target="#b38">(Sohl-Dickstein et al., 2015;</ref><ref type="bibr" target="#b10">Ho et al., 2020;</ref><ref type="bibr" target="#b40">Song et al., 2020)</ref> also suffer from a large number of sampling steps. Knowledge distillation is a promising approach to address this problem and has been widely studied. These methods leverage the trajectory constructed by the pre-trained diffusion model, and train neural networks to directly predict the value multiple steps ahead in the trajectory, rather than predicting just one step ahead as in the pre-trained model. One key difference between various knowledge distillation methods lies in how the starting and ending points of multi-step skipping are selected. The earliest method (Luhman &amp; Luhman, 2021) trains the model to skip the entire trajectory (i.e., predicting the final data directly from the initial Gaussian noise), enabling one-step sampling. PD <ref type="bibr" target="#b34">(Salimans &amp; Ho, 2022)</ref> progressively merges two adjacent steps into one, which makes the optimization task smoother and provides a trade-off between steps and quality. CM <ref type="bibr">(Song et al., 2023;</ref><ref type="bibr">Song &amp; Dhariwal, 2023)</ref> skips from any intermediate points along the trajectory to the final data. CTM <ref type="bibr" target="#b12">(Kim et al., 2023)</ref> proposes a more general framework which enables the transfer between any two points in the trajectory.</p><p>Unlike diffusion models, AR models do not come with deterministic trajectories, and therefore, doing distillation on AR is not straightforward. One of our key innovations is the construction of deterministic trajectories out from a pre-trained AR (Sec. 3.2), thereby making knowledge distillation for AR possible. In this paper, we only explored a simple knowledge distillation paradigm, and we hope that this work opens the door for more knowledge distillation paradigms for AR in the future.</p><p>See App. F for more discussions on related works <ref type="bibr">(Li et al., 2024a;</ref><ref type="bibr">Yin et al., 2024)</ref> </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">EXPERIMENTS</head><p>In this section, we use DD to accelerate pre-trained image AR models and demonstrate its effectiveness. More details are in App. D. Ablation studies are in App. E.2.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.1">SETUP</head><p>Training. For pre-trained AR models, we choose VAR <ref type="bibr" target="#b17">(Tian et al., 2024)</ref> and LlamaGen <ref type="bibr" target="#b44">(Sun et al., 2024)</ref> for the following reasons: (1) Both methods are recently released, very popular, and have achieved excellent performance (e.g., LlamaGen claims to beat diffusion models on image generation).</p><p>(2) Their token sequences are defined very differently (Sec. 2.2): VAR uses images of different resolutions to construct the sequence, while LlamaGen adopts traditional method where tokens are latent pixels and arranged in raster order. We want to test the universality of DD across different token sequence definitions.</p><p>(3) Their number of generation steps vary significantly: VAR has 10 steps while LlamaGen uses 256 steps. We want to test whether DD is able to achieve few-step generation no matter whether the AR model has a small or a large number of steps. (4) They both provide different sizes of pre-trained models for us to study how DD scales with model sizes.</p><p>Following these works, we choose ImageNet 256×256 as the main benchmark. We set the number of available timesteps as 2 and use {1, 6}, {1, 81} as {t k1 , t k2 } for VAR, LlamaGen, respectively. Results show that DD can compress both models to 1 or 2 steps with comparable quality.</p><p>We further evaluate DD on text-to-image models to assess its capability in handling large-scale tasks.</p><p>We select the stage-1 text-to-image model from LlamaGen as our base model, which uses 256 steps for generation. For evaluation, we generate images based on 5k unseen prompts from the LAION-COCO dataset and report the FID between the generated images and their corresponding real images.</p><p>All other settings are consistent with those used for the ImageNet dataset.</p><p>Generation. We apply Alg. 3 with 1 and 2 steps as our main results in Sec. 5.2. We additionally use Alg. 4 in Sec. 5.3 for better quality with more generation steps. We use a series of staring timesteps for the pre-trained model to get a smooth trade-off between generation cost and quality.</p><p>Baselines. Since there is no existing method for decreasing the generation steps of visual AR with causal transformers (Sec. 4), we design two baselines: (1) Directly skipping the last several steps, denoted as skip-n where n is the number of skipped steps, and (2) predicting the distribution of all tokens in one step with the optimal solution in Prop. 3.1, denoted as onestep*. We also compare with the base pre-trained AR models and other generative models for comprehensiveness.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.2">MAIN RESULTS</head><p>The main results of DD are shown at Tab. 1. The key takeaways are:</p><p>DD enable few-step generation of AR models. By comparing the required generation step and time between the pre-trained models (VAR and LlamaGen) and our distilled models (VAR-DD and LlamaGen-DD), we can see that DD compresses the step and accelerates the pre-trained AR by a very impressive ratio (6.3× on VAR and 217.8× on LlamaGen). Notably, DD decreases the generation step and time of LlamaGen by two orders.</p><p>Baselines do not work for few-step generation. From Tab. 1, we can see that DD steadily surpasses the two types of baselines. For skip baseline, we find that the performance rapidly declines as the number of skipped steps increases. The onestep* indeed does not work as expected in Sec. 3.1, due to the lack of correlation between tokens.</p><p>DD does not sacrifice quality too much. While achieving significant speedup, DD does not sacrifice the generation quality too much. For VAR, the FID increases of one-step and two-step generation are smaller than 6 and 4, respectively. For LlamaGen which has more original steps, the FID increase is around 3.5 for two-step generation. Note that as DD learns the mapping given by the pre-trained AR, its performance is bounded by the pre-trained model. Such results have already outperformed many other popular methods like ADM <ref type="bibr" target="#b6">(Dhariwal &amp; Nichol, 2021)</ref> with much faster generation speed.</p><p>DD scales well with different model sizes. We experiment with two different sizes of LlamaGen and three different sizes of VAR (Tab. 4). DD always achieves reasonable sample quality across different model sizes. In addition, for each model family, with larger model sizes, DD can achieve better FID. These results suggest that DD works and scales well with different model sizes.</p><p>Table <ref type="table">2</ref>: Generation quality of involving the pre-trained AR model when sampling. The notation pre-trained-n-m means that the pre-trained AR model is used to re-generate the n-th to m -1-th tokens in the sequence generated by the first step of DD.  DD allows users to choose the desired trade-off between quality and speed. From Tab. 1, we can see that generation with two steps has better quality than generation with one step, indicating that DD offers a trade-off between quality and step, which is a property that AR models using a causal transformer (such as VAR and LlamaGen) do not have.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.3">GENERATION INVOLVING THE PRE-TRAINED MODEL</head><p>In this section, we test the method in Alg. 4 which utilizes both the distilled model from DD and the pre-trained AR model to provide more trade-off points between quality and step. As discussed in Sec. 3.3, we use the pre-trained AR model to re-generate token from t s to t k2 -1, denoted as pre-trained-t s -t k2 . Results are shown at Tab. 2. We can see this generation method offers a flexible and smooth trade-off between quality and step. For example, for VAR, by totally replacing the first step with the pre-trained model, DD reaches a FID of 5.03 which is very close to the pre-trained model, while achieving 1.5× speedup. For LlamaGen, DD achieves FID 6.76 with 11.2× speedup.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.4">TEXT-TO-IMAGE GENERATION</head><p>In this section, we report the results of DD on text-to-image generation in Tab. 3. We can see that DD achieves performance comparable to the pre-trained model (i.e., 25.70 v.s. 28.95) with only 2 sampling steps. Generated examples are demonstrated in Fig. <ref type="figure">2</ref> and App. G.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6">LIMITATIONS AND FUTURE WORK</head><p>Training few-step AR models without teachers. In this work, we distill pre-trained teacher AR models to support few-step sampling. The sample quality is therefore bounded by the pre-trained AR model. It would be interesting to explore if it is possible to eliminate the need for a teacher, which offers more flexibility and potentially can lead to better sample quality. As discussed in Sec. 4.2, the trajectory construction in DD opens up the opportunity to apply other diffusion distillation approaches to AR models. One potential direction is to apply the teacher-free consistency training approaches <ref type="bibr">(Song et al., 2023;</ref><ref type="bibr">Song &amp; Dhariwal, 2023)</ref> on AR models.</p><p>Applications on LLMs. Theoretically, DD can be directly applied to LLMs. However, different from visual AR models, the codebook of LLMs is much larger in both size and embedding dimensions. Additionally, the sequence length of LLMs may be much longer. Therefore, applying DD on LLMs introduces new challenges to be solved.</p><p>Questioning the fundamental trade-off between inference cost and performance. It was recently believed that for AR models scaling up the inference compute and number of generation steps is important for getting better performance, as exemplified by various LLM prompting techniques <ref type="bibr" target="#b49">(Wei et al., 2022;</ref><ref type="bibr" target="#b26">Nori et al., 2023;</ref><ref type="bibr">Ning et al., 2024b;</ref><ref type="bibr" target="#b37">Snell et al., 2024)</ref> and the inference scaling law presented in OpenAI o1 <ref type="bibr" target="#b27">(OpenAI, 2024)</ref>. However, as our experiments demonstrated, it is possible to significantly reduce the inference compute and generation steps without losing too much fidelity, at least for current image AR models. This suggests that while the inference compute is important, current models might be wasting compute in the wrong place. It would be interesting to study (1) where the optimal trade-off between inference cost and performance is, (2) how much current models are away from that optimal trade-off, and (3) how to modify current models or design new models to reach that optimal trade-off.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Algorithm 1 Generate dataset</head><p>Require: θ Φ : The pre-trained AR model Generation Process</p><formula xml:id="formula_26">1: D ← ∅ 2: for i = 1, • • • , N do 3: X1 ← (ϵ1, • • • , ϵn) ∼ N (0, I) 4: for t = 1, • • • , n do 5: qt ← F M (ϵt, p θ Φ (•|q&lt;t)) 6:</formula><p>end for 7:</p><p>Xn ← (q1,  </p><formula xml:id="formula_27">, • • • , t k l }. Sampling Process 1: X1 ← (ϵ1, • • • , ϵn) ∼ N (0, I), X ← X1 2: for t in {t k 1 , • • • , t k l } do 3: X ← Concat(X[: t -1], X1[t :]) 4: X ← F θ (X,</formula><formula xml:id="formula_28">: X1 ← (ϵ1, • • • , ϵn) ∼ N (0, I), X ← X1 2: X ← Concat(X[: t k 1 -1], X1[t k 1 :]) 3: X ← F θ (X, t k 1 ) 4: X ← Concat(X[: ts -1], X1[ts :]) 5: for t in {ts, • • • , t k 2 -1} do 6: Sample qt ∼ p θ Φ (•|X[: t -1]) 7:</formula><p>X[t] ← qt 8: end for 9: X ← F θ (X, t k 2 ) 10: return X Two final heads for logits and embedding prediction. The task of the model is to output the token in the codebook (with a shape of V × C) which corresponds to the input noise. There are two approaches to achieve this goal: we can view the problem as a classification problem among all tokens in the codebook, or we can treat it as a regression task aimed at outputting the correct embedding. Therefore, we set two final heads after the transformer backbone. For each token, one outputs p ∈ R V as the predicted logits among all tokens in the codebook, and the other outputs c ∈ R C as the predicted embedding. For logits output, we use cross entropy as the distance function d in Eq. ( <ref type="formula" target="#formula_23">7</ref>), while we apply LPIPS loss <ref type="bibr">(Zhang et al., 2018)</ref> for the embedding prediction. The overall objective is a weighted sum of the two losses. We empirically find that the predicted logits perform well when t is small and much worse when t is large, while the predicted embeddings perform the opposite. Thus we simply set a split point and use the predicted logits for small ts and the predicted embeddings for the rest.</p><p>Additional embeddings for noise and data tokens. Since data tokens and noise tokens are fed in the model simultaneously, and their distribution differs significantly, it is necessary for the network to distinguish between them. Therefore, before the transformer block, We add two different learnable embeddings to the data tokens and noise tokens, respectively. The two embeddings are randomly initialized.</p><p>Positional Embedding. Actually, the processed sequence of our model is one token longer than the pre-trained AR model. It is because the pre-trained model needs 1 class label token and n -1 generated token to obtain the whole sequence, while our model needs 1 class label token and n noise token to generate the whole sequence. Thus, for models who have positional embedding, we increase its length by 1 and randomly initialize this new part.</p><p>Attention Mask. The attention mask of the pre-trained AR model also can not be used directly due to the mismatch in length. In our case, we let every token see all previous tokens. For VAR, all tokens generated at the same step can see each other as well. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>D EXPERIMENTAL DETAILS</head><p>In this section, we introduce more details of the experiments in Sec. 5.</p><p>Dataset Generation. In the dataset generation phase, we use Alg. 1 to construct the data-noise pairs. For the ImageNet dataset, we generated a total of 1.2M data-noise pairs; for the text-to-image task, we generated a total of 3M data-noise pairs. For the AR models, we set the classifier-free guidance scale to 2.0 for both VAR and LlamaGen, while other settings follow the default configuration of these two works. In the flow matching process, we employ the perturb function from Rectflow <ref type="bibr" target="#b21">(Liu et al., 2022)</ref>: φ(x 0 , x 1 , t) = (1 -t)x 0 + tx 1 . We use the DPM-Solver <ref type="bibr">(Lu et al., 2022a;</ref><ref type="bibr" target="#b1">b)</ref> to efficiently solve the FM ODE. Specifically, after calculating the velocity model given by Eq. ( <ref type="formula">3</ref>), we wrap the model function V (x, t) to get the noise prediction model ϵ(x, t): ϵ(x, t) = x -tV (x, t).</p><p>Then we can directly use the official implementation of DPM-Solver (see https://github. com/LuChengTHU/dpm-solver) to conduct sampling with the noise prediction model and the Rectflow noise schedule. Our configuration includes 10 NFE multistep DPM-Solver++ with an order of 3.</p><p>Training Configuration. We follow most of the training configuration for the pre-trained AR model. For VAR, we use a batch size of 512, a base learning rate 1e-4 per 256 batch size, and an AdamW optimizer with β 1 = 0.9, β 2 = 0.95. For LlamaGen, all other settings are the same except for the learning rate, which is fixed at 1e-4 and doesn't vary with the batch size. We distill the VAR model for 120 epochs and LlamaGen model for 70 epochs. We additionally use exponential moving average (EMA) with a rate of 0.9999. As discussed in App. C, our model has two types of prediction results, therefore two types of loss. We assign a loss weight of 1.0 for the embedding loss (LPIPS) and a weight of 0.1 for the logits loss (cross entropy) to maintain a similar loss scale for them. For the timestep-wise loss weight, we use a uniform one with λ(t) = 1.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>E ADDITIONAL RESULTS</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>E.1 RESULTS WITH MORE MODEL SIZES</head><p>In this section, we present results with VAR and LlamaGen models of more parameter sizes in Tab. 4.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>E.2 ABLATION STUDY</head><p>Effect of the training iteration. From Fig. <ref type="figure" target="#fig_3">7</ref>, we can see that the few-step FID decreases rapidly in the first few epochs, demonstrating the high adaptability of the pre-trained AR model across different tasks, which contributes to the smaller distilling cost of DD than training AR models from scratch.</p><p>Effect of the intermediate timestep. From Fig. <ref type="figure" target="#fig_3">7</ref>, we find that the convergence speed and performance of different intermediate timesteps are similar, indicating that DD is not sensitive to it.</p><p>Effect of the dataset size. From Fig. <ref type="figure" target="#fig_4">8</ref>, we find that the DD can still work when there is only 0.6M (data, noise) pairs. Additionally, with more (data, noise) pairs, the performance improves. The results demonstrate DD's robustness to limited data and its data scaling ability.  </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>F MORE RELATED WORK DISCUSSIONS</head><p>In this section, we provide expanded discussions on two related works: DMD <ref type="bibr">(Yin et al., 2024)</ref> and MAR <ref type="bibr">(Li et al., 2024a)</ref>. DMD <ref type="bibr">(Yin et al., 2024)</ref> uses distribution matching to distill diffusion models into few steps. Specifically, the main idea of DMD is to minimize the distance between the generated distribution and the teacher distribution at all timesteps. Additionally, it constructs data-noise pairs and conducts direct distillation as a regularization loss term to avoid mode collapse. There are several key differences between DD and DMD: (1) Target: DMD focuses on diffusion models, whereas DD focuses on AR. These are two different problems; (2) Technique: In diffusion models, the diffusion process naturally defines the data-noise pairs, which can be directly used for distillation as in DMD. In contrast, AR models do not have a pre-defined concept of "noise". How to construct noise and the data-noise pair (Sec. 3.2) is one important and unique contribution of our work.</p><p>That being said, the distribution matching idea in DMD is very insightful, and could potentially be combined with DD to achieve better approaches for few-step sampling of AR models. For example, from a high-level perspective, the noisy image in DMD is similar to the partial data sequence in AR, while the next token logits given by the pre-trained AR model can be viewed as the score function in DMD. The objective can be set as minimizing the distance between the output of a fake logits prediction network and the pre-trained AR at all timesteps. As long as the next-token conditional distribution of the generated distribution is the same as the distribution given by the pre-trained AR model, the modeled one-step distribution will be correct. There is no requirement for any data-noise pair in this case.</p><p>MAR <ref type="bibr">(Li et al., 2024a)</ref> proposes to replace the cross-entropy loss with diffusion loss in AR, which shares some similarities with DD at a high level since both works view decoding as a denoising process. The goals of these two works are different though. MAR targets removing the vector quantization in image AR models for better performance, while DD aims to compress the sampling steps of AR, without any modification to the codebook. In this sense, these two works are orthogonal and could potentially be combined to develop a new method that leverages the strengths of both. </p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 1 :Figure 2 :</head><label>12</label><figDesc>Figure 1: Qualitative comparisons between DD and vanilla LlamaGen Sun et al. (2024) on ImageNet 256×256. We show that the generated images of DD have small quality loss compared to the pre-trained AR model, while achieving ≥200× speedup. More examples are in App. G.</figDesc><graphic coords="2,209.48,199.39,94.05,94.05" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Figure 3 :</head><label>3</label><figDesc>Figure3: Comparison of DD models, pre-trained models, and other acceleration methods for pretrained models. DD achieves significant speedup compared to pre-trained models with comparable performance. In contrast, other methods' performance degrades quickly as inference time decreases.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Figure 7 :</head><label>7</label><figDesc>Figure 7: The training curve of FID vs. epoch or iteration for different intermediate timesteps. FIDs are calculated with 5k generated sample.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Figure 8 :</head><label>8</label><figDesc>Figure 8: The training curve of FID vs. epoch for different dataset sizes. FIDs are calculated with 5k generated sample.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_5"><head>Figure 9 :</head><label>9</label><figDesc>Figure 9: Generation results with VAR model (Tian et al., 2024). From left to right: one-step DD model, two-step DD model, DD-pre-trained-4-6, and the pre-trained VAR model.</figDesc><graphic coords="18,108.00,81.86,396.00,495.00" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 1 :</head><label>1</label><figDesc>Generative performance on class-conditional ImageNet-256. "#Step" indicates the number of model inference to generate one image. "Time" is the wall-time of generating one image in the steady state. Results with † are from<ref type="bibr" target="#b17">Tian et al. (2024)</ref>. See Tab. 4 for results on more model sizes.</figDesc><table><row><cell>Type</cell><cell>Model</cell><cell>FID↓</cell><cell>IS↑</cell><cell>Pre↑</cell><cell>Rec↑</cell><cell>#Para</cell><cell>#Step</cell><cell>Time</cell></row><row><cell>GAN  †</cell><cell>StyleGan-XL (Sauer et al., 2022)</cell><cell>2.30</cell><cell>265.1</cell><cell>0.78</cell><cell>0.53</cell><cell>166M</cell><cell>1</cell><cell>0.3</cell></row><row><cell>Diff.  †</cell><cell>ADM (Dhariwal &amp; Nichol, 2021)</cell><cell>10.94</cell><cell>101.0</cell><cell>0.69</cell><cell>0.63</cell><cell>554M</cell><cell>250</cell><cell>168</cell></row><row><cell>Diff.  †</cell><cell>LDM-4-G (Rombach et al., 2022)</cell><cell>3.60</cell><cell>247.7</cell><cell>-</cell><cell>-</cell><cell>400M</cell><cell>250</cell><cell>-</cell></row><row><cell>Diff.  †</cell><cell>DiT-L/2 (Peebles &amp; Xie, 2023)</cell><cell>5.02</cell><cell>167.2</cell><cell>0.75</cell><cell>0.57</cell><cell>458M</cell><cell>250</cell><cell>31</cell></row><row><cell>Diff.  †</cell><cell>L-DiT-7B (Peebles &amp; Xie, 2023)</cell><cell>2.28</cell><cell>316.2</cell><cell>0.83</cell><cell>0.58</cell><cell>7.0B</cell><cell>250</cell><cell>&gt;45</cell></row><row><cell>Mask.  †</cell><cell>MaskGIT (Chang et al., 2022)</cell><cell>6.18</cell><cell>182.1</cell><cell>0.80</cell><cell>0.51</cell><cell>227M</cell><cell>8</cell><cell>0.5</cell></row><row><cell>AR  †</cell><cell>VQVAE-2  † (Razavi et al., 2019)</cell><cell>31.11</cell><cell>∼45</cell><cell>0.36</cell><cell>0.57</cell><cell>13.5B</cell><cell>5120</cell><cell>-</cell></row><row><cell>AR  †</cell><cell>VQGAN (Esser et al., 2021)</cell><cell>15.78</cell><cell>74.3</cell><cell>-</cell><cell>-</cell><cell>1.4B</cell><cell>256</cell><cell>24</cell></row><row><cell>AR  †</cell><cell>ViTVQ (Yu et al., 2021)</cell><cell>4.17</cell><cell>175.1</cell><cell>-</cell><cell>-</cell><cell>1.7B</cell><cell>1024</cell><cell>&gt;24</cell></row><row><cell>AR  †</cell><cell>RQTran. (Lee et al., 2022)</cell><cell>7.55</cell><cell>134.0</cell><cell>-</cell><cell>-</cell><cell>3.8B</cell><cell>68</cell><cell>21</cell></row><row><cell>AR</cell><cell>VAR-d16 (Tian et al., 2024)</cell><cell>4.19</cell><cell>230.2</cell><cell>0.84</cell><cell>0.48</cell><cell>310M</cell><cell>10</cell><cell>0.133</cell></row><row><cell>AR</cell><cell>LlamaGen-L (Sun et al., 2024)</cell><cell>4.11</cell><cell>283.5</cell><cell>0.85</cell><cell>0.48</cell><cell>343M</cell><cell>256</cell><cell>5.01</cell></row><row><cell>Baseline</cell><cell>VAR-skip-1</cell><cell>9.52</cell><cell>178.9</cell><cell>0.68</cell><cell>0.54</cell><cell>310M</cell><cell>9</cell><cell>0.113</cell></row><row><cell>Baseline</cell><cell>VAR-skip-2</cell><cell>40.09</cell><cell>56.8</cell><cell>0.46</cell><cell>0.50</cell><cell>310M</cell><cell>8</cell><cell>0.098</cell></row><row><cell>Baseline</cell><cell>VAR-onestep*</cell><cell>157.5</cell><cell>-</cell><cell>-</cell><cell>-</cell><cell>-</cell><cell>1</cell><cell>-</cell></row><row><cell>Baseline</cell><cell>LlamaGen-skip-106</cell><cell>19.14</cell><cell>80.39</cell><cell>0.42</cell><cell>0.43</cell><cell>343M</cell><cell>150</cell><cell>2.94</cell></row><row><cell>Baseline</cell><cell>LlamaGen-skip-156</cell><cell>80.72</cell><cell>12.13</cell><cell>0.17</cell><cell>0.20</cell><cell>343M</cell><cell>100</cell><cell>1.95</cell></row><row><cell>Baseline</cell><cell>LlamaGen-onestep*</cell><cell>220.2</cell><cell>-</cell><cell>-</cell><cell>-</cell><cell>-</cell><cell>1</cell><cell>-</cell></row><row><cell>Ours</cell><cell>VAR-d16-DD</cell><cell>9.94</cell><cell>193.6</cell><cell>0.80</cell><cell>0.37</cell><cell>327M</cell><cell>1</cell><cell>0.021 (6.3×)</cell></row><row><cell>Ours</cell><cell>VAR-d16-DD</cell><cell>7.82</cell><cell>197.0</cell><cell>0.80</cell><cell>0.41</cell><cell>327M</cell><cell>2</cell><cell>0.036 (3.7×)</cell></row><row><cell>Ours</cell><cell>LlamaGen-L-DD</cell><cell>11.35</cell><cell>193.6</cell><cell>0.81</cell><cell>0.30</cell><cell>326M</cell><cell>1</cell><cell>0.023 (217.8×)</cell></row><row><cell>Ours</cell><cell>LlamaGen-L-DD</cell><cell>7.58</cell><cell>237.5</cell><cell>0.84</cell><cell>0.37</cell><cell>326M</cell><cell>2</cell><cell>0.043 (116.5×)</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_3"><head>Table 3 :</head><label>3</label><figDesc>Generation results of DD on text-to-image task.</figDesc><table><row><cell>Type</cell><cell>Model</cell><cell>FID</cell><cell>#Param</cell><cell>#Step</cell><cell>Time</cell></row><row><cell>AR</cell><cell>LlamaGen</cell><cell>25.70</cell><cell>775M</cell><cell>256</cell><cell>7.90</cell></row><row><cell>Ours</cell><cell>LlamaGen-DD</cell><cell>36.09</cell><cell>756M</cell><cell>1</cell><cell>0.052 (151.9×)</cell></row><row><cell>Ours</cell><cell>LlamaGen-DD</cell><cell>28.95</cell><cell>756M</cell><cell>2</cell><cell>0.085 (92.9×)</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_4"><head></head><label></label><figDesc>: :Generated dataset with noise-data pairs D, the pretrained AR model θ Φ .</figDesc><table><row><cell></cell><cell cols="2">Algorithm 2 Training</cell></row><row><cell></cell><cell cols="2">Hyper-parameter :</cell><cell>Available timesteps for training</cell></row><row><cell></cell><cell cols="2">{t1, • • • , tL}, learning rate η.</cell></row><row><cell></cell><cell cols="2">Training Process</cell></row><row><cell></cell><cell cols="2">1: θ initialized from θ Φ</cell></row><row><cell></cell><cell cols="2">2: for i = 1, • • • , Iter do</cell></row><row><cell></cell><cell>3:</cell><cell>Sample (X1, Xn) ∼ D, t ∼ {t1, • • • , tL}</cell></row><row><cell></cell><cell>4:</cell><cell>Xt ← Concat(Xn[: t -1], X1[t :])</cell></row><row><cell>•, qn) D ← D ∪ {(X1, Xn)} 9: end for 8: 10: return D</cell><cell cols="2">5: 6: 7: 8: end for Xn ← F θ (Xt, t) L ← d( Xn, Xn) θ ← θ -η∇ θ L</cell></row><row><cell></cell><cell cols="2">9: return θ</cell></row><row><cell>Algorithm 3 Sampling</cell><cell></cell></row><row><cell cols="2">Require: : The distilled few-step model θ, sam-</cell></row><row><cell>pling timesteps {t k 1</cell><cell></cell></row></table><note><p>Require</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_5"><head></head><label></label><figDesc>Sampling with the pre-trained AR model Require: : The distilled few-step model θ, the pre-trained AR model θ Φ , sampling timesteps {t k 1 = 1, t k 2 }, starting timestep of pre-trained model t k 1 &lt; ts &lt; t k 2 .</figDesc><table><row><cell>Algorithm 4 Sampling Process</cell></row><row><cell>1</cell></row><row><cell>t)</cell></row><row><cell>5: end for</cell></row><row><cell>6: return X</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_6"><head>Table 4 :</head><label>4</label><figDesc>Generative performance on class-conditional ImageNet-256. "#Step" indicates the number of model inference to generate one image. "Time" is the wall-time of generating one image in the steady state.</figDesc><table><row><cell>Type</cell><cell>Model</cell><cell>FID↓</cell><cell>IS↑</cell><cell>Pre↑</cell><cell>Rec↑</cell><cell>#Para</cell><cell>#Step</cell><cell>Time</cell></row><row><cell>AR</cell><cell>VAR-d20 (Tian et al., 2024)</cell><cell>3.35</cell><cell>301.4</cell><cell>0.84</cell><cell>0.51</cell><cell>600M</cell><cell>10</cell><cell>0.184</cell></row><row><cell>AR</cell><cell>VAR-d24 (Tian et al., 2024)</cell><cell>2.51</cell><cell>312.2</cell><cell>0.82</cell><cell>0.53</cell><cell>1.03B</cell><cell>10</cell><cell>0.251</cell></row><row><cell>AR</cell><cell>LlamaGen-B (Sun et al., 2024)</cell><cell>5.42</cell><cell>193.5</cell><cell>0.83</cell><cell>0.44</cell><cell>111M</cell><cell>256</cell><cell>2.93</cell></row><row><cell>Ours</cell><cell>VAR-d20-DD</cell><cell>9.55</cell><cell>197.2</cell><cell>0.78</cell><cell>0.38</cell><cell>635M</cell><cell>1</cell><cell>0.027 (6.9×)</cell></row><row><cell>Ours</cell><cell>VAR-d20-DD</cell><cell>7.33</cell><cell>204.5</cell><cell>0.82</cell><cell>0.40</cell><cell>635M</cell><cell>2</cell><cell>0.047 (3.9×)</cell></row><row><cell>Ours</cell><cell>VAR-d24-DD</cell><cell>8.92</cell><cell>202.8</cell><cell>0.78</cell><cell>0.39</cell><cell>1.09B</cell><cell>1</cell><cell>0.034 (7.4×)</cell></row><row><cell>Ours</cell><cell>VAR-d24-DD</cell><cell>6.95</cell><cell>222.5</cell><cell>0.83</cell><cell>0.43</cell><cell>1.09B</cell><cell>2</cell><cell>0.059 (4.3×)</cell></row><row><cell>Ours</cell><cell>LlamaGen-B-DD</cell><cell>15.50</cell><cell>135.4</cell><cell>0.76</cell><cell>0.26</cell><cell>98.3M</cell><cell>1</cell><cell>0.018 (162.7×)</cell></row><row><cell>Ours</cell><cell>LlamaGen-B-DD</cell><cell>11.17</cell><cell>154.8</cell><cell>0.80</cell><cell>0.31</cell><cell>98.3M</cell><cell>2</cell><cell>0.029 (101.0×)</cell></row></table></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="1" xml:id="foot_0"><p>Measured on one NVIDIA A100-80G GPU.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="2" xml:id="foot_1"><p>Note that this is different from Python indexing.</p></note>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>ACKNOWLEDGEMENT</head><p>The authors would like to thank Sergey Yekhanin and Arturs Backurs of Microsoft Research for their support and suggestions of this work, Qian Chen for his help with experiments, and the anonymous reviewers for their valuable feedback and suggestions. A PROOF OF PROP. 3.1</p><p>Proof. Since all positions in the sequence are symmetrical, we can just consider one certain position j. The loss on this position is</p><p>Due to the normalization constraints of probability, we have</p><p>Considering the Lagrange Multiplier Method, the Lagrange function is given as</p><p>The optimal pθjk and the corresponding λ satisfy</p><p>By solving the above equations, we can get the final solution</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B ALGORITHM PSEUDOCODE</head><p>In this section, we provide the algorithm pseudocode of training data generation (Alg. 1), training (Alg. 2), and sampling (Alg. 3 and Alg. 4).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C MODEL ARCHITECTURE DESIGN</head><p>Since our method does not alter the AR property nature of the generation task, we can use the same architecture as the pre-trained model while slightly modify several modules as discussed below.</p><p>Aside from these adjusted modules, all other modules inherit the weights from the teacher model for quicker convergence. </p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<author>
+			<persName><forename type="first">Josh</forename><surname>Achiam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Adler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lama</forename><surname>Ahmad</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilge</forename><surname>Akkaya</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Florencia</forename><surname>Leoni Aleman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Diogo</forename><surname>Almeida</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Janko</forename><surname>Altenschmidt</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Altman</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2303.08774</idno>
+		<title level="m">Shyamal Anadkat, et al. Gpt-4 technical report</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<monogr>
+		<title level="m" type="main">Language models are few-shot learners</title>
+		<author>
+			<persName><surname>Tom B Brown</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2005.14165</idno>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<monogr>
+		<author>
+			<persName><forename type="first">Tianle</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuhong</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhengyang</forename><surname>Geng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongwu</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><forename type="middle">D</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deming</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Dao</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Medusa</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.10774</idno>
+		<title level="m">Simple llm inference acceleration framework with multiple decoding heads</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Masked generative image transformer</title>
+		<author>
+			<persName><forename type="first">Huiwen</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Han</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ce</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><forename type="middle">T</forename><surname>Freeman</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Maskgit</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition</title>
+		<meeting>the IEEE/CVF Conference on Computer Vision and Pattern Recognition</meeting>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="11315" to="11325" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<monogr>
+		<author>
+			<persName><forename type="first">Charlie</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sebastian</forename><surname>Borgeaud</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Geoffrey</forename><surname>Irving</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jean-Baptiste</forename><surname>Lespiau</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laurent</forename><surname>Sifre</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><surname>Jumper</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2302.01318</idno>
+		<title level="m">Accelerating large language model decoding with speculative sampling</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title level="a" type="main">Pixelsnail: An improved autoregressive generative model</title>
+		<author>
+			<persName><forename type="first">Xi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikhil</forename><surname>Mishra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mostafa</forename><surname>Rohaninejad</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><surname>Abbeel</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+			<biblScope unit="page" from="864" to="872" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Diffusion models beat gans on image synthesis</title>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Nichol</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="page" from="8780" to="8794" />
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Taming transformers for high-resolution image synthesis</title>
+		<author>
+			<persName><forename type="first">Patrick</forename><surname>Esser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Robin</forename><surname>Rombach</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bjorn</forename><surname>Ommer</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE/CVF conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="12873" to="12883" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<monogr>
+		<author>
+			<persName><forename type="first">Fabian</forename><surname>Gloeckle</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Youbi</forename><surname>Badr</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baptiste</forename><surname>Idrissi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Rozière</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriel</forename><surname>Lopez-Paz</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Synnaeve</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.19737</idno>
+		<title level="m">Better &amp; faster large language models via multi-token prediction</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">Masked autoencoders are scalable vision learners</title>
+		<author>
+			<persName><forename type="first">Kaiming</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinlei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saining</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanghao</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piotr</forename><surname>Dollár</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ross</forename><surname>Girshick</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE/CVF conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="16000" to="16009" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<analytic>
+		<title level="a" type="main">Denoising diffusion probabilistic models</title>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Ho</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ajay</forename><surname>Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><surname>Abbeel</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in neural information processing systems</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="page" from="6840" to="6851" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<monogr>
+		<author>
+			<persName><forename type="first">Jin</forename><surname>Shuowei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yongji</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haizhong</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qingzhao</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><surname>Lentz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Morley</forename><surname>Mao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Atul</forename><surname>Prakash</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.12280</idno>
+		<title level="m">Feng Qian, and Danyang Zhuo. Adaptive skeleton graph decoding</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<monogr>
+		<author>
+			<persName><forename type="first">Dongjun</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chieh-Hsin</forename><surname>Lai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei-Hsiang</forename><surname>Liao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naoki</forename><surname>Murata</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuhta</forename><surname>Takida</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Toshimitsu</forename><surname>Uesaka</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yutong</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuki</forename><surname>Mitsufuji</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefano</forename><surname>Ermon</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.02279</idno>
+		<title level="m">Consistency trajectory models: Learning probability flow ode trajectory of diffusion</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<author>
+			<persName><forename type="first">Siqi</forename><surname>Kou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lanxiang</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhezhi</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhijie</forename><surname>Deng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Zhang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2403.00835</idno>
+		<title level="m">Cllms: Consistency large language models</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Autoregressive image generation using residual quantization</title>
+		<author>
+			<persName><forename type="first">Doyup</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chiheon</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saehoon</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Minsu</forename><surname>Cho</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wook-Shin</forename><surname>Han</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition</title>
+		<meeting>the IEEE/CVF Conference on Computer Vision and Pattern Recognition</meeting>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="11523" to="11532" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Fast inference from transformers via speculative decoding</title>
+		<author>
+			<persName><forename type="first">Yaniv</forename><surname>Leviathan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matan</forename><surname>Kalman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yossi</forename><surname>Matias</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="19274" to="19286" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">Masked generative encoder to unify representation learning and image synthesis</title>
+		<author>
+			<persName><forename type="first">Tianhong</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huiwen</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shlok</forename><surname>Mishra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Han</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dina</forename><surname>Katabi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dilip</forename><surname>Krishnan</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Mage</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition</title>
+		<meeting>the IEEE/CVF Conference on Computer Vision and Pattern Recognition</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="2142" to="2152" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<monogr>
+		<title level="m" type="main">Autoregressive image generation without vector quantization</title>
+		<author>
+			<persName><forename type="first">Tianhong</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yonglong</forename><surname>Tian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">He</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mingyang</forename><surname>Deng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaiming</forename><surname>He</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2406.11838</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yuhui</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fangyun</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chao</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongyang</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Eagle</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.15077</idno>
+		<title level="m">Speculative sampling requires rethinking feature uncertainty</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yaron</forename><surname>Lipman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ricky Tq</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heli</forename><surname>Ben-Hamu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2210.02747</idno>
+		<title level="m">Maximilian Nickel, and Matt Le. Flow matching for generative modeling</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<monogr>
+		<author>
+			<persName><forename type="first">Mingdao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aohan</forename><surname>Zeng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bowen</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuxiao</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Apar</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.06761</idno>
+		<title level="m">Llms can do auto-parallel auto-regressive decoding</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<title level="m" type="main">Flow straight and fast: Learning to generate and transfer data with rectified flow</title>
+		<author>
+			<persName><forename type="first">Xingchao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chengyue</forename><surname>Gong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiang</forename><surname>Liu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2209.03003</idno>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Dpm-solver: A fast ode solver for diffusion probabilistic model sampling in around 10 steps</title>
+		<author>
+			<persName><forename type="first">Cheng</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuhao</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fan</forename><surname>Bao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianfei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chongxuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Zhu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="5775" to="5787" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<monogr>
+		<title level="m" type="main">Knowledge distillation in iterative generative models for improved sampling speed</title>
+		<author>
+			<persName><forename type="first">Cheng</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuhao</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fan</forename><surname>Bao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianfei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chongxuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Luhman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Troy</forename><surname>Luhman</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2211.01095</idno>
+		<idno>arXiv:2101.02388</idno>
+		<imprint>
+			<date type="published" when="2021">2022. 2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+	<note>Dpm-solver++: Fast solver for guided sampling of diffusion probabilistic models</note>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Skeleton-ofthought: Prompting llms for efficient parallel generation</title>
+		<author>
+			<persName><forename type="first">Xuefei</forename><surname>Ning</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zinan</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zixuan</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zifu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huazhong</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Wang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<monogr>
+		<title level="m" type="main">Can llms learn by teaching? a preliminary study</title>
+		<author>
+			<persName><forename type="first">Xuefei</forename><surname>Ning</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zifu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shiyao</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zinan</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peiran</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianyu</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><forename type="middle">B</forename><surname>Blaschko</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guohao</forename><surname>Dai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huazhong</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2406.14629</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<monogr>
+		<title level="m" type="main">Can generalist foundation models outcompete special-purpose tuning? case study in medicine</title>
+		<author>
+			<persName><forename type="first">Harsha</forename><surname>Nori</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yin</forename><surname>Tat Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sheng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dean</forename><surname>Carignan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Richard</forename><surname>Edgar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicolo</forename><surname>Fusi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicholas</forename><surname>King</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Larson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weishung</forename><surname>Liu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2311.16452</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<monogr>
+		<title/>
+		<author>
+			<persName><surname>Openai</surname></persName>
+		</author>
+		<ptr target="https://openai.com/index/learning-to-reason-with-llms" />
+		<imprint>
+			<date type="published" when="2024-09">Sep 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<analytic>
+		<title level="a" type="main">Training language models to follow instructions with human feedback</title>
+		<author>
+			<persName><forename type="first">Long</forename><surname>Ouyang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xu</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Diogo</forename><surname>Almeida</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carroll</forename><surname>Wainwright</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pamela</forename><surname>Mishkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chong</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katarina</forename><surname>Slama</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Ray</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="27730" to="27744" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Scalable diffusion models with transformers</title>
+		<author>
+			<persName><forename type="first">William</forename><surname>Peebles</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saining</forename><surname>Xie</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF International Conference on Computer Vision</title>
+		<meeting>the IEEE/CVF International Conference on Computer Vision</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="4195" to="4205" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<title level="m" type="main">Improving language understanding by generative pre-training</title>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Language models are unsupervised multitask learners</title>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rewon</forename><surname>Child</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Luan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dario</forename><surname>Amodei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Sutskever</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">OpenAI blog</title>
+		<imprint>
+			<biblScope unit="volume">1</biblScope>
+			<biblScope unit="issue">8</biblScope>
+			<biblScope unit="page">9</biblScope>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<monogr>
+		<title level="m" type="main">Generating diverse high-fidelity images with vq-vae-2. Advances in neural information processing systems</title>
+		<author>
+			<persName><forename type="first">Ali</forename><surname>Razavi</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="volume">32</biblScope>
+		</imprint>
+	</monogr>
+	<note>Aaron Van den Oord, and Oriol Vinyals</note>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<analytic>
+		<title level="a" type="main">Highresolution image synthesis with latent diffusion models</title>
+		<author>
+			<persName><forename type="first">Robin</forename><surname>Rombach</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andreas</forename><surname>Blattmann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dominik</forename><surname>Lorenz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Patrick</forename><surname>Esser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Björn</forename><surname>Ommer</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE/CVF conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="10684" to="10695" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<monogr>
+		<title level="m" type="main">Progressive distillation for fast sampling of diffusion models</title>
+		<author>
+			<persName><forename type="first">Tim</forename><surname>Salimans</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Ho</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2202.00512</idno>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<monogr>
+		<title level="m" type="main">Accelerating transformer inference for translation via parallel decoding</title>
+		<author>
+			<persName><forename type="first">Andrea</forename><surname>Santilli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Silvio</forename><surname>Severino</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Emilian</forename><surname>Postolache</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Valentino</forename><surname>Maiorca</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michele</forename><surname>Mancusi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Riccardo</forename><surname>Marin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Emanuele</forename><surname>Rodolà</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.10427</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">Stylegan-xl: Scaling stylegan to large diverse datasets</title>
+		<author>
+			<persName><forename type="first">Axel</forename><surname>Sauer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katja</forename><surname>Schwarz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andreas</forename><surname>Geiger</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ACM SIGGRAPH 2022 conference proceedings</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="1" to="10" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<monogr>
+		<title level="m" type="main">Scaling llm test-time compute optimally can be more effective than scaling model parameters</title>
+		<author>
+			<persName><forename type="first">Charlie</forename><surname>Snell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jaehoon</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kelvin</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aviral</forename><surname>Kumar</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2408.03314</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<analytic>
+		<title level="a" type="main">Deep unsupervised learning using nonequilibrium thermodynamics</title>
+		<author>
+			<persName><forename type="first">Jascha</forename><surname>Sohl-Dickstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Weiss</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Niru</forename><surname>Maheswaranathan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Surya</forename><surname>Ganguli</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2015">2015</date>
+			<biblScope unit="page" from="2256" to="2265" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.14189</idno>
+		<title level="m">Improved techniques for training consistency models</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jascha</forename><surname>Sohl-Dickstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">P</forename><surname>Diederik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abhishek</forename><surname>Kingma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefano</forename><surname>Kumar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ben</forename><surname>Ermon</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Poole</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2011.13456</idno>
+		<title level="m">Score-based generative modeling through stochastic differential equations</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<analytic>
+		<title level="a" type="main">Accelerating feedforward computation via parallel nonlinear equation solving</title>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenlin</forename><surname>Meng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Renjie</forename><surname>Liao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefano</forename><surname>Ermon</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="9791" to="9800" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<monogr>
+		<title/>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Sutskever</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2303.01469</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">Consistency models. arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<analytic>
+		<title level="a" type="main">Blockwise parallel decoding for deep autoregressive models</title>
+		<author>
+			<persName><forename type="first">Mitchell</forename><surname>Stern</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakob</forename><surname>Uszkoreit</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="page">31</biblScope>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<monogr>
+		<title level="m" type="main">Autoregressive model beats diffusion: Llama for scalable image generation</title>
+		<author>
+			<persName><forename type="first">Peize</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shoufa</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shilong</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bingyue</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ping</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zehuan</forename><surname>Yuan</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2406.06525</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<monogr>
+		<title level="m" type="main">Visual autoregressive modeling: Scalable image generation via next-scale prediction</title>
+		<author>
+			<persName><forename type="first">Keyu</forename><surname>Tian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zehuan</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bingyue</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liwei</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.02905</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<monogr>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thibaut</forename><surname>Lavril</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gautier</forename><surname>Izacard</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xavier</forename><surname>Martinet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marie-Anne</forename><surname>Lachaux</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Timothée</forename><surname>Lacroix</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baptiste</forename><surname>Rozière</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naman</forename><surname>Goyal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Hambro</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Faisal</forename><surname>Azhar</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2302.13971</idno>
+		<title level="m">Open and efficient foundation language models</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b47">
+	<monogr>
+		<title level="m" type="main">Llama 2: Open foundation and fine-tuned chat models</title>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Louis</forename><surname>Martin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevin</forename><surname>Stone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Albert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amjad</forename><surname>Almahairi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yasmine</forename><surname>Babaei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikolay</forename><surname>Bashlykov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Soumya</forename><surname>Batra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prajjwal</forename><surname>Bhargava</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shruti</forename><surname>Bhosale</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2307.09288</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b48">
+	<analytic>
+		<title level="a" type="main">Lasse Espeholt, Oriol Vinyals, Alex Graves, et al. Conditional image generation with pixelcnn decoders</title>
+		<author>
+			<persName><forename type="first">Aaron</forename><surname>Van Den Oord</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nal</forename><surname>Kalchbrenner</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="volume">29</biblScope>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b49">
+	<analytic>
+		<title level="a" type="main">Chain-of-thought prompting elicits reasoning in large language models</title>
+		<author>
+			<persName><forename type="first">Jason</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuezhi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dale</forename><surname>Schuurmans</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maarten</forename><surname>Bosma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fei</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ed</forename><surname>Chi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">V</forename><surname>Quoc</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Denny</forename><surname>Le</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zhou</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in neural information processing systems</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="24824" to="24837" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b50">
+	<analytic>
+		<title level="a" type="main">Speculative decoding: Exploiting speculative execution for accelerating seq2seq generation</title>
+		<author>
+			<persName><forename type="first">Heming</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Ge</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peiyi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Si-Qing</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Furu</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhifang</forename><surname>Sui</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Findings of the Association for Computational Linguistics: EMNLP 2023</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="3909" to="3925" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

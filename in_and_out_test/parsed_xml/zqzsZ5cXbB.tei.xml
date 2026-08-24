@@ -1,0 +1,2364 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">LET THE CODE LLM EDIT ITSELF WHEN YOU EDIT THE CODE</title>
+				<funder ref="#_RPThyh8">
+					<orgName type="full">National Science Foundation of China</orgName>
+				</funder>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<author>
+							<persName><forename type="first">Zhenyu</forename><surname>He</surname></persName>
+							<affiliation key="aff0">
+								<orgName type="department">School of Intelligence Science and Technology</orgName>
+								<orgName type="laboratory">National Key Laboratory of General Artificial Intelligence</orgName>
+								<orgName type="institution">Peking University ♠ ByteDance Inc</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Jun</forename><surname>Zhang</surname></persName>
+							<affiliation key="aff0">
+								<orgName type="department">School of Intelligence Science and Technology</orgName>
+								<orgName type="laboratory">National Key Laboratory of General Artificial Intelligence</orgName>
+								<orgName type="institution">Peking University ♠ ByteDance Inc</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Shengjie</forename><surname>Luo</surname></persName>
+							<affiliation key="aff0">
+								<orgName type="department">School of Intelligence Science and Technology</orgName>
+								<orgName type="laboratory">National Key Laboratory of General Artificial Intelligence</orgName>
+								<orgName type="institution">Peking University ♠ ByteDance Inc</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Jingjing</forename><surname>Xu</surname></persName>
+							<affiliation key="aff0">
+								<orgName type="department">School of Intelligence Science and Technology</orgName>
+								<orgName type="laboratory">National Key Laboratory of General Artificial Intelligence</orgName>
+								<orgName type="institution">Peking University ♠ ByteDance Inc</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Zhi</forename><surname>Zhang</surname></persName>
+							<affiliation key="aff0">
+								<orgName type="department">School of Intelligence Science and Technology</orgName>
+								<orgName type="laboratory">National Key Laboratory of General Artificial Intelligence</orgName>
+								<orgName type="institution">Peking University ♠ ByteDance Inc</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Di</forename><surname>He</surname></persName>
+							<affiliation key="aff0">
+								<orgName type="department">School of Intelligence Science and Technology</orgName>
+								<orgName type="laboratory">National Key Laboratory of General Artificial Intelligence</orgName>
+								<orgName type="institution">Peking University ♠ ByteDance Inc</orgName>
+							</affiliation>
+						</author>
+						<title level="a" type="main">LET THE CODE LLM EDIT ITSELF WHEN YOU EDIT THE CODE</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">6A27557720FD3774A9E888816B272252</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:09+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>In this work, we investigate a typical scenario in code generation where a developer edits existing code in real time and requests a code assistant, e.g., a large language model, to re-predict the next token or next line on the fly. Naively, the LLM needs to re-encode the entire KV cache to provide an accurate prediction. However, this process is computationally expensive, especially when the sequence length is long. Simply encoding the edited subsequence and integrating it to the original KV cache meets the temporal confusion problem, leading to significantly worse performance. We address this efficiency and accuracy trade-off by introducing Positional Integrity Encoding (PIE). Building upon the rotary positional encoding, PIE first removes the rotary matrices in the Key cache that introduce temporal confusion and then reapplies the correct rotary matrices. This process ensures that positional relationships between tokens are correct and requires only a single round of matrix multiplication. We validate the effectiveness of PIE through extensive experiments on the RepoBench-C-8k dataset, utilizing DeepSeek-Coder models with 1.3B, 6.7B, and 33B parameters. Our evaluation includes three real-world coding tasks: code insertion, code deletion, and multi-place code editing. Results demonstrate that PIE reduces computational overhead by over 85% compared to the standard full recomputation approach across all model sizes and tasks while well approximating the model performance. Code is available at https: //github.com/zhenyuhe00/PIE.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Figure <ref type="figure">1</ref>: Latency and accuracy comparison of the full recomputation approach and our PIE using DeepSeek-Coder 6.7B on the RepoBench-C-8k(XF-F) Python dataset on a single A100 GPU. The latency only records the time cost for the KV cache update.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>Large language models (LLMs) <ref type="bibr" target="#b13">(Dettmers et al., 2022;</ref><ref type="bibr" target="#b1">Anil et al., 2023;</ref><ref type="bibr" target="#b54">Touvron et al., 2023;</ref><ref type="bibr" target="#b63">Zeng et al., 2023)</ref> have seen widespread adoption and achieved impressive results across various natural language processing (NLP) tasks. Despite these successes, LLMs face significant computational challenges, particularly in handling long sequences. To address this, numerous approaches have been proposed to accelerate the inference process, including lossless (e.g., memory and IO optimization <ref type="bibr" target="#b12">(Dao et al., 2022;</ref><ref type="bibr" target="#b24">Kwon et al., 2023;</ref><ref type="bibr" target="#b47">Sheng et al., 2023)</ref>, speculative decoding <ref type="bibr" target="#b49">(Stern et al., 2018;</ref><ref type="bibr" target="#b25">Leviathan et al., 2023)</ref>) and lossy techniques (e.g., quantization <ref type="bibr" target="#b15">(Frantar et al., 2022;</ref><ref type="bibr" target="#b59">Xiao et al., 2023)</ref> and KV cache eviction <ref type="bibr" target="#b60">(Xiao et al., 2024;</ref><ref type="bibr" target="#b66">Zhang et al., 2024)</ref>). We refer to the above setting as the static setting, where the content is fixed, and the goal is to generate responses efficiently without compromising too much on performance.</p><p>Besides the static setting, we observe there is a strong demand for an alternative, which we call the real-time editing setting, where users frequently edit the content and expect the LLM to generate correct responses based on the updated information. A typical scenario is the interactive coding assistant, where developers often make incremental changes to their existing code and require the AI copilot to correctly predict the next line or complete a partial code snippet on the fly. The standard approach is re-encoding the KV cache of the content after each edit and then making the prediction. However, as illustrated in Figure <ref type="figure">1</ref>, this approach leads to considerable substantial computational overhead and latency when the content is long <ref type="bibr" target="#b16">(Fu, 2024;</ref><ref type="bibr" target="#b0">Agrawal et al., 2024)</ref>, making it impractical for real-time applications where quick and accurate responses are essential.</p><p>In this paper, we aim to improve the efficiency of AI copilots in real-time editing scenarios, as illustrated in Figure <ref type="figure" target="#fig_1">2</ref>. Naively, an efficient strategy is encoding only the edited subsequence and then directly integrating those keys and values into the original KV cache. However, this strategy results in temporal confusion between the pre-edit and post-edit sequences. Keys of certain positions either disappear or multiple keys at different positions share the same index, causing the model to attend to incorrect information, leading to poor next-token prediction performance in practice. To address this problem, we introduce Positional Integrity Encoding (PIE). PIE is built upon rotary positional encoding (RoPE) <ref type="bibr" target="#b50">(Su et al., 2021)</ref>, the de-facto standard component in modern LLMs. PIE first removes the rotary matrices in the Key cache that introduce temporal confusion and then reapplies the correct rotary matrix for each position through simple matrix multiplications. By ensuring that the positional relationships between tokens in the new sequence are unique and consecutive, PIE can help the model make accurate predictions. It is worth noting that the calculation of PIE requires only a single round of matrix operations to modify the KV cache, resulting in negligible computational overhead.</p><p>We demonstrate the effectiveness of Positional Integrity Encoding (PIE) through extensive experiments conducted on the RepoBench-C-8k dataset, utilizing the DeepSeek-Coder (Guo et al., 2024) models with 1.3B, 6.7B, and 33B parameters. To rigorously evaluate PIE's performance, we curated three tasks designed to simulate real-world coding scenarios: code insertion, code deletion, and multi-place code edition. These tasks were chosen to reflect common operations that developers perform during interactive coding sessions, thereby providing a comprehensive assessment of PIE's practical utility. Our experimental results indicate that PIE achieves a reduction in computational overhead of over 85% for editing the KV cache across all model sizes and tasks without compromising performance compared to the naive full-recomputation approach. By leveraging PIE, developers can experience efficient interactions with AI coding assistants.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">RELATED WORK</head><p>Positional Encodings Positional information is essential for modeling languages. The original Transformer model <ref type="bibr" target="#b55">(Vaswani et al., 2017)</ref> encodes positional information using Absolute Positional Encoding (APE). In particular, a (learnable) real-valued embedding is assigned to each position i. Differently, Relative Positional Encodings (RPE) <ref type="bibr" target="#b46">(Shaw et al., 2018;</ref><ref type="bibr" target="#b10">Dai et al., 2019;</ref><ref type="bibr" target="#b42">Raffel et al., 2020;</ref><ref type="bibr">Press et al., 2022;</ref><ref type="bibr" target="#b50">Su et al., 2021;</ref><ref type="bibr" target="#b33">Luo et al., 2021;</ref><ref type="bibr">2022;</ref><ref type="bibr" target="#b6">Chi et al., 2022;</ref><ref type="bibr" target="#b51">Sun et al., 2023;</ref><ref type="bibr" target="#b7">Chi et al., 2023;</ref><ref type="bibr" target="#b26">Li et al., 2023;</ref><ref type="bibr" target="#b20">He et al., 2024)</ref> instead encode the relative distance i -j for each position pair (i, j). One of the most widely used RPE in state-of-the-art LLMs is Rotary Position Encoding (RoPE) <ref type="bibr" target="#b50">(Su et al., 2021)</ref>. RoPE rotates the query and key vectors by an angle proportional to their absolute positions before the attention mechanism, resulting in the attention being a function of the relative distance between tokens.</p><p>In the literature, relative positional encodings play essential roles across various tasks and data modalities, such as improving the length extrapolation capability of language models <ref type="bibr">(Press et al., 2022;</ref><ref type="bibr" target="#b51">Sun et al., 2023;</ref><ref type="bibr" target="#b6">Chi et al., 2022;</ref><ref type="bibr" target="#b11">2023;</ref><ref type="bibr" target="#b20">He et al., 2024)</ref> and enabling flexible modeling of structural information beyond sequence data like images <ref type="bibr" target="#b29">(Liu et al., 2021)</ref> and graphs <ref type="bibr" target="#b62">(Ying et al., 2021;</ref><ref type="bibr">Zhang et al., 2023a;</ref><ref type="bibr" target="#b35">Luo et al., 2023)</ref>. In this work, we develop the Positional Integrity Encoding based on RoPE to improve the efficiency of LLMs in the real-time editing setting.</p><p>Transformer Efficiency Improving the efficiency of Transformer models has great significance in real-world applications. In the literature, existing approaches can be briefly categorized into (1) efficient attention, (2) model compression, and (3) system-architecture co-design.</p><p>The attention module of Transformer needs to calculate pairwise correlations between all positions, resulting in quadratic time and memory cost with respect to the sequence length. To reduce the cost, many efficient attention variants have been proposed, such as (1) sparse attentions <ref type="bibr" target="#b8">(Child et al., 2019;</ref><ref type="bibr" target="#b2">Beltagy et al., 2020;</ref><ref type="bibr" target="#b41">Qiu et al., 2020)</ref>, which design either pre-defined or learnable patterns to reduce the amount of the key-value pairs that each query needs to attend to; (2) approximation-based attention <ref type="bibr" target="#b22">(Katharopoulos et al., 2020;</ref><ref type="bibr" target="#b57">Wang et al., 2020;</ref><ref type="bibr" target="#b9">Choromanski et al., 2021;</ref><ref type="bibr" target="#b23">Kitaev et al., 2020;</ref><ref type="bibr" target="#b53">Tay et al., 2020;</ref><ref type="bibr" target="#b43">Roy et al., 2021)</ref>, which use tailored approaches like low-rank projection or random features to approximate standard attention for efficient computation.</p><p>Another perspective for Transformer efficiency is model compression, mainly including (1) pruning <ref type="bibr" target="#b56">(Wang et al., 2021;</ref><ref type="bibr" target="#b21">Hubara et al., 2021;</ref><ref type="bibr" target="#b36">Ma et al., 2023;</ref><ref type="bibr" target="#b14">Frantar &amp; Alistarh, 2023)</ref>, which aims at removing redundant model parameters or layers for efficient deployment without scarifying performance;</p><p>(2) quantization <ref type="bibr" target="#b61">(Yao et al., 2022;</ref><ref type="bibr" target="#b38">Park et al., 2022;</ref><ref type="bibr" target="#b13">Dettmers et al., 2022;</ref><ref type="bibr" target="#b15">Frantar et al., 2022;</ref><ref type="bibr" target="#b59">Xiao et al., 2023;</ref><ref type="bibr" target="#b30">Liu et al., 2023)</ref>, which uses post-processing to represent weights and activations via low-precision format for reducing time and memory costs; (3) knowledge distillation <ref type="bibr" target="#b45">(Sanh et al., 2019;</ref><ref type="bibr" target="#b17">Gu et al., 2024)</ref>, which uses a smaller model to learn knowledge from a large model for balancing efficiency-accuracy trade-offs.</p><p>In the era of LLMs, the importance of system-architecture co-design has been highlighted to improve Transformer efficiency further. Many works begin to design more efficient approaches for serving Transformers regarding the characteristics of computer systems for real-world applications, such as FlashAttention <ref type="bibr" target="#b12">(Dao et al., 2022;</ref><ref type="bibr" target="#b11">Dao, 2023)</ref>, PagedAttention <ref type="bibr" target="#b24">(Kwon et al., 2023)</ref>, and FlexGen <ref type="bibr" target="#b47">(Sheng et al., 2023)</ref> that are proposed for memory and I/O optimization. Additionally, to reduce functional calls during generation, speculative decoding <ref type="bibr" target="#b49">(Stern et al., 2018;</ref><ref type="bibr" target="#b25">Leviathan et al., 2023;</ref><ref type="bibr" target="#b4">Chen et al., 2023;</ref><ref type="bibr" target="#b37">Miao et al., 2023;</ref><ref type="bibr" target="#b48">Spector &amp; Re, 2023;</ref><ref type="bibr" target="#b3">Cai et al., 2024;</ref><ref type="bibr">Zhang et al., 2023b;</ref><ref type="bibr" target="#b19">He et al., 2023;</ref><ref type="bibr" target="#b27">Li et al., 2024)</ref> has been proposed. Our Positional Integrity Encoding is specially designed to improve the efficiency of LLMs in real-time editing settings, which can be seamlessly combined with all the above-introduced approaches to achieve further speed-ups.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">METHODS</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.1">BACKGROUND</head><p>Let s = (w 1 , w 2 , . . . , w n ) represent the input token sequence, where each w i belongs to a fixed vocabulary. Let θ LLM represent a Transformer-based large language model, which can calculate the conditional probability distribution of the next token p(w n+1 |s; θ LLM ) and generate tokens iteratively. Typically, the input s is fixed. Therefore, the generation process of LLMs usually employs the KV Cache mechanism <ref type="bibr" target="#b39">(Pope et al., 2023)</ref> to store previously computed Key/Value vectors during each layer's attention calculation. We denote the KV cache as</p><formula xml:id="formula_0">K = (K 1 , K 2 , . . . , K n ) and V = (V 1 , V 2 , . . . , V n )</formula><p>, where K i and V i are the keys and values associated with token w i . When predicting the token at position n + 1, we can use w n as input and, in each layer, compute the attention between the current hidden representation and the stored KV cache, avoiding recomputing the hidden representation of previous tokens. Without any confusion, we also denote the next token probability distribution as p(w n+1 |K, V , w n ; θ LLM ).</p><p>In this study, we aim to investigate a new scenario where the context s is real-time edited by users, which makes it impossible for the KV cache to predict the correct next token without any modification.</p><p>We can model such real-time context as a sequence of steps. Each step can be formulated as an action where tokens from position i to j in s are edited, resulting in a modified sequence todo represent the new inputs that replace [w i , . . . , w j ]. Our goal is to accurately and efficiently predict w n+1 given by θ LLM on s edit . This problem is crucial in various scenarios. For instance, users can frequently edit their previous codes for different purposes and expect the code language model to swiftly adapt to these changes and predict the correct next line based on the updated information.</p><p>As the context between position i and position j is edited, the KV cache corresponding to these tokens must be updated. Furthermore, these changes will impact the representations of subsequent tokens after position j, thereby necessitating updates to all subsequent KV cache. The naive approach involves a full-recomputation strategy: re-encoding all the KV cache for [a 1 , a 2 , . . . , a m , w j+1 , . . . , w n ] layer by layer, followed by making predictions using the updated cache K * and V * . This approach ensures the KV cache is exact when predicting the next tokens. However, it is easy to see that it is computationally expensive, especially when the edits are light but the texts to be reencoded are long. It's worth noting that the original K and V already encode rich information on [w j+1 , . . . , w n ], and a full recomputation may not be essential for practical problems. With this in mind, we seek to find ways to efficiently edit K and V , yielding K edit and V edit , which approximates p(w n+1 |K * , V * , w n ; θ LLM ) ≈ p(w n+1 |K edit , V edit , w n ; θ LLM ) in an effective way.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">POSITIONAL INTEGRITY ENCODING (PIE)</head><p>When a user modifies s into s edit , KV cache associated with the first i tokens, i.e., K [1:i] and V [1:i] , remains unchanged. As [a 1 , a 2 , . . . , a m ] is the user's new input, we feed this subsequence to the LLM to obtain the keys and values from position i + 1 to i + m. We denote this piece of new KV cache as K edit [i+1:i+m] and V edit [i+1:i+m] , and now have the edited KV cache as:</p><formula xml:id="formula_1">K edit = Concat(K [1:i] , K edit [i+1:i+m] , K [j+1:n] ),<label>(1)</label></formula><formula xml:id="formula_2">V edit = Concat(V [1:i] , V edit [i+1:i+m] , V [j+1:n] ),<label>(2)</label></formula><p>where the red symbols indicate real-time calculations.</p><p>Challenges. The key challenge lies in how to edit the succeeding KV cache</p><formula xml:id="formula_3">K [j+1:n] and V [j+1:n] .</formula><p>Clearly, the modification of [a 1 , a 2 , . . . , a m ] impacts the subsequent content in two ways: semantically and structurally. The semantic impact refers to the changes in the understanding of the subsequent text caused by the edited content. This can be a problem in natural language applications, such as dialog systems, where modifications to earlier conversations can significantly influence the generation of current responses. The other impact is structural, primarily concerning the temporal confusion between the pre-edit and post-edit sequences when j -i ̸ = m. This issue arises with common editing actions in code, such as additions and deletions (corresponding to j -i = 0 or m = 0). To be more concrete, imagine the original sequence has 5 tokens. If we add three tokens between the second and third position, it will occupy the positional index <ref type="bibr">[3,</ref><ref type="bibr">4,</ref><ref type="bibr">5]</ref>. We calculate K edit <ref type="table" target="#tab_4">[3:5]</ref> and<ref type="table" target="#tab_4">V edit  [3:5] in equation (1)</ref> and<ref type="table" target="#tab_1">(2)</ref>. However, in the original K <ref type="table" target="#tab_4">[3:5]</ref> and<ref type="table" target="#tab_4">V [3:5]</ref> , the positional index <ref type="bibr">[3,</ref><ref type="bibr">4,</ref><ref type="bibr">5]</ref> is also occupied. If we integrate them together and take no actions during the next token prediction, the model will calculate similarity with multiple keys in the KV cache with the same index <ref type="bibr">[3,</ref><ref type="bibr">4,</ref><ref type="bibr">5]</ref>, causing confusion and potential prediction errors. Empirically, in code tasks, we find that the semantic impact is relatively small. Addressing temporal confusion for light edits alone can already lead to good performance (see the experiments in Section 4 for more details).</p><p>Our approach. To mitigate the temporal confusion during real-time editing, we propose a simple yet effective solution: Positional Integrity Encoding (PIE), which ensures that positional information remains correctly ordered after editing without the need to re-encode the KV cache for subsequent tokens. PIE builds upon the rotary positional encoding (RoPE) <ref type="bibr" target="#b50">(Su et al., 2021)</ref>, which is the most widely used positional encoding in LLMs. Without loss of generality, given a query vector x i at position i and a key vector x j at position j, RoPE calculates the dot-product similarity using</p><formula xml:id="formula_4">z ij = x T i W T q R j-i W k x j (3)</formula><p>where R j-i is the rotary matrix parameterized by the relative distance j -i, and W q and W k are learnable projection matrices. By definition, R j-i can be expressed by the multiplication of two rotary matrices:</p><formula xml:id="formula_5">R j-i = R T i R j<label>(4)</label></formula><p>For practical implementation, during inference, we compute R Θ,i W k x i as the key on the fly and store it in the cache, and when a query arrives at a new position, we rotate the query using its corresponding rotary matrix and calculate its similarity with all the keys in the cache to obtain the attention scores.</p><p>It can be easily seen that the positional information in the KV cache is encoded within the rotary matrix. When an edit occurs, the rotary matrix associated with the keys must be adjusted to reflect their post-edit locations. Leveraging the formulation of RoPE-based attention calculation, this challenge can be addressed by first removing the rotary matrices in K that introduce temporal confusion and then reapplying the correct rotary matrix. In detail, assume we would like to update the key vector k l j ′ for the original position j ′ ∈ [j + 1, n], where l ∈ [1, L] is the layer index. We can simply edit the key vector by using</p><formula xml:id="formula_6">k edit,l j ′ = R i+m+j ′ -j R -1 j ′ k l j ′<label>(5)</label></formula><p>where R -1 j ′ , the inverse rotary matrix at position j ′ , is used to remove the incorrect positional information, and R i+m+j ′ -j is used to encode the correct position i + m + j ′ -j in s edit . It can easily seen that the computation can be further simplified as</p><formula xml:id="formula_7">k edit,l j ′ = R i+m+j ′ -j R -1 j ′ k l j ′ = R i+m+j ′ -j R -j ′ k l j ′ = R i+m-j k l j ′<label>(6)</label></formula><p>Hence, the full editing process for K [j+1:n] is as follows:</p><formula xml:id="formula_8">K edit [j+1:n] = [K edit j+1 , . . . , K edit n ]<label>(7)</label></formula><p>where each</p><formula xml:id="formula_9">K edit j ′ = {k edit,1 j ′ , • • • , k edit,l j ′ , • • • , k edit,L j ′ }, j ′ ∈ [j + 1, n], l ∈ [1, L] each k edit,l j ′ = R i+m-j k l j ′</formula><p>Unlike the full recomputation approach, the above calculation only requires a single round of matrix multiplication to directly modify the pre-computed KV cache, where the computational overhead can be considered negligible. By utilizing these transformations, we finally construct the edited KV cache as: where the red symbols indicate real-time calculations. The LLM then makes predictions based on p(x n+1 |K edit , V edit , x n ; θ LLM ). It is worth noting that PIE is compatible with KV cache eviction methods <ref type="bibr" target="#b60">(Xiao et al., 2024;</ref><ref type="bibr" target="#b66">Zhang et al., 2024;</ref><ref type="bibr">Liu et al., 2024b)</ref>. These KV cache eviction methods focus on reducing the memory usage of the KV cache during inference. PIE is designed to obtain the KV cache of the edited context with minimal overhead. By integrating PIE with KV cache eviction methods, it is possible to maintain efficient memory management while ensuring the integrity of the positional information in the real-time edit setting.</p><formula xml:id="formula_10">K edit = Concat(K [1:i] , K edit [i+1:i+m] , K edit [j+1:n] ),<label>(8)</label></formula><formula xml:id="formula_11">V edit = Concat(V [1:i] , V edit [i+1:i+m] , V [j+1:n] ),<label>(9)</label></formula></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">EXPERIMENTS</head><p>In this section, we empirically study the effectiveness of our proposed method. In particular, we aim at answering the following questions through experiments:</p><p>• Question 1: Can our Positional Integrity Encoding maintain the prediction accuracy of full re-computation in code editing scenarios? • Question 2: How much efficiency improvement can be achieved by using our Positional Integrity Encoding compared to existing approaches? • Question 3: How large is the gap between our Positional Integrity Encoding and full re-computation in terms of LLM's predictions &amp; representations?</p><p>We will answer each question with carefully designed experiments in the following sub-sections. We also conduct additional experiments in Appendix B.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.1">EXPERIMENTAL SETUP</head><p>Tasks. Our experiments are conducted on RepoBench-C-8k <ref type="bibr">(Liu et al., 2024a)</ref>. This benchmark focuses on the prediction of the next line of code, given a set of in-file context (including import statements and preceding lines before the target line), and cross-file context (comprising snippets from other files parsed by import statements). The detailed statistics of RepoBench-C-8k is shown in Table <ref type="table" target="#tab_0">1</ref>. To effectively evaluate next-line prediction performance of code LLMs, we follow <ref type="bibr">Liu et al. (2024a)</ref> to use three task settings: (1) Cross-File-First (XF-F): mask the first appearance of a cross-file line within a file; (2) Cross-File-Random (XF-R): mask a random and non-first occurrence of a cross-file line;</p><p>(3) In-File (IF): mask an in-file line that does not involve any cross-file modules. Moreover, we carefully design three real-world scenarios covering code insertion, code deletion, and code edition to comprehensively examine our approach. See Appendix A.1 for more detailed descriptions of tasks construction.</p><p>Settings. In our experiments, we employ DeepSeek-Coder (Guo et al., 2024), a code LLM that achieves strong performance in handling repository-level code completion tasks (We also conduct experiments on <ref type="bibr">CodeLlama (Roziere et al., 2023)</ref> in Appendix A.2). We use Transformers <ref type="bibr" target="#b58">(Wolf et al., 2020)</ref> as our codebase. We benchmark our method on models of different sizes covering 1.3B, 6.7B, and 33B. During inference, the greedy decoding strategy is used to deterministically generate 64 tokens. For 1.3B and 6.7B models, all the experiments are conducted on a single NVIDIA A100 GPU. For 33B models, the time for encoding the context is conducted on two NVIDIA A100 GPUs and the full generation process is conducted on eight NVIDIA A100 GPUs. The first non-comment line in the output is truncated and used as the prediction. The batch size is set to 1. All experiments are repeated three times with different seeds and the averaged scores are reported.</p><p>Evaluation. For comparison with our Positional Integrity Encoding, we choose two standard approaches as baselines: (1) Full-recomputation: re-compute the KV cache for all edited tokens  <ref type="bibr" target="#b52">(Svyatkovskiy et al., 2020)</ref> to evaluate the accuracy of the predicted code lines on code completion tasks. We also report the time required to encode the edited context for efficiency evaluation.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.2">MAIN RESULTS</head><p>Positional Integrity Encoding perfectly preserves the full re-computation performance. Results of different code editing settings are presented in Table <ref type="table" target="#tab_1">2</ref>, 3 and 4 respectively. It can be easily seen that all metrics indicate that our Positional Integrity Encoding can perfectly maintain the prediction accuracy of full re-computation in different scenarios. This indicates that PIE effectively addresses temporal confusion, and the semantic impact of minor edits is relatively negligible. For example, in the most challenging XF-F setting requiring to handle long-range cross-file context, the maximum relative difference between our PIE and Full-recomputation across different model sizes and code languages is 0.3%/0.15%, 0.66%/0.79%, 1.33%/2.24% for code insertion, deletion, and edition in terms of EM/ES respectively, which is rather negligible. This thorough examination serves as a strong support of the reliability of our PIE approach in real-world code editing scenarios.</p><p>Positional Integrity Encoding significantly reduces computational overhead. Moreover, we further benchmark the computational costs brought by different approaches. From all results in the above tables, it can be easily seen that our Positional Integrity Encoding can achieve substantial speedup compared to full re-computation while preserving its performance simultaneously. In particular, for the code edition experiment that requires both insertion and deletion, the averaged reductions of computational overhead induced by our PIE are 87.9%/88.2%, 92.4%/92.8%, 94.8%/95.2% for 1.3B, 6.7B, and 33B models on Python/Java languages respectively. Furthermore, compared to Conflict Fast Encoding which induces minimal costs but largely hurts performance, our PIE only brings negligible overhead, showing its good accuracy-efficiency balance.</p><p>In summary, our main results comprehensively demonstrate the superiority of our Positional Integration Encoding for code LLMs towards real-world code editing scenarios, which perfectly preserves the prediction accuracy and significantly addresses the crucial gap in the efficient deployment of LLMs in real-time dynamic scenarios.  </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.3">MORE ANALYSIS</head><p>In this subsection, we further present detailed analysis to investigate how large is the gap between our Positional Integrity Encoding and full re-computation in terms of context representations and predictions from LLMs, which provide additional insight of our approach. How large is the gap on context representations? In practical scenarios, real-time editing by users results in the modified sequence x edit , requiring the KV cache to must be updated. In our analysis, we use the cosine similarity between context representations of full re-computation K * [j+1:n] and (1) our Positional Integrity Encoding K edit</p><formula xml:id="formula_12">[j+1:n] ; (2) Conflict Fast Encoding K [j+1:n] .</formula><p>We employ the DeepSeek-Coder 6.7B model on the Python subset of RepoBench. Averaged results are reported.</p><p>In Figure <ref type="figure" target="#fig_2">3</ref>, the cosine similarity between representations of full re-computation and our Positional Integraty Enocding is consistently around 1.0 across all layers. This high similarity demonstrates the effectiveness of PIE in preserving the contextual integrity of the key representations after editing, suggesting that PIE successfully mitigates the temporal confusion that typically arises when manipulating the KV cache. In contrast, the cosine similarity between representations of full re-computation and Conflict Fast Encoding is significantly lower, indicating the temporal confusion issue that hurts model performance a lot. How large is the gap on model predictions? Moreover, we further use Kullback-Leibler (KL) divergence as the metric to investigate the gap between model predictions of different approaches.</p><p>Similarly, we employ the DeepSeek-Coder 6.7B model on the Python subset of RepoBench and report the averaged results. In Figure <ref type="figure" target="#fig_3">4</ref>, the KL divergence between model predictions of full re-computation and our Positional Integrity Encoding remains consistently low, i.e., below 0.0002 across 64 tokens. However, the KL divergence between model predictions of full re-computation and Conflict Fast Encoding is substantially higher (2x larger). These findings again underscore the importance of maintaining positional integrity within the KV cache to ensure accurate generation results.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">CONCLUSION</head><p>In this paper, we introduce Positional Integrity Encoding (PIE), a novel method designed to enhance the efficiency of large language models (LLMs) in the real-time editing setting. Our approach addresses the significant computational overhead associated with re-encoding contexts after small edits, a common scenario in interactive coding environments. Through extensive experiments, we demonstrated that PIE not only significantly reduces latency but also maintains high accuracy compared to the naive full re-computation method.</p><p>PIE represents a substantial step forward in the development of efficient LLMs, particularly in dynamic contexts where frequent edits are made. Future work could explore the integration of PIE with other optimization techniques and its application to a broader range of tasks beyond code generation. Our method paves the way for more responsive and resource-efficient AI assistants, enhancing their practicality and usability in various real-world scenarios. Tasks Construction for Multi-place Code Edition To comprehensively evaluate the model's performance in handling simultaneous code insertion and deletion, we construct a task scenario that integrates both operations. Initially, we randomly delete five consecutive lines from each context to simulate code insertion. The context without these lines is treated as the original context. The tokens in the deleted lines are identified as the inserted tokens.</p><p>Simultaneously, we randomly select another line within the context and insert five randomly sampled lines at this position. The complete context, which includes all lines as they appear after both deletions and insertions, is regarded as the edited context. The tokens in the newly inserted lines are considered the deleted tokens. This dual operation setup allows us to evaluate the model's ability to handle complex, simultaneous edits, adding missing code segments while removing extraneous ones, reflecting the multifaceted nature of real-world coding environments where developers often perform multiple types of edits concurrently.</p><p>A </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B ADDITIONAL EXPERIMENTS B.1 CODE GENERATION TASKS</head><p>To further validate the effectiveness of PIE, we conduct experiments on code generation tasks, using HumanEval <ref type="bibr" target="#b5">Chen et al. (2021)</ref> and its C++ version from HumanEval-X <ref type="bibr" target="#b67">Zheng et al. (2023)</ref>. We randomly choose three consecutive lines in the prompt as the user inserted code and report Pass@1 for different methods. It's important to note that the context (prompt) in HumanEval consists of only a few lines (with an average of 15 lines), making each edit semantically significant. The results in Table <ref type="table" target="#tab_8">8</ref> demonstrate that PIE significantly outperforms the baseline methods, approaching the performance of full recomputation. Note that we also include a reuse baseline where the pre-edit context is reused without modification. Given the importance of these edits in such short contexts, updating the KV cache with PIE becomes essential for maintaining high prediction accuracy, whereas the performance of the reuse baseline drops substantially.  We design a contextually related insertion setting, where we use Edit Distance to identify lines in the context that are similar to the target line, simulating user insertions. We also increase the number of edited lines. We conduct experiments on the Cross-File-First setting of RepoBench-C-8k, keeping all other settings the same as Section 4.The results in Table <ref type="table" target="#tab_9">9</ref> demonstrate that PIE is robust in handling contextually related edits and outperforms the baseline methods, approaching the performance of full recomputation. Note that we also include a reuse baseline where the pre-edit context is reused without modification.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.3 MULTI-PLACE EDITS</head><p>Users may edit a function definition followed by updates to all associated call sites. To simulate this scenario, we treat each line in the context as a potential site and use Edit Distance to identify multiple sites in the context that are similar to the target line, thereby simulating multi-place insertions. We conduct experiments in this contextually related multi-place editing setting on the Cross-File-First task of RepoBench-C-8k. The results in Table <ref type="table" target="#tab_10">10</ref> demonstrate that PIE is robust in handling multi-place edits and outperforms the baseline methods. </p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 2 :</head><label>2</label><figDesc>Figure2: Illustration of the KV cache mechanism in both static and real-time editing settings for large language models (LLMs). Top: In the static setting, the model processes a fixed input to generate predictions, leveraging precomputed Key/Value (KV) pairs stored in the cache. Bottom: In the real-time editing setting, the input code is frequently edited, necessitating updates to the KV cache to maintain accurate information to generate the correct next tokens. Our objective is to optimize the efficiency of the green arrow pathway, which represents the process of updating the KV cache in response to code edits.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: Cosine similarity of key representations across model layers. The plots compare the cosine similarity between K [j+1:n] and K * [j+1:n] (indicating temporal confusion of Conflict Fast Encoding) with the cosine similarity between K edit [j+1:n] and K * [j+1:n] (showing the effectiveness of PIE).</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Figure 4 :</head><label>4</label><figDesc>Figure4: KL divergence of the generated token distributions. The plots compare the KL divergence between the generated token distributions of PIE and Full-recomputation, and the KL divergence between the generated token distributions of Conflict Fast Encoding and Full-recomputation.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head>Table 1 :</head><label>1</label><figDesc>Statistics of RepoBench-C-8k(Liu et al., 2024a)  test set.</figDesc><table><row><cell>Language</cell><cell>XF-F</cell><cell>XF-R</cell><cell>IF</cell><cell>Average Number of Tokens</cell></row><row><cell>Python</cell><cell cols="3">18,000 7,500 10,500</cell><cell>3,967</cell></row><row><cell>Java</cell><cell cols="3">18,000 7,500 10,500</cell><cell>4,179</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 2 :</head><label>2</label><figDesc>Performance comparisons of insertion experiments. In this task, for each next-line prediction target, we insert several lines of code into its context randomly to simulate real-world scenarios. EM and ES denote the Exact Match and Edit Similarity score respectively. All results demonstrate that our Positional Integrity Encoding approach brings substantial speed-ups without performance drops.</figDesc><table><row><cell></cell><cell>Model</cell><cell>Method</cell><cell></cell><cell>XF-F</cell><cell></cell><cell></cell><cell>XF-R</cell><cell></cell><cell>IF</cell></row><row><cell></cell><cell></cell><cell></cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell></row><row><cell>Python</cell><cell>1.3B 1.3B 1.3B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">22.42 65.26 7.32 43.73 22.3 65.2</cell><cell>192ms 23ms 29ms</cell><cell cols="2">35.41 72.96 10.61 47.18 35.33 72.88</cell><cell>193ms 22ms 28ms</cell><cell>28.78 69.22 8.91 45.25 28.69 69.13</cell><cell>193ms 22ms 29ms</cell></row><row><cell>Python</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">28.95 70.11 5.35 33.32 28.83 70.01</cell><cell>561ms 34ms 50ms</cell><cell cols="2">40.89 76.19 6.52 35.25 40.77 76.14</cell><cell>564ms 34ms 50ms</cell><cell>35.26 72.73 6.09 38.76 35.2 72.72</cell><cell>562ms 34ms 50ms</cell></row><row><cell>Python</cell><cell>33B 33B 33B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="3">35.75 73.46 2194ms 3.96 30.13 126ms 35.77 73.45 134ms</cell><cell cols="2">46.0 5.41 45.74 78.85 78.9 32.32</cell><cell cols="2">2199ms 39.75 75.12 2194ms 121ms 3.92 35.56 127ms 140ms 39.74 75.1 141ms</cell></row><row><cell>Java</cell><cell>1.3B 1.3B 1.3B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">26.21 70.89 0.29 3.12 26.13 70.82</cell><cell>200ms 22ms 30ms</cell><cell cols="2">36.77 76.31 0.57 3.19 36.67 76.25</cell><cell>200ms 23ms 30ms</cell><cell>45.89 78.04 0.7 2.63 45.92 77.99</cell><cell>198ms 23ms 29ms</cell></row><row><cell>Java</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">32.51 75.56 0.47 2.77 32.21 75.47</cell><cell>578ms 34ms 50ms</cell><cell cols="2">41.97 79.41 0.76 2.78 41.96 79.32</cell><cell>578ms 35ms 49ms</cell><cell>50.86 80.53 0.67 2.48 50.85 80.43</cell><cell>578ms 33ms 48ms</cell></row><row><cell>Java</cell><cell>33B 33B 33B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="7">35.05 76.93 2269ms 44.95 80.87 2281ms 53.23 81.76 2270ms 0.38 2.51 120ms 0.59 2.40 122ms 0.68 2.09 122ms 34.78 76.78 138ms 45.01 80.95 133ms 53.16 81.66 139ms</cell></row></table><note><p><p><p>and subsequent tokens; (2) Conflict Fast Encoding: re-compute the KV cache for the edited tokens while keeping the rest of the cache intact (i.e., using equation (1,2). Following</p><ref type="bibr" target="#b32">Lu et al. (2021)</ref></p>, we use Exact Match (EM) and Edit Similarity (ES)</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_2"><head>Table 3 :</head><label>3</label><figDesc>Performance comparisons of deletion experiments. In this task, for each next-line prediction target, we delete several lines of code of its context randomly to simulate real-world scenarios. EM and ES denotes the Exact Match and Edit Similarity score respectively. All results demonstrate that our Positional Integrity Encoding approach brings substantial speed-ups without performance drops.</figDesc><table><row><cell></cell><cell>Model</cell><cell>Method</cell><cell></cell><cell>XF-F</cell><cell></cell><cell></cell><cell>XF-R</cell><cell></cell><cell>IF</cell></row><row><cell></cell><cell></cell><cell></cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell></row><row><cell>Python</cell><cell>1.3B 1.3B 1.3B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">22.42 65.26 0.41 39.31 22.31 65.19</cell><cell>192ms 22ms 29ms</cell><cell cols="2">35.41 72.96 0.59 42.02 35.25 72.81</cell><cell>193ms 24ms 27ms</cell><cell>28.78 69.22 1.05 42.85 28.8 69.16</cell><cell>193ms 22ms 27ms</cell></row><row><cell>Python</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">28.95 70.11 0.51 40.24 28.86 70.01</cell><cell>561ms 30ms 43ms</cell><cell cols="2">40.89 76.19 0.77 42.77 40.77 76.15</cell><cell>564ms 31ms 42ms</cell><cell>35.26 72.73 1.42 43.93 35.09 72.67</cell><cell>562ms 30ms 42ms</cell></row><row><cell>Python</cell><cell>33B 33B 33B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="3">35.75 73.46 2194ms 1.42 43.93 105ms 35.09 72.67 128ms</cell><cell cols="2">46.0 1.55 45.21 78.18 78.9 44.22</cell><cell cols="2">2199ms 39.75 75.12 2194ms 108ms 2.4 45.04 108ms 118ms 39.69 75.05 119ms</cell></row><row><cell>Java</cell><cell>1.3B 1.3B 1.3B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">26.21 70.89 0.33 33.48 26.05 70.77</cell><cell>200ms 22ms 28ms</cell><cell cols="2">36.77 76.31 0.55 36.24 36.83 76.34</cell><cell>200ms 22ms 27ms</cell><cell>45.89 78.04 1.35 38.65 45.74 77.91</cell><cell>198ms 22ms 27ms</cell></row><row><cell>Java</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">32.51 75.56 0.49 33.6 32.57 75.56</cell><cell>578ms 29ms 42ms</cell><cell cols="2">41.97 79.41 0.8 36.17 41.83 79.39</cell><cell>578ms 29ms 43ms</cell><cell>50.86 80.53 1.84 38.82 50.88 80.52</cell><cell>578ms 29ms 42ms</cell></row><row><cell>Java</cell><cell>33B 33B 33B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="7">35.05 76.93 2269ms 44.95 80.87 2281ms 53.23 81.76 2270ms 0.91 35.06 109ms 1.01 37.97 106ms 2.31 40.15 105ms 34.82 76.76 117ms 44.93 80.86 120ms 53.19 81.71 119ms</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_3"><head>Table 4 :</head><label>4</label><figDesc>Performance comparisons of edition experiments. In this task, for each next-line prediction target, we delete several lines of code of its context and simultaneously insert other lines of code randomly to simulate real-world scenarios. EM and ES denote the Exact Match and Edit Similarity score respectively. All results demonstrate that our Positional Integrity Encoding approach brings substantial speed-ups without performance drops.</figDesc><table><row><cell></cell><cell>Model</cell><cell>Method</cell><cell></cell><cell>XF-F</cell><cell></cell><cell></cell><cell>XF-R</cell><cell></cell><cell>IF</cell></row><row><cell></cell><cell></cell><cell></cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell></row><row><cell>Python</cell><cell>1.3B 1.3B 1.3B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">22.42 65.26 8.80 50.08 22.04 64.59</cell><cell>242ms 23ms 30ms</cell><cell cols="2">35.41 72.96 13.83 54.01 34.49 72.02</cell><cell>242ms 22ms 29ms</cell><cell>28.78 69.22 11.29 51.99 28.15 68.32</cell><cell>244ms 22ms 29ms</cell></row><row><cell>Python</cell><cell>6.7B 6.7B 6.7B</cell><cell cols="3">Full-recomputation Conflict Fast Encoding 11.26 51.63 28.95 70.11 PIE 28.07 69.00</cell><cell>705ms 34ms 54ms</cell><cell cols="2">40.89 76.19 12.57 53.27 39.89 75.10</cell><cell>706ms 34ms 54ms</cell><cell>35.26 72.73 12.75 51.45 34.05 71.64</cell><cell>713ms 34ms 54ms</cell></row><row><cell>Python</cell><cell>33B 33B 33B</cell><cell cols="8">Full-recomputation Conflict Fast Encoding 14.33 53.73 35.75 73.46 2766ms 46.00 78.90 2759ms 39.75 75.12 2787ms 126ms 15.12 54.59 121ms 13.88 51.94 127ms PIE 34.62 72.47 146ms 44.59 77.69 142ms 38.83 74.08 141ms</cell></row><row><cell>Java</cell><cell>1.3B 1.3B 1.3B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">26.21 70.89 5.87 31.46 25.29 68.93</cell><cell>251ms 22ms 30ms</cell><cell cols="2">36.77 76.31 8.01 32.74 35.59 74.17</cell><cell>253ms 23ms 30ms</cell><cell>45.89 78.04 10.20 34.34 44.51 76.06</cell><cell>249ms 23ms 29ms</cell></row><row><cell>Java</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">32.51 75.56 9.28 39.32 31.32 73.83</cell><cell>733ms 34ms 52ms</cell><cell cols="2">41.97 79.41 11.47 39.11 40.89 77.65</cell><cell>736ms 35ms 53ms</cell><cell>50.86 80.53 15.51 41.92 49.44 78.80</cell><cell>728ms 33ms 53ms</cell></row><row><cell>Java</cell><cell>33B 33B 33B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="7">35.05 76.93 2892ms 44.95 80.87 2894ms 53.23 81.76 2833ms 8.02 32.93 120ms 9.67 33.29 122ms 12.10 34.70 122ms 33.72 74.69 134ms 43.71 78.66 138ms 51.71 79.49 143ms</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_4"><head>Table 5 :</head><label>5</label><figDesc>Performance comparisons of insertion experiments for CodeLlama. In this task, for each next-line prediction target, we insert several lines of code into its context randomly to simulate real-world scenarios. EM and ES denotes the Exact Match and Edit Similarity score respectively. All results demonstrate that our Positional Integrity Encoding approach brings substantial speed-ups without performance drops.</figDesc><table><row><cell></cell><cell>Model</cell><cell>Method</cell><cell>XF-F</cell><cell></cell><cell></cell><cell>XF-R</cell><cell></cell><cell></cell><cell>IF</cell></row><row><cell></cell><cell></cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell></row><row><cell>Python</cell><cell>7B 7B 7B</cell><cell cols="2">Full-recomputation Conflict Fast Encoding 14.49 55.10 25.72 66.49 PIE 25.42 66.40</cell><cell>561ms 34ms 50ms</cell><cell cols="2">38.87 73.81 19.32 57.34 38.76 73.83</cell><cell>564ms 34ms 50ms</cell><cell cols="2">33.55 70.26 15.49 53.05 33.30 70.11</cell><cell>562ms 34ms 50ms</cell></row><row><cell>Python</cell><cell>34B 34B 34B</cell><cell cols="8">Full-recomputation Conflict Fast Encoding 11.56 50.23 31.04 69.48 2013ms 42.80 76.27 2029ms 37.69 72.36 1999ms 113ms 16.06 52.59 110ms 11.58 48.36 112ms PIE 30.53 68.79 123ms 42.73 76.40 119ms 37.51 72.25 123ms</cell></row><row><cell>Java</cell><cell>7B 7B 7B</cell><cell cols="2">Full-recomputation Conflict Fast Encoding 10.45 37.69 28.02 72.49 PIE 28.02 72.39</cell><cell>578ms 34ms 50ms</cell><cell cols="2">39.61 77.81 14.28 38.45 39.48 77.74</cell><cell>578ms 35ms 49ms</cell><cell cols="2">49.20 79.76 16.95 38.15 49.31 79.79</cell><cell>578ms 33ms 48ms</cell></row><row><cell>Java</cell><cell>34B 34B 34B</cell><cell cols="8">Full-recomputation Conflict Fast Encoding 12.04 41.76 32.16 75.09 2179ms 43.45 79.89 2184ms 52.43 80.97 2197ms 104ms 14.25 39.19 107ms 17.29 38.50 109ms PIE 31.45 74.64 119ms 43.54 79.80 118ms 52.42 81.00 115ms</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_5"><head></head><label></label><figDesc>.2 RESULTS ON CODELLAMA Results of different code editing settings on CodeLlama (Roziere et al., 2023) are presented in Table 5, 6 and 7 respectively. Similar to DeepSeek-Coder, CodeLlama with Positional Integrity Encoding demonstrates strong performance and fast speed across various editing scenarios. The metrics indicate that PIE effectively maintains prediction accuracy and addresses temporal confusion, ensuring the impact of minor edits is minimal.</figDesc><table /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_6"><head>Table 6 :</head><label>6</label><figDesc>Performance comparisons of deletion experiments for CodeLlama. In this task, for each next-line prediction target, we delete several lines of code of its context randomly to simulate real-world scenarios. EM and ES denote the Exact Match and Edit Similarity score respectively. All results demonstrate that our Positional Integrity Encoding approach brings substantial speed-ups without performance drops.</figDesc><table><row><cell></cell><cell>Model</cell><cell>Method</cell><cell></cell><cell>XF-F</cell><cell></cell><cell></cell><cell>XF-R</cell><cell></cell><cell>IF</cell></row><row><cell></cell><cell></cell><cell></cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell></row><row><cell>Python</cell><cell>7B 7B 7B</cell><cell cols="3">Full-recomputation Conflict Fast Encoding 10.14 52.80 25.72 66.49 PIE 25.52 66.47</cell><cell>561ms 30ms 43ms</cell><cell cols="2">38.87 73.81 15.24 57.88 38.88 73.87</cell><cell>564ms 31ms 42ms</cell><cell>33.55 70.26 13.04 54.53 33.51 70.18</cell><cell>562ms 30ms 42ms</cell></row><row><cell>Python</cell><cell>34B 34B 34B</cell><cell cols="8">Full-recomputation Conflict Fast Encoding 12.15 54.76 31.04 69.48 2013ms 42.80 76.27 2029ms 37.69 72.36 1999ms 88ms 16.40 59.29 94ms 13.78 55.90 93ms PIE 31.01 69.44 100ms 42.76 76.13 100ms 37.60 72.38 102ms</cell></row><row><cell>Java</cell><cell>7B 7B 7B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="2">28.02 72.49 7.21 42.51 28.01 72.45</cell><cell>578ms 29ms 42ms</cell><cell cols="2">39.61 77.81 7.77 43.86 39.51 77.78</cell><cell>578ms 29ms 42ms</cell><cell>49.20 79.76 8.78 44.46 49.30 79.80</cell><cell>578ms 29ms 42ms</cell></row><row><cell>Java</cell><cell>34B 34B 34B</cell><cell>Full-recomputation Conflict Fast Encoding PIE</cell><cell cols="7">32.16 75.09 2179ms 43.45 79.89 2184ms 52.43 80.97 2197ms 8.76 45.44 92ms 8.67 45.57 92ms 10.11 46.64 95ms 32.12 75.02 99ms 43.33 79.86 98ms 52.36 80.96 107ms</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_7"><head>Table 7 :</head><label>7</label><figDesc>Performance comparisons of edition experiments for CodeLlama. In this task, for each next-line prediction target, we delete several lines of code of its context and simultaneously insert other lines of code randomly to simulate real-world scenarios. EM and ES denote the Exact Match and Edit Similarity score respectively. All results demonstrate that our Positional Integrity Encoding approach brings substantial speed-ups without performance drops.</figDesc><table><row><cell></cell><cell>Model</cell><cell>Method</cell><cell>XF-F</cell><cell></cell><cell></cell><cell>XF-R</cell><cell></cell><cell></cell><cell>IF</cell></row><row><cell></cell><cell></cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell><cell>EM</cell><cell>ES</cell><cell>Time</cell></row><row><cell>Python</cell><cell>7B 7B 7B</cell><cell cols="2">Full-recomputation Conflict Fast Encoding 19.97 61.46 25.72 66.49 PIE 24.97 66.04</cell><cell>705ms 34ms 54ms</cell><cell cols="2">38.87 73.81 29.79 67.31 38.21 73.40</cell><cell>706ms 34ms 54ms</cell><cell cols="2">33.55 70.26 24.70 63.28 32.84 69.66</cell><cell>713ms 34ms 54ms</cell></row><row><cell>Python</cell><cell>34B 34B 34B</cell><cell cols="8">Full-recomputation Conflict Fast Encoding 21.91 61.78 31.04 69.48 2574ms 42.80 76.27 2569ms 37.69 72.36 2581ms 91ms 30.87 67.16 91ms 25.76 63.15 90ms PIE 29.92 68.7 126ms 41.74 75.37 126ms 37.01 71.76 127ms</cell></row><row><cell>Java</cell><cell>7B 7B 7B</cell><cell cols="2">Full-recomputation Conflict Fast Encoding 18.78 57.38 28.02 72.49 PIE 27.43 71.60</cell><cell>733ms 34ms 52ms</cell><cell cols="2">39.61 77.81 25.79 60.97 38.89 76.96</cell><cell>736ms 35ms 53ms</cell><cell cols="2">49.20 79.76 32.60 62.66 48.60 78.94</cell><cell>728ms 33ms 53ms</cell></row><row><cell>Java</cell><cell>34B 34B 34B</cell><cell cols="8">Full-recomputation Conflict Fast Encoding 21.25 59.70 32.16 75.09 2726ms 43.45 79.89 2807ms 52.43 80.97 2727ms 104ms 27.83 61.91 107ms 32.98 62.03 109ms PIE 30.82 73.84 126ms 42.71 78.94 119ms 51.64 80.15 125ms</cell></row><row><cell cols="4">B.2 CONTEXTUALLY RELATED EDITS</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_8"><head>Table 8 :</head><label>8</label><figDesc>Performance of DeepSeek-Coder 6.7B on HumanEval and HumanEval-X</figDesc><table><row><cell>Method</cell><cell cols="2">Pass@1</cell></row><row><cell></cell><cell cols="2">Python C++</cell></row><row><cell>Full-recomputation</cell><cell>49.4</cell><cell>50.3</cell></row><row><cell>Conflict Fast Encoding</cell><cell>11.0</cell><cell>15.5</cell></row><row><cell>Reuse baseline</cell><cell>17.7</cell><cell>29.2</cell></row><row><cell>PIE</cell><cell>43.9</cell><cell>49.7</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_9"><head>Table 9 :</head><label>9</label><figDesc>Performance of DeepSeek-Coder 6.7B on contextually-related insertion experiments</figDesc><table><row><cell></cell><cell>Model</cell><cell>Method</cell><cell cols="2">5 lines</cell><cell cols="2">7 lines</cell><cell cols="2">11 lines</cell><cell cols="2">13 lines</cell><cell>15 lines</cell></row><row><cell></cell><cell></cell><cell></cell><cell>EM</cell><cell>ES</cell><cell>EM</cell><cell>ES</cell><cell>EM</cell><cell>ES</cell><cell>EM</cell><cell>ES</cell><cell>EM</cell><cell>ES</cell></row><row><cell>Python</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding Reuse baseline</cell><cell cols="8">28.95 70.11 28.95 70.11 28.95 70.11 28.95 70.11 28.95 70.11 7.92 41.56 6.39 38.56 4.78 34.91 4.11 33.34 3.43 32.15 25.58 68.23 25.29 68.03 25.23 67.95 25.13 67.83 24.71 67.74</cell></row><row><cell></cell><cell>6.7B</cell><cell>PIE</cell><cell cols="7">27.40 69.10 27.23 68.94 27.04 68.80 26.92</cell><cell>68.8</cell><cell>26.86 68.63</cell></row><row><cell>Java</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding Reuse baseline</cell><cell cols="8">32.51 75.56 32.51 75.56 32.51 75.56 32.51 75.56 32.51 75.56 2.81 15.46 1.89 12.16 1.10 7.89 0.87 6.52 0.74 5.57 25.99 73.29 25.72 73.17 25.18 73.03 25.15 72.99 24.99 72.84</cell></row><row><cell></cell><cell>6.7B</cell><cell>PIE</cell><cell cols="8">30.04 74.46 30.00 74.44 30.13 74.47 29.87 74.38 29.76 74.29</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_10"><head>Table 10 :</head><label>10</label><figDesc>Performance of DeepSeek-Coder 6.7B on contextually-related multi-place insertion experiments</figDesc><table><row><cell></cell><cell>Model</cell><cell>Method</cell><cell cols="2">5 lines</cell><cell cols="2">7 lines</cell><cell cols="2">11 lines</cell><cell cols="2">13 lines</cell><cell>15 lines</cell></row><row><cell></cell><cell></cell><cell></cell><cell>EM</cell><cell>ES</cell><cell>EM</cell><cell>ES</cell><cell>EM</cell><cell>ES</cell><cell>EM</cell><cell>ES</cell><cell>EM</cell><cell>ES</cell></row><row><cell>Python</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding Reuse baseline</cell><cell cols="7">28.95 70.11 28.95 70.11 28.95 70.11 28.95 7.43 39.95 5.83 37.00 4.06 33.02 3.48 24.61 67.43 24.44 67.17 23.84 66.77 23.62</cell><cell>70.11 31.71 66.63</cell><cell>28.95 70.11 2.97 30.59 23.49 66.55</cell></row><row><cell></cell><cell>6.7B</cell><cell>PIE</cell><cell cols="8">26.97 68.85 26.77 68.67 26.33 68.34 26.15 68.222</cell><cell>25.9</cell><cell>68.23</cell></row><row><cell>Java</cell><cell>6.7B 6.7B 6.7B</cell><cell>Full-recomputation Conflict Fast Encoding Reuse baseline</cell><cell cols="7">32.51 75.56 32.51 75.56 32.51 75.56 32.51 1.69 10.91 1.06 7.66 0.43 4.26 0.28 24.46 72.35 23.99 72.05 23.11 71.69 22.97</cell><cell>75.56 3.36 71.56</cell><cell>32.51 75.56 0.22 2.81 22.75 71.38</cell></row><row><cell></cell><cell>6.7B</cell><cell>PIE</cell><cell cols="7">29.56 74.14 29.26 73.91 29.03 73.81 28.83</cell><cell>73.68</cell><cell>28.56 73.59</cell></row></table></figure>
+		</body>
+		<back>
+
+			<div type="acknowledgement">
+<div><head>ACKNOWLEDGEMENTS</head><p>We thank all the anonymous reviewers for the very careful and detailed reviews as well as the valuable suggestions. Their help has further enhanced our work. <rs type="person">Di He</rs> is supported by <rs type="funder">National Science Foundation of China</rs> (<rs type="grantNumber">NSFC62376007</rs>).</p></div>
+			</div>
+			<listOrg type="funding">
+				<org type="funding" xml:id="_RPThyh8">
+					<idno type="grant-number">NSFC62376007</idno>
+				</org>
+			</listOrg>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A EXPERIMENTAL DETAILS</head><p>A.1 EXPERIMENTAL SETUP Tasks Construction for Code Insertion. To simulate code insertion tasks, we start by randomly deleting five consecutive lines from each context. The resulting context, which lacks these five lines, is considered the original context. The complete context, which includes the previously deleted lines, is treated as the edited context. The tokens within the deleted lines are identified as the inserted tokens (around 64 tokens for Python and 51 tokens for Java). This setup allows us to evaluate the model's capability to accurately restore missing code segments, mimicking real-world scenarios where developers frequently insert blocks of code.</p><p>Tasks Construction for Code Deletion. For code deletion tasks, we begin by randomly selecting a line within the context and then inserting five randomly sampled lines at this position. The context containing these additional lines is designated as the original context. The complete context, which excludes the inserted lines, is regarded as the edited context. The tokens in the inserted lines are treated as the deleted tokens (around 64 tokens for Python and 51 tokens for Java). This construction enables us to assess the model's performance in identifying and removing extraneous code, reflecting situations where developers need to clean up or refactor their codebase.</p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<title level="m" type="main">Taming throughput-latency tradeoff in llm inference with sarathi-serve</title>
+		<author>
+			<persName><forename type="first">Amey</forename><surname>Agrawal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nitin</forename><surname>Kedia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashish</forename><surname>Panwar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jayashree</forename><surname>Mohan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nipun</forename><surname>Kwatra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Bhargav</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Gulavani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ramachandran</forename><surname>Tumanov</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Ramjee</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2403.02310</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<monogr>
+		<author>
+			<persName><forename type="first">Rohan</forename><surname>Anil</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><forename type="middle">M</forename><surname>Dai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Orhan</forename><surname>Firat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Melvin</forename><surname>Johnson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dmitry</forename><surname>Lepikhin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexandre</forename><surname>Passos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Siamak</forename><surname>Shakeri</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Emanuel</forename><surname>Taropa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Paige</forename><surname>Bailey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhifeng</forename><surname>Chen</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.10403</idno>
+		<title level="m">Palm 2 technical report</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<monogr>
+		<author>
+			<persName><forename type="first">Iz</forename><surname>Beltagy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><forename type="middle">E</forename><surname>Peters</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arman</forename><surname>Cohan</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Longformer</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2004.05150</idno>
+		<title level="m">The long-document transformer</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<monogr>
+		<author>
+			<persName><forename type="first">Tianle</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuhong</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhengyang</forename><surname>Geng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongwu</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><forename type="middle">D</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deming</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Dao</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Medusa</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.10774</idno>
+		<title level="m">Simple llm inference acceleration framework with multiple decoding heads</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<monogr>
+		<author>
+			<persName><forename type="first">Charlie</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sebastian</forename><surname>Borgeaud</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Geoffrey</forename><surname>Irving</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jean-Baptiste</forename><surname>Lespiau</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laurent</forename><surname>Sifre</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><surname>Jumper</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2302.01318</idno>
+		<ptr target="https://arxiv.org/abs/2302.01318" />
+		<title level="m">Accelerating large language model decoding with speculative sampling</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<monogr>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jerry</forename><surname>Tworek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heewoo</forename><surname>Jun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiming</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Henrique</forename><surname>Ponde De Oliveira Pinto</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><surname>Kaplan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Harri</forename><surname>Edwards</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuri</forename><surname>Burda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicholas</forename><surname>Joseph</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Greg</forename><surname>Brockman</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2107.03374</idno>
+		<title level="m">Evaluating large language models trained on code</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Kerple: Kernelized relative positional embedding for length extrapolation</title>
+		<author>
+			<persName><forename type="first">Ta-Chung</forename><surname>Chi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><forename type="middle">J</forename><surname>Ting-Han Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Ramadge</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Rudnicky</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="8386" to="8399" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Dissecting transformer length extrapolation via the lens of receptive field analysis</title>
+		<author>
+			<persName><forename type="first">Ta-Chung</forename><surname>Chi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Ting-Han Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Rudnicky</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Ramadge</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics</title>
+		<meeting>the 61st Annual Meeting of the Association for Computational Linguistics</meeting>
+		<imprint>
+			<publisher>Long Papers</publisher>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">1</biblScope>
+			<biblScope unit="page" from="13522" to="13537" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<monogr>
+		<title level="m" type="main">Generating long sequences with sparse transformers</title>
+		<author>
+			<persName><forename type="first">Rewon</forename><surname>Child</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Scott</forename><surname>Gray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Sutskever</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1904.10509</idno>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">Rethinking attention with performers</title>
+		<author>
+			<persName><forename type="first">Valerii</forename><surname>Krzysztof Marcin Choromanski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Likhosherstov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xingyou</forename><surname>Dohan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andreea</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tamas</forename><surname>Gane</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Sarlos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><forename type="middle">Quincy</forename><surname>Hawkins</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Afroz</forename><surname>Davis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukasz</forename><surname>Mohiuddin</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Kaiser</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<title level="m" type="main">Transformer-XL: Attentive language models beyond a fixed-length context</title>
+		<author>
+			<persName><forename type="first">Zihang</forename><surname>Dai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhilin</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yiming</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jaime</forename><surname>Carbonell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quoc</forename><surname>Le</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruslan</forename><surname>Salakhutdinov</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2019-07">July 2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<monogr>
+		<title level="m" type="main">Flashattention-2: Faster attention with better parallelism and work partitioning</title>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Dao</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2307.08691</idno>
+		<ptr target="https://arxiv.org/abs/2307.08691" />
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">Flashattention: Fast and memoryefficient exact attention with io-awareness</title>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Dao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefano</forename><surname>Ermon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Atri</forename><surname>Rudra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Ré</surname></persName>
+		</author>
+		<ptr target="https://proceedings.neurips.cc/paperfiles/paper/2022/file/67" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems (NeurIPS)</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note>d57c32e20fd0a7a302cb81d36e40d5-Paper-Conference.pdf</note>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<analytic>
+		<title level="a" type="main">8-bit matrix multiplication for transformers at scale</title>
+		<author>
+			<persName><forename type="first">Tim</forename><surname>Dettmers</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mike</forename><surname>Lewis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Younes</forename><surname>Belkada</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Zettlemoyer</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2208.07339" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems (NeurIPS)</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note>Gpt3. int8 (</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Sparsegpt: Massive language models can be accurately pruned in one-shot</title>
+		<author>
+			<persName><forename type="first">Elias</forename><surname>Frantar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Alistarh</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="10323" to="10337" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Optq: Accurate quantization for generative pre-trained transformers</title>
+		<author>
+			<persName><forename type="first">Elias</forename><surname>Frantar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Torsten</forename><surname>Saleh Ashkboos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Hoefler</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Alistarh</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=tcbBPnfwxS&amp;fbclid=" />
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note>IwAR0QoRRF 7gr6NEt2sKchK5wgGNLfJUNavvbSeCRlWhpVmtUbo0W3ExJXZE</note>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<monogr>
+		<title level="m" type="main">Challenges in deploying long-context transformers: A theoretical peak performance analysis</title>
+		<author>
+			<persName><forename type="first">Yao</forename><surname>Fu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2405.08944</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">Knowledge distillation of large language models</title>
+		<author>
+			<persName><forename type="first">Yuxian</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Li</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Furu</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Minlie</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Minillm</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<monogr>
+		<author>
+			<persName><forename type="first">Qihao</forename><surname>Daya Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dejian</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhenda</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kai</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wentao</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guanting</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Bi</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Li</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.14196</idno>
+		<title level="m">Deepseek-coder: When the large language model meets programming-the rise of code intelligence</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<monogr>
+		<title level="m" type="main">Rest: Retrieval-based speculative decoding</title>
+		<author>
+			<persName><forename type="first">Zhenyu</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zexuan</forename><surname>Zhong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianle</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><forename type="middle">D</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Di</forename><surname>He</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2311.08252</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<monogr>
+		<author>
+			<persName><forename type="first">Zhenyu</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guhao</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengjie</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kai</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Di</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jingjing</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongxia</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liwei</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.16421</idno>
+		<title level="m">Two stones hit one bird: Bilevel positional encoding for better length extrapolation</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<analytic>
+		<title level="a" type="main">Accelerated sparse neural training: A provable and efficient method to find n: m transposable masks</title>
+		<author>
+			<persName><forename type="first">Itay</forename><surname>Hubara</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Brian</forename><surname>Chmiel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Moshe</forename><surname>Island</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ron</forename><surname>Banner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joseph</forename><surname>Naor</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Soudry</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2102.08124" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems (NeurIPS)</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Nikolaos Pappas, and Franc ¸ois Fleuret. Transformers are rnns: Fast autoregressive transformers with linear attention</title>
+		<author>
+			<persName><forename type="first">Angelos</forename><surname>Katharopoulos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Apoorv</forename><surname>Vyas</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="5156" to="5165" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<monogr>
+		<title level="m" type="main">Reformer: The efficient transformer</title>
+		<author>
+			<persName><forename type="first">Nikita</forename><surname>Kitaev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Łukasz</forename><surname>Kaiser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anselm</forename><surname>Levskaya</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2001.04451</idno>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Efficient memory management for large language model serving with pagedattention</title>
+		<author>
+			<persName><forename type="first">Woosuk</forename><surname>Kwon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhuohan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Siyuan</forename><surname>Zhuang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><surname>Sheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lianmin</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cody</forename><forename type="middle">Hao</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joseph</forename><surname>Gonzalez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ion</forename><surname>Stoica</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2309.06180" />
+	</analytic>
+	<monogr>
+		<title level="m">Symposium on Operating Systems Principles (SOSP)</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<analytic>
+		<title level="a" type="main">Fast inference from transformers via speculative decoding</title>
+		<author>
+			<persName><forename type="first">Yaniv</forename><surname>Leviathan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matan</forename><surname>Kalman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yossi</forename><surname>Matias</surname></persName>
+		</author>
+		<ptr target="https://proceedings.mlr.press/v202/leviathan23a.html" />
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning (ICML)</title>
+		<editor>
+			<persName><forename type="first">Andreas</forename><surname>Krause</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Emma</forename><surname>Brunskill</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Kyunghyun</forename><surname>Cho</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Barbara</forename><surname>Engelhardt</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Sivan</forename><surname>Sabato</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Jonathan</forename><surname>Scarlett</surname></persName>
+		</editor>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<monogr>
+		<author>
+			<persName><forename type="first">Shanda</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chong</forename><surname>You</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guru</forename><surname>Guruganesh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joshua</forename><surname>Ainslie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Santiago</forename><surname>Ontanon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Manzil</forename><surname>Zaheer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sumit</forename><surname>Sanghai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yiming</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanjiv</forename><surname>Kumar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Srinadh</forename><surname>Bhojanapalli</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.04418</idno>
+		<title level="m">Functional interpolation for relative positions improves long context transformers</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<analytic>
+		<title level="a" type="main">Eagle: Speculative sampling requires rethinking feature uncertainty</title>
+		<author>
+			<persName><forename type="first">Yuhui</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fangyun</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chao</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongyang</forename><surname>Zhang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<monogr>
+		<title level="m" type="main">Repobench: Benchmarking repository-level code auto-completion systems</title>
+		<author>
+			<persName><forename type="first">Tianyang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Canwen</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julian</forename><surname>Mcauley</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2306.03091" />
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Swin transformer: Hierarchical vision transformer using shifted windows</title>
+		<author>
+			<persName><forename type="first">Ze</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yutong</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yue</forename><surname>Cao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Han</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yixuan</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zheng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baining</forename><surname>Guo</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF international conference on computer vision</title>
+		<meeting>the IEEE/CVF international conference on computer vision</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="10012" to="10022" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<title level="m" type="main">Llm-qat: Data-free quantization aware training for large language models</title>
+		<author>
+			<persName><forename type="first">Zechun</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Barlas</forename><surname>Oguz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Changsheng</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ernie</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierre</forename><surname>Stock</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yashar</forename><surname>Mehdad</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yangyang</forename><surname>Shi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Raghuraman</forename><surname>Krishnamoorthi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vikas</forename><surname>Chandra</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.17888</idno>
+		<ptr target="https://arxiv.org/abs/2305.17888" />
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Scissorhands: Exploiting the persistence of importance hypothesis for llm kv cache compression at test time</title>
+		<author>
+			<persName><forename type="first">Zichang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aditya</forename><surname>Desai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fangshuo</forename><surname>Liao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weitao</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Victor</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhaozhuo</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anastasios</forename><surname>Kyrillidis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anshumali</forename><surname>Shrivastava</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<monogr>
+		<title level="m" type="main">Codexglue: A machine learning benchmark dataset for code understanding and generation</title>
+		<author>
+			<persName><forename type="first">Shuai</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daya</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuo</forename><surname>Ren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junjie</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Svyatkovskiy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ambrosio</forename><surname>Blanco</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Colin</forename><surname>Clement</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dawn</forename><surname>Drain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daxin</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Duyu</forename><surname>Tang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2102.04664</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<analytic>
+		<title level="a" type="main">Stable, fast and accurate: Kernelized attention with relative positional encoding</title>
+		<author>
+			<persName><forename type="first">Shengjie</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shanda</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianle</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Di</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dinglan</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuxin</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guolin</forename><surname>Ke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liwei</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tie-Yan</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="page" from="22795" to="22807" />
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">Your transformer may not be as powerful as you expect</title>
+		<author>
+			<persName><forename type="first">Shengjie</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shanda</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuxin</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tie-Yan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liwei</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Di</forename><surname>He</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="4301" to="4315" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">One transformer can understand both 2d &amp; 3d molecular data</title>
+		<author>
+			<persName><forename type="first">Shengjie</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianlang</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yixian</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuxin</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tie-Yan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liwei</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Di</forename><surname>He</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=vZTp1oPV3PC" />
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">Llm-pruner: On the structural pruning of large language models</title>
+		<author>
+			<persName><forename type="first">Xinyin</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gongfan</forename><surname>Fang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinchao</forename><surname>Wang</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/pdf/2305.11627.pdf" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems (NeurIPS)</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<monogr>
+		<author>
+			<persName><forename type="first">Xupeng</forename><surname>Miao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriele</forename><surname>Oliaro</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhihao</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinhao</forename><surname>Cheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeyu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rae</forename><surname>Ying</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yee</forename><surname>Wong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhuoming</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daiyaan</forename><surname>Arfeen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Reyna</forename><surname>Abhyankar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhihao</forename><surname>Jia</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Specinfer</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.09781</idno>
+		<ptr target="https://arxiv.org/abs/2305.09781" />
+		<title level="m">Accelerating generative llm serving with speculative inference and token tree verification</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<monogr>
+		<author>
+			<persName><forename type="first">Gunho</forename><surname>Park</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baeseong</forename><surname>Park</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Se</forename><surname>Jung Kwon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Byeongwook</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Youngjoo</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dongsoo</forename><surname>Lee</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2206.09557</idno>
+		<ptr target="https://arxiv.org/abs/2206.09557" />
+		<title level="m">Quantized matmul for efficient inference of large-scale generative language models</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<analytic>
+		<title level="a" type="main">Efficiently scaling transformer inference</title>
+		<author>
+			<persName><forename type="first">Reiner</forename><surname>Pope</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sholto</forename><surname>Douglas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aakanksha</forename><surname>Chowdhery</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Devlin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Bradbury</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Heek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kefan</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shivani</forename><surname>Agrawal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeff</forename><surname>Dean</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of Machine Learning and Systems</title>
+		<meeting>Machine Learning and Systems</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">5</biblScope>
+			<biblScope unit="page" from="606" to="624" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<analytic>
+		<title level="a" type="main">Train short, test long: Attention with linear biases enables input length extrapolation</title>
+		<author>
+			<persName><forename type="first">Ofir</forename><surname>Press</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noah</forename><surname>Smith</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mike</forename><surname>Lewis</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations (ICLR)</title>
+		<imprint>
+			<biblScope unit="page">2022</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<analytic>
+		<title level="a" type="main">Blockwise selfattention for long document understanding</title>
+		<author>
+			<persName><forename type="first">Jiezhong</forename><surname>Qiu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Omer</forename><surname>Levy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wen-Tau</forename><surname>Yih</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sinong</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Tang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Findings of the Association for Computational Linguistics: EMNLP 2020</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="2555" to="2565" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<analytic>
+		<title level="a" type="main">Exploring the limits of transfer learning with a unified text-to-text transformer</title>
+		<author>
+			<persName><forename type="first">Colin</forename><surname>Raffel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Roberts</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katherine</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sharan</forename><surname>Narang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Matena</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanqi</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><forename type="middle">J</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">The Journal of Machine Learning Research</title>
+		<imprint>
+			<biblScope unit="volume">21</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="5485" to="5551" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<analytic>
+		<title level="a" type="main">Efficient content-based sparse attention with routing transformers</title>
+		<author>
+			<persName><forename type="first">Aurko</forename><surname>Roy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mohammad</forename><surname>Saffar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashish</forename><surname>Vaswani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Grangier</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Transactions of the Association for Computational Linguistics</title>
+		<imprint>
+			<biblScope unit="volume">9</biblScope>
+			<biblScope unit="page" from="53" to="68" />
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<monogr>
+		<title level="m" type="main">Code llama: Open foundation models for code</title>
+		<author>
+			<persName><forename type="first">Jonas</forename><surname>Baptiste Roziere</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fabian</forename><surname>Gehring</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sten</forename><surname>Gloeckle</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Itai</forename><surname>Sootla</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Gat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ellen</forename><surname>Xiaoqing</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yossi</forename><surname>Tan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jingyu</forename><surname>Adi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Romain</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tal</forename><surname>Sauvestre</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Remez</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2308.12950</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<monogr>
+		<title level="m" type="main">Distilbert, a distilled version of bert: smaller, faster, cheaper and lighter</title>
+		<author>
+			<persName><forename type="first">Victor</forename><surname>Sanh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lysandre</forename><surname>Debut</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Chaumond</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Wolf</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1910.01108</idno>
+		<ptr target="https://arxiv.org/abs/1910.01108" />
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<analytic>
+		<title level="a" type="main">Self-attention with relative position representations</title>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Shaw</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakob</forename><surname>Uszkoreit</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashish</forename><surname>Vaswani</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Association for Computational Linguistics (ACL)</title>
+		<imprint>
+			<date type="published" when="2018-06">June 2018</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b47">
+	<analytic>
+		<title level="a" type="main">Flexgen: High-throughput generative inference of large language models with a single gpu</title>
+		<author>
+			<persName><forename type="first">Ying</forename><surname>Sheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lianmin</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Binhang</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhuohan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Max</forename><surname>Ryabinin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Beidi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Percy</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Ré</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ion</forename><surname>Stoica</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ce</forename><surname>Zhang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<publisher>PMLR</publisher>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="31094" to="31116" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b48">
+	<monogr>
+		<title level="m" type="main">Accelerating llm inference with staged speculative decoding</title>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Spector</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><surname>Re</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2308.04623</idno>
+		<ptr target="https://arxiv.org/abs/2308.04623" />
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b49">
+	<analytic>
+		<title level="a" type="main">Blockwise parallel decoding for deep autoregressive models</title>
+		<author>
+			<persName><forename type="first">Mitchell</forename><surname>Stern</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakob</forename><surname>Uszkoreit</surname></persName>
+		</author>
+		<ptr target="https://proceedings.neurips.cc/paperfiles/paper/2018/file/c4127" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems (NeurIPS)</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+	<note>b9194fe8562c64dc0f5bf2c93bc-Paper.pdf</note>
+</biblStruct>
+
+<biblStruct xml:id="b50">
+	<monogr>
+		<title level="m" type="main">Roformer: Enhanced transformer with rotary position embedding</title>
+		<author>
+			<persName><forename type="first">Jianlin</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengfeng</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ahmed</forename><surname>Murtadha</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Wen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunfeng</forename><surname>Liu</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b51">
+	<analytic>
+		<title level="a" type="main">A length-extrapolatable transformer</title>
+		<author>
+			<persName><forename type="first">Yutao</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Li</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Barun</forename><surname>Patra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuming</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shaohan</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alon</forename><surname>Benhaim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vishrav</forename><surname>Chaudhary</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xia</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Furu</forename><surname>Wei</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics</title>
+		<meeting>the 61st Annual Meeting of the Association for Computational Linguistics</meeting>
+		<imprint>
+			<publisher>Long Papers). Association for Computational Linguistics</publisher>
+			<date type="published" when="2023-07">July 2023</date>
+			<biblScope unit="volume">1</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b52">
+	<analytic>
+		<title level="a" type="main">Intellicode compose: Code generation using transformer</title>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Svyatkovskiy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengyu</forename><surname>Shao Kun Deng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Neel</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Sundaresan</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 28th ACM joint meeting on European software engineering conference and symposium on the foundations of software engineering</title>
+		<meeting>the 28th ACM joint meeting on European software engineering conference and symposium on the foundations of software engineering</meeting>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="1433" to="1443" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b53">
+	<analytic>
+		<title level="a" type="main">Sparse sinkhorn attention</title>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Tay</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dara</forename><surname>Bahri</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liu</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Donald</forename><surname>Metzler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Da-Cheng</forename><surname>Juan</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="9438" to="9447" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b54">
+	<monogr>
+		<title level="m" type="main">Llama 2: Open foundation and fine-tuned chat models</title>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Louis</forename><surname>Martin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevin</forename><surname>Stone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Albert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amjad</forename><surname>Almahairi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yasmine</forename><surname>Babaei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikolay</forename><surname>Bashlykov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Soumya</forename><surname>Batra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prajjwal</forename><surname>Bhargava</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shruti</forename><surname>Bhosale</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2307.09288</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b55">
+	<analytic>
+		<title level="a" type="main">Attention is all you need</title>
+		<author>
+			<persName><forename type="first">Ashish</forename><surname>Vaswani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Niki</forename><surname>Parmar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakob</forename><surname>Uszkoreit</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Llion</forename><surname>Jones</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aidan</forename><forename type="middle">N</forename><surname>Gomez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Łukasz</forename><surname>Kaiser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Illia</forename><surname>Polosukhin</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems (NeurIPS)</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+			<biblScope unit="page">30</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b56">
+	<analytic>
+		<title level="a" type="main">Spatten: Efficient sparse attention architecture with cascade token and head pruning</title>
+		<author>
+			<persName><forename type="first">Hanrui</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhekai</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Song</forename><surname>Han</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2012.09852" />
+	</analytic>
+	<monogr>
+		<title level="m">2021 IEEE International Symposium on High-Performance Computer Architecture (HPCA)</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b57">
+	<monogr>
+		<title level="m" type="main">Linformer: Self-attention with linear complexity</title>
+		<author>
+			<persName><forename type="first">Sinong</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Belinda</forename><forename type="middle">Z</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Madian</forename><surname>Khabsa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Han</forename><surname>Fang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Ma</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2006.04768</idno>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b58">
+	<analytic>
+		<title level="a" type="main">Transformers: State-of-the-art natural language processing</title>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Wolf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lysandre</forename><surname>Debut</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Victor</forename><surname>Sanh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Chaumond</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clement</forename><surname>Delangue</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anthony</forename><surname>Moi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierric</forename><surname>Cistac</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tim</forename><surname>Rault</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rémi</forename><surname>Louf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Morgan</forename><surname>Funtowicz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joe</forename><surname>Davison</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Shleifer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clara</forename><surname>Patrick Von Platen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yacine</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Jernite</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Canwen</forename><surname>Plu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Teven</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sylvain</forename><surname>Le Scao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mariama</forename><surname>Gugger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quentin</forename><surname>Drame</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><forename type="middle">M</forename><surname>Lhoest</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Rush</surname></persName>
+		</author>
+		<ptr target="https://www.aclweb.org/anthology/2020.emnlp-demos" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing: System Demonstrations</title>
+		<meeting>the 2020 Conference on Empirical Methods in Natural Language Processing: System Demonstrations<address><addrLine>Online</addrLine></address></meeting>
+		<imprint>
+			<publisher>Association for Computational Linguistics</publisher>
+			<date type="published" when="2020-10">October 2020</date>
+			<biblScope unit="page" from="38" to="45" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b59">
+	<analytic>
+		<title level="a" type="main">Smoothquant: Accurate and efficient post-training quantization for large language models</title>
+		<author>
+			<persName><forename type="first">Guangxuan</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ji</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mickael</forename><surname>Seznec</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Demouth</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Song</forename><surname>Han</surname></persName>
+		</author>
+		<ptr target="https://proceedings.mlr.press/v202/xiao23c/xiao23c.pdf" />
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning (ICML)</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b60">
+	<analytic>
+		<title level="a" type="main">Efficient streaming language models with attention sinks</title>
+		<author>
+			<persName><forename type="first">Guangxuan</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuandong</forename><surname>Tian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Beidi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Song</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mike</forename><surname>Lewis</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=NG7sS51zVF" />
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b61">
+	<analytic>
+		<title level="a" type="main">Zeroquant: Efficient and affordable post-training quantization for large-scale transformers</title>
+		<author>
+			<persName><forename type="first">Zhewei</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Reza</forename><surname>Yazdani Aminabadi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Minjia</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaoxia</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Conglong</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuxiong</forename><surname>He</surname></persName>
+		</author>
+		<ptr target="https://proceedings.neurips.cc/paperfiles/paper/2022/file/adf" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems (NeurIPS)</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note>fa39d65e2983d724ff7da57f00ac-Paper-Conference.pdf</note>
+</biblStruct>
+
+<biblStruct xml:id="b62">
+	<analytic>
+		<title level="a" type="main">Do transformers really perform badly for graph representation?</title>
+		<author>
+			<persName><forename type="first">Chengxuan</forename><surname>Ying</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianle</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengjie</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuxin</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guolin</forename><surname>Ke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Di</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanming</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tie-Yan</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="page" from="28877" to="28888" />
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b63">
+	<analytic>
+		<title level="a" type="main">GLM-130b: An open bilingual pre-trained model</title>
+		<author>
+			<persName><forename type="first">Aohan</forename><surname>Zeng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhengxiao</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zihan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hanyu</forename><surname>Lai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ming</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhuoyi</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yifan</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wendi</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weng</forename><surname>Lam Tam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zixuan</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yufei</forename><surname>Xue</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jidong</forename><surname>Zhai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenguang</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyuan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuxiao</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Tang</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=-Aw0rrrPUF" />
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b64">
+	<analytic>
+		<title level="a" type="main">Rethinking the expressive power of GNNs via graph biconnectivity</title>
+		<author>
+			<persName><forename type="first">Bohang</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengjie</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liwei</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Di</forename><surname>He</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=r9hNv76KoT3" />
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations, 2023a</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b65">
+	<monogr>
+		<title level="m" type="main">Draft &amp; verify: Lossless large language model acceleration via self-speculative decoding</title>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jue</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lidan</forename><surname>Shou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ke</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gang</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sharad</forename><surname>Mehrotra</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2309.08168</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b66">
+	<analytic>
+		<title level="a" type="main">H2o: Heavy-hitter oracle for efficient generative inference of large language models</title>
+		<author>
+			<persName><forename type="first">Zhenyu</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><surname>Sheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianyi</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianlong</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lianmin</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruisi</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhao</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuandong</forename><surname>Tian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Ré</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clark</forename><surname>Barrett</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b67">
+	<analytic>
+		<title level="a" type="main">Codegeex: A pre-trained model for code generation with multilingual benchmarking on humaneval-x</title>
+		<author>
+			<persName><forename type="first">Qinkai</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xu</forename><surname>Zou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuxiao</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yufei</forename><surname>Xue</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lei</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zihan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Li</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining</title>
+		<meeting>the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="5673" to="5684" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

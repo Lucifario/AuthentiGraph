@@ -1,0 +1,619 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 DIFFERENTIABLE IMPLICIT SOLVER ON GRAPH NEU-RAL NETWORKS FOR FORWARD AND INVERSE PROB-LEMS</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 DIFFERENTIABLE IMPLICIT SOLVER ON GRAPH NEU-RAL NETWORKS FOR FORWARD AND INVERSE PROB-LEMS</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">2C404265ED2BA6D935A316A32238BDEA</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:12+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Partial differential equations (PDEs) on unstructured grids can be solved using message passing on a graph neural network (GNN). Implicit time-stepping schemes are often favored, especially for parabolic PDEs, due to their stability properties. In this work, we develop a fully differentiable implicit solver for unstructured grids. We evaluate its performance across four key tasks: a) forward modeling of stiff evolutionary and static problems; b) the inverse problem of estimating equation coefficients; c) the inverse problem of estimating the right-hand side; and d) graph coarsening to accelerate forward modeling. The increased stability and differentiability of our solver enable excellent results in reducing the complexity of forward modeling and efficiently solving related inverse problems. This makes it a promising tool for geoscience and other physics-based applications.</p><p>Figure <ref type="figure">1</ref>: Differentiable modeling pipeline developed in this work combines graph neural networks, the finite-volume method, implicit time-stepping and can be applied to optimization in forward and inverse problems.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>In recent years, graph neural networks (GNNs) have emerged as a powerful tool for handling data on unstructured grids <ref type="bibr" target="#b11">(Kipf &amp; Welling, 2017;</ref><ref type="bibr" target="#b19">Veličković et al., 2018;</ref><ref type="bibr" target="#b8">Hamilton et al., 2017;</ref><ref type="bibr" target="#b20">Xu et al., 2019)</ref>. By leveraging message-passing mechanisms, GNNs are highly effective at capturing local dependencies and updating node features through their connections. This capability has sparked Under review as a conference paper at ICLR 2025 increasing interest in applying GNNs to PDE solvers, particularly in problems where the data is naturally represented as a graph, such as Voronoi grids and finite-volume discretizations.</p><p>Implicit deep learning, El <ref type="bibr" target="#b3">Ghaoui et al. (2021)</ref>, also referred as deep equilibrium models (DEQ), substitutes conventional activation functions at a particular layers with a non-linear equilibrium equation completed with a prediction equation. DEQ combined with GNNs are known as implicit GNNs, <ref type="bibr" target="#b7">Gu et al. (2021)</ref>. Their benefit is that data propagates instantly within the graph, rather than with finite speed as in case of conventional deep learning.</p><p>The finite-volume (FV) method is a well-established numerical technique for solving PDEs, especially on unstructured grids, as it ensures local conservation properties. Integrating FV methods with GNN-based solvers provides a structured, grid-free representation of the domain, while preserving a rigorous framework for solving governing equations. In this context, the development of differentiable solvers is an especially promising research direction.</p><p>One key advancement explored in this work is the application of automatic differentiation (AD) Naumann (2012) within GNN-based solvers, particularly for tasks such as graph coarsening and solving inverse problems. AD has proven to be an invaluable tool for efficient gradient-based optimization, especially when combined with deep learning models, enabling end-to-end differentiable pipelines. The use of AD in inverse problems involving hyperbolic equations was demonstrated in <ref type="bibr" target="#b7">Zhu et al. (2021)</ref>.</p><p>In our work, we focus on parabolic partial-differential equations, which are crucial in various applications, including engineering and the oil and gas industry. However, the high stiffness of the resulting evolutionary problems necessitates the use of implicit time-stepping schemes due to their stability properties. Additionally, we address elliptic partial-differential equations, where a distinctive challenge lies in solving large, sparse linear systems.</p><p>Although some automatic differentiation (AD) libraries support implicit relations between variables (e.g., JAX), their capabilities for handling sparse linear solvers are currently quite limited. To address this, we developed custom autograd functions tailored to our needs.</p><p>Building on this foundation, we propose an integrated approach that combines GNNs, finitevolume methods, implicit time-stepping, and automatic differentiation to create a fully differentiable pipeline for both forward and inverse modeling. Our approach ensures differentiability with respect to various components, including grid cell locations, PDE coefficients, and the right-hand side, providing a flexible and robust framework for tackling both forward modeling and inverse problems. Specifically, we focus on the following key applications:</p><p>• Forward modeling of stiff evolutionary and static problems;</p><p>• Solving inverse problems to estimate equation coefficients;</p><p>• Solving inverse problems to estimate unknown right-hand side terms;</p><p>• Graph coarsening to accelerate forward modeling.</p><p>We demonstrate the capability of the proposed approach to effectively address all these problem types, showcasing its flexibility and ease of implementation for geoscience and other PDE-based applications.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">METHODOLOGY</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.1">GOVERNING EQUATIONS</head><p>In this work, we mainly consider a parabolic partial-differential equation in some domain V ,</p><formula xml:id="formula_0">∂u ∂t -div(K∇u) = f, 0 &lt; t &lt; T, (x, y) ∈ V,<label>(1)</label></formula><p>where u(x, y, t) is the unknown variable, K(x, y) is some known coefficient, f (x, y, t) is the source term. The above equation is completed with the initial condition p = p 0 (x, y) at t = 0 and zero Neumann boundary conditions on the domain boundary.</p><p>Assume that we given with a set of points C s , 1 ≤ s ≤ N . We use them to generate a Voronoi grid, (1). The a numerical solution to (1) can be received by combining the finite volume method for spatial discretization ( <ref type="bibr" target="#b4">(Eymard et al., 2000)</ref>, <ref type="bibr" target="#b13">(Kuznetsov et al., 2007)</ref>) and the implicit Euler scheme for temporal discretization,</p><formula xml:id="formula_1">D u k+1 -u k τ + A • u k+1 = Df k+1 , 0 ≤ k ≤ n -1. (<label>2</label></formula><formula xml:id="formula_2">)</formula><p>where u k ∈ R N , 0 ≤ k ≤ n is the numerical solution at the respective time step, A is the finite volume matrix, D is the diagonal matrix of Voronoi cells areas, and f k is the source vector.</p><p>We implemented the finite volume method within the graph neural network (GNN) framework with the message passing paradigm. Our GNN solver uses weights for the edges of the graph,</p><formula xml:id="formula_3">w ij = -A ij .<label>(3)</label></formula><p>Since every non-zero off-diagonal matrix entry corresponds to some edge of the graph, the GNN implements multiplication, A • u k .</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.2">PROBLEM SETUP</head><p>Optimization in both static and evolutionary forward and inverse problems can be written in the following form,</p><formula xml:id="formula_4">L(θ) = n k=1 ∥R • u k (θ) -u k obs ∥ 2 + S(θ),<label>(4)</label></formula><p>where θ ∈ R M is an unknown parameter requiring estimation, n is the number of temporal measurements (1 for static problems),</p><formula xml:id="formula_5">u k (θ) ∈ R N modelled variable, R : R N → R m is the measurement operator, u k obs ∈ R m</formula><p>is measured data at the temporal point k, and S(θ) is a stabilizer. The role of operator R is to simply keep in a given vector several entries (wherever sensors are located) while removing the other entries.</p><p>Both static problems and evolutionary problems involving implicit time-stepping will require solution of a large sparse equation system,</p><formula xml:id="formula_6">A(θ) • u k (θ) = f k (θ), 1 ≤ k ≤ n,<label>(5)</label></formula><p>forming a constraint to (4).</p><p>A naive approach might be to eliminate u k (θ) and received an unconstrained optimization problem,</p><formula xml:id="formula_7">L(θ) = n k=1 ∥R • A(θ) -1 • f k (θ) -u k obs ∥ 2 + S(θ),<label>(6)</label></formula><p>However, this is not feasible since A(θ) -1 is a large dense matrix not suitable for manipulations including backward propagation. Practically, ( <ref type="formula" target="#formula_6">5</ref>) is solved with either a direct or preconditioned iterative solver.</p><p>Let us notice the following. Firstly, automatic differentiation systems that are typically used for minimization of (4), may not process implicit relations like ( <ref type="formula" target="#formula_6">5</ref>), e.g. PyTorch. Secondly, custom developed fast solvers are commonly linked to solve (5). To address both of these cases, we will derive formulae for forward and backward propagations in the next subsection.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.3">FORWARD AND BACKWARD PROPAGATION</head><p>We will assume that the system matrix in ( <ref type="formula" target="#formula_6">5</ref>) is symmetric and positive-definite, which typically the case within implicit time-stepping and static problems. Let us rewrite the system as</p><formula xml:id="formula_8">A • u = b or j a ij u j = b i ,<label>(7)</label></formula><p>for brevity. The matrix A is large and sparse thus special formats are used to store its non-zero values only, e.g. compressed sparse row (CSR) or coordinate (COO) formats.</p><p>Under review as a conference paper at ICLR 2025</p><p>During the forward propagation stage, we have to solve ( <ref type="formula" target="#formula_8">7</ref>), what could be formally written as,</p><formula xml:id="formula_9">u = A -1 • b. (8)</formula><p>Practical algorithms avoid storing A -1 and multiplication by it.</p><p>During the backward propagation stage, we have to compute the gradients of u with respect to A and b. The gradient with respect to b could be found as follows,</p><formula xml:id="formula_10">j a ij ∂u j ∂b k = δ ik , thus ∇ b u = A -1 .<label>(9)</label></formula><p>The gradient with respect to A has the following form,</p><formula xml:id="formula_11">j ∂a ij ∂a km u j + j a ij ∂u j ∂a km = 0, thus ∇ A u = -A -1 • P • u. (<label>10</label></formula><formula xml:id="formula_12">)</formula><p>where P is a perturbation matrix, i.e. a matrix of zeros with just a single entry of 1.</p><p>Now, these expressions can used to compute the gradient of the loss L with respect to A and b efficiently. Notice</p><formula xml:id="formula_13">∇ b L = ∇ u L • ∇ b u, and ∇ A L = ∇ u L • ∇ A u,<label>(11)</label></formula><p>where ∇ u L is the gradient of the loss with respect to the solution u, propagated back from subsequent stages in the computational graph.</p><p>Substituting ( <ref type="formula" target="#formula_10">9</ref>) and ( <ref type="formula" target="#formula_11">10</ref>) into (11), we receive,</p><formula xml:id="formula_14">∇ b L = ∇ u L • A -1 ,<label>(12)</label></formula><p>and</p><formula xml:id="formula_15">∇ A L = -∇ u L • A -1 • P • u = -∇ b L • P • u.<label>(13)</label></formula><p>The last expressions imply the following computational algorithm the backward propagation stage :</p><p>1. Compute ∇ b L with (12), which is equivalent to solving of a single linear system.</p><p>2. Compute ∇ A L by multiplying the respective entries of ∇ b L and -u by each other.</p><p>Thus computational complexity of the backward propagation stage is equivalent to the complexity solution of a single equation system. Since A is stored in a sparse matrix format, ( <ref type="formula" target="#formula_15">13</ref>) is reduced to differentiating only non-zero entries.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">EXPERIMENTS</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.1">IMPLEMENTATION</head><p>Our differentiable graph simulator is implemented based on the message passing paradigm in a graph neural networks. For implementing such a solver, we used Pytorch Geometric <ref type="bibr" target="#b5">Fey &amp; Lenssen (2019)</ref> framework. Formalas ( <ref type="formula" target="#formula_14">12</ref>) and ( <ref type="formula" target="#formula_15">13</ref>) were implemented in a PyTorch custom autograd function.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">FORWARD MODELLING AND ITS ACCELERATION</head><p>Let a polygonal domain be filled with heterogeneous porous media. We assume that a slightly compressible fluid is injected at one point and pressure is measured at some other points. With minor simplifications <ref type="bibr" target="#b2">(Chen, 2007</ref>) the fluid flow is described by the parabolic equation, (1).</p><p>In this experiment, the coarsening process is driven by a graph neural network (GNN), which learns soft cluster assignments to map nodes from the fine grid to coarser clusters. The GNN is composed of graph convolutions followed by an MLP, and it represents a learnable aggregation function θ.</p><p>The aggregation function θ learns how to combine the node features from the fine grid into coarse representations, ensuring that key physical properties are preserved during the coarsening process. The feature aggregation is mathematically represented as:</p><formula xml:id="formula_16">c j = N i=1 S ij x i N i=1 S ij ,<label>(14)</label></formula><p>where c j is the centroid feature for cluster j, x i is the feature vector for node i, and S ij is the soft assignment of node i to cluster j.</p><p>The fine modeling grid had 400 cells, Fig. <ref type="figure" target="#fig_0">2 a</ref>). We used the time step, τ , of 0.1 s. The pressure was computed at two measurement points. The respective time series are shown in Fig. <ref type="figure" target="#fig_0">2 c</ref>). Although the measurement points are symmetric with respect to the source, they are located in the areas of different permeability, leading to different pressure growth rates.</p><p>In this experiment, minimization of (4) was performed with Adam optimizer and no stabilizer. We picked a coarse grid with 33 cells and tried to optimize it minimizing the misfit between pressure values on the coarse and fine grids over time. An approximately optimal grid was received after 160 epochs, Fig. <ref type="figure" target="#fig_0">2 b</ref>).</p><p>The results demonstrate that the coarse grid maintains high fidelity to the original simulation while significantly accelerating the modeling process (from 400 unknowns to 33). We compared the implicit scheme (2) versus a much easier to implement explicit scheme, Shumilin et al.. The explicit scheme does not involve equation system solution thus computational expenses at every time are quite modest (comparable to matrix-vector multiplication). However, the time step size is limited by a quite restrictive stability condition. Table <ref type="table" target="#tab_0">1</ref> gives a numerical illustration. We see that although each time step of the implicit scheme is more computationally expensive, the overall computational time is more than a 1500 time smaller. Fig. <ref type="figure">3</ref> shows that the pressure computed with implicit and explicit schemes match quite well.  <ref type="table" target="#tab_0">20×20 0.01 100 0.63 5e-6 2e+5 290  40×40 0.01 100 1.55 1e-6 1e+6 2520</ref> Figure <ref type="figure">3</ref>: Pressure computed with either implicit or explicit scheme.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.3">COEFFICIENT INVERSE PROBLEM</head><p>Estimation of a poorly known partial-differential equation coefficient describing properties of some heterogeneous medium is of paramount importance in many applications, especially geoscience and geophysics.</p><p>We consider a setup similar to the previous experiment. However, now we will assume that the true permeability, K, is unknown. This problem is known as history matching in petroleum engineering. We will estimate the permeability by minimizing the following functional,</p><formula xml:id="formula_17">L(K) = T 0 m i=1 w i (t) p i mod (t) -p i obs (t) 2 dt + β V |∇K| 2 dxdy,<label>(15)</label></formula><p>constrained with (1) and K(x, y) &gt; 0. Here, the first term represents data misfit, while the second term is a stabilizer promoting permeability smoothness.</p><p>In our experiment, pressure was measured at two spatial locations, m = 2 and at 100 temporal points, τ = 0.1s, T = 10s, Fig. <ref type="figure" target="#fig_1">4 a</ref>) and c). The Voronoi grid was formed from a graph of 400 randomly perturbed vertices.</p><p>We applied the Adam optimizer to (15) stating with with K = 1 and continued for 250 epochs. Decent data fit was archived after 150 epochs, Fig. <ref type="figure" target="#fig_1">4 d</ref>). The recovered permeability, Fig. <ref type="figure" target="#fig_1">4</ref> b), has main features of the true one: the lower left area of lower permeability, the upper right area of higher permeability.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.4">INVERSE SOURCE PROBLEM</head><p>Another type of an inverse problem that is commonly encountered in geosciences and geophysics is to estimate the right-hand of a partial-differential equation. We will proceed with a setting that is referred as self-potential method, <ref type="bibr" target="#b17">Revil &amp; Jardani (2013)</ref>. The goal is to estimate direct current source density based on the observations of the electric potential. They are related by the equation,</p><formula xml:id="formula_18">-div(σ∇u) = f.<label>(16)</label></formula><p>The above equation was considered in a rectangular domain, completed Dirichlet on the bottom side and Neumann boundary on the other three sides. Here σ is known electrical conductivity, u is the electric potential, f is source density. Although, the equation is static, its numerical solution will involve solution of a large sparse linear system, making it similar to implicit time stepping. The source density is estimated by minimizing the following functional,</p><formula xml:id="formula_19">L(f ) = n i=1 w i u i mod -u i obs 2 + γ V |κ∇f | 2 dxdy + δ V f 2 dxdy,<label>(17)</label></formula><p>where the first term represents data misfit; the second term is a stabilizer promoting smoothness with κ being a variable coefficient needed to compensate decrease of sensitivity with depth; the third term is a stabilizer promoting sources with smaller energy; γ and δ are trade-off scalar parameters.</p><p>In this experiment, the Voronoi grid was formed from a graph of 900 randomly perturbed vertices. The electric potential was measured at n = 28 points on the upper side of the domain, Fig. <ref type="figure" target="#fig_3">5 a</ref>). The true right-hand side was formed by a source in the left part of the domain and a sink in the right part. Observed data, u obs , was received by solving ( <ref type="formula" target="#formula_18">16</ref>) and adding 10% noise. Notice this problem was highly under-determined: we estimated the values of 900 unknowns based on 28.</p><p>We applied the Adam optimizer to (17) stating with with f = 0 and continued for 100 epochs. We observed good data fit and convergence of the optimizer,  </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">RELATED WORK</head><p>A large number works of recent works can be characterized as surrogate modelling. For forward problems, the idea idea it approximate the equation Green's function, e.g., <ref type="bibr" target="#b1">Alet et al. (2019)</ref> or <ref type="bibr" target="#b15">Nastorg et al. (2024)</ref> involving implicit GNN. For inverse problems, the idea is approximate the inverse to the possibly non-linear forward operator using a given dataset. For example, <ref type="bibr" target="#b21">Zhao et al. (2022)</ref> involved GNN for this task. In <ref type="bibr" target="#b10">Jessica et al. (2023)</ref>, the author enriched GNN with novel geometric features for better prediction accuracy. The work of <ref type="bibr" target="#b9">Horie &amp; Mitsume (2024)</ref> suggested a learnable approach to compute fluxes in the FVM, motivated by convection-dominated problems. However, these approach typically requires massive datasets (GBs and TBs) and quite computationally demanding learning (100-1000s of GPU hours).</p><p>In the traditional approach to inverse problems, <ref type="bibr" target="#b22">Zhdanov (2002)</ref>, optimization on performed every new data. But this algorithms are implemented though derivation of the Jacobians. This derivations a tedious and prone-to-bugs task. Availability of AD pipeines can help to avoid it. The work of Zhu Under review as a conference paper at ICLR 2025 et al. ( <ref type="formula">2021</ref>) presented AD-based acoustic data inversion combined with explicit Euler temporal discretization of the wave equation. In our work, we followed a similar direction and showed how the implicit schemes can be incorporated into an AD pipeline and further combined with a GNN. Our work is close to PINNs, <ref type="bibr" target="#b16">Raissi et al. (2019)</ref>, <ref type="bibr" target="#b14">Lu et al. (2021)</ref>, and their extensions, graph convolutional PINN, <ref type="bibr" target="#b6">Gao et al. (2022)</ref>, since both of the approaches can be attributed as self-supervised.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">CONCLUSIONS</head><p>In this work, we integrated graph neural networks, the finite-volume method, and implicit timestepping to develop a fully differentiable modeling pipeline, applying it to both forward and inverse problems in geoscience. Our PyTorch-based pipeline is flexible and easy to implement, enabling the integration of new, fast solvers for large sparse linear systems.</p><p>For comparison, Shumilin et al. presented results on accelerating forward modeling using graph coarsening, which is somewhat similar to our approach in Section 3.2. However, their method encountered significant time-step limitations due to the use of an explicit scheme.</p><p>Our pipeline is highly efficient. In future work, we plan to address large-scale 3D problems and more complex equations, such as multi-phase fluid flow. Large-scale 3D modeling and inversion typically rely on custom preconditioned iterative solvers, as they offer both memory efficiency and fast convergence. Our pipeline's ability to easily integrate new solvers makes it particularly appealing for industrial applications.</p><p>In this work, we discussed coarsening within the context of forward modeling and data inversion.</p><p>An interesting future research direction would be to combine coarsening with inversion, allowing data inversion to be performed on an optimal coarse grid.</p><p>Under review as a conference paper at ICLR 2025 </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A CONSERVATION PROPERTY</head><p>In this appendix, we derive an expressions for energy balance and illustrate energy conservation numerically.</p><p>Let us integrate (1) over domain V . With help of the divergence theorem, we arrive to the following,</p><formula xml:id="formula_20">∂ ∂t V udV = V f dV. (<label>18</label></formula><formula xml:id="formula_21">)</formula><p>This equality states that source energy fully is converted to the change of solution energy.</p><p>The FVM allows to receive an identical discrete equality. </p><p>We see that FVM variables obey the same conservation property as the contentious ones.</p><p>Given the setup shown in Fig 4a ), we made a plot to illustrate (20). Fig. <ref type="figure" target="#fig_5">6</ref> shows total source energy and change of the solution energy at every time step. We observe that they are match identically. </p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 2 :</head><label>2</label><figDesc>Figure 2: Computational grid coarsening. a) Original grid, color indicates permeability, source marked with blued diamond, and two measurement points (1 &amp; 2) marked as black diamonds; b) coarsened grid; c) original and coarsened grid pressure data at two measurement points; d) loss function during 160 epochs of minimization.</figDesc><graphic coords="5,147.60,292.31,316.80,316.80" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 4 :</head><label>4</label><figDesc>Figure 4: Solution of the coefficient inverse problem. a) Original grid, color indicates permeability, source and two measurement points (1&amp;2); b) recovered permeability; c) pressure at two measurement points (data and prediction/fitting); d) loss function during 250 epochs of minimization.</figDesc><graphic coords="7,147.60,81.86,316.80,316.80" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head></head><label></label><figDesc>Fig. 4 c) and d). The recovered and Under review as a conference paper at ICLR 2025 true right-hand sides, Fig. 4 b) and a), posses common features: positive values in the left part and negative in the right. The recovered right-hand side is quite smeared. Also the locations of the extrema are biased. These artifacts were related to the measurement setup and impact of stabilizers. The use of more advanced stabilizers can further improve inversion results.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Figure 5 :</head><label>5</label><figDesc>Figure 5: Solution of the source inverse problem. a) True right-hand side and measurement points (black diamonds); magenta diamonds indicate the side where Dirichlet boundary condition was applied; Neumann boundary condition was applied on the other three sides; b) recovered right-hand side; c) observed data at measurement points with with noise added, u obs , (data) and prediction, u mod , (fitting); d) loss function during 100 epochs of minimization: physical loss (first term in (17)) and stabilizers (later terms in (17)).</figDesc><graphic coords="8,127.80,138.54,356.38,331.46" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head></head><label></label><figDesc>Multiplying (2) by vector e = (1 • • • 1) ∈ R N , we arrive to, 1 τ (e, D(u k+1 -u k )) + (e, Au k+1 ) = (e, Df k+1 ). (19) However, A is singular, thus the later expression is simplified to 1 τ (e, D(u k+1 -u k )) = (e, Df k+1 ).</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_5"><head>Figure 6 :</head><label>6</label><figDesc>Figure 6: Total source energy (green line) and change of the solution energy (crosses).</figDesc><graphic coords="11,197.10,401.75,217.80,164.78" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0"><head></head><label></label><figDesc></figDesc><graphic coords="1,137.70,387.94,336.60,200.05" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head>Table 1 :</head><label>1</label><figDesc>Comparison of implicit and explicit schemes: τ is the time step size, n is the number of time steps, T cpu is the computational time</figDesc><table><row><cell>grid</cell><cell cols="3">Implicit Scheme</cell><cell cols="3">Explicit Scheme</cell></row><row><cell></cell><cell>τ</cell><cell>n</cell><cell>T cpu</cell><cell>τ</cell><cell>n</cell><cell>T cpu</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head></head><label></label><figDesc>Weiqiang Zhu,Kailai Xu, Eric Darve, and Gregory C. Beroza. A general approach to seismic inversion with automatic differentiation. Computers and Geosciences, 151:104751, June 2021. ISSN 0098-3004. doi: 10.1016/j.cageo.2021.104751. URL http://dx.doi.org/10.1016/j. cageo.2021.104751.</figDesc><table /></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="6" xml:id="foot_0"><p>REPRODUCIBILITYOur implementation mainly follows the formulas derived in the manuscript. The source code is available upon written request.</p></note>
+		</body>
+		<back>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<author>
+			<persName><surname>Jax</surname></persName>
+		</author>
+		<ptr target="https://jax.readthedocs.io/en/latest/index.html" />
+		<title level="m">High performance array computing</title>
+		<imprint>
+			<biblScope unit="page" from="2024" to="2034" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<monogr>
+		<author>
+			<persName><forename type="first">Ferran</forename><surname>Alet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adarsh</forename><forename type="middle">K</forename><surname>Jeewajee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maria</forename><surname>Bauza</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alberto</forename><surname>Rodriguez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomas</forename><surname>Lozano-Perez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Leslie</forename><surname>Pack</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaelbling</forename></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/1904.09019" />
+		<title level="m">Graph element networks: adaptive, structured computation and memory</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Reservoir Simulation: Mathematical Techniques in Oil Recovery</title>
+		<author>
+			<persName><forename type="first">Zhangxin</forename><surname>Chen</surname></persName>
+		</author>
+		<idno type="DOI">10.1137/1.9780898717075</idno>
+		<ptr target="http://dx.doi.org/10.1137/1.9780898717075" />
+	</analytic>
+	<monogr>
+		<title level="j">Society for Industrial and Applied Mathematics</title>
+		<imprint>
+			<date type="published" when="2007-01">January 2007</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Implicit deep learning</title>
+		<author>
+			<persName><forename type="first">Laurent</forename><forename type="middle">El</forename><surname>Ghaoui</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fangda</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bertrand</forename><surname>Travacca</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Armin</forename><surname>Askari</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alicia</forename><surname>Tsai</surname></persName>
+		</author>
+		<idno type="DOI">10.1137/20M1358517</idno>
+		<ptr target="http://dx.doi.org/10.1137/20M1358517" />
+	</analytic>
+	<monogr>
+		<title level="j">SIAM Journal on Mathematics of Data Science</title>
+		<idno type="ISSN">2577-0187</idno>
+		<imprint>
+			<biblScope unit="volume">3</biblScope>
+			<biblScope unit="issue">3</biblScope>
+			<biblScope unit="page" from="930" to="958" />
+			<date type="published" when="2021-01">January 2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<analytic>
+		<title level="a" type="main">Finite volume methods</title>
+		<author>
+			<persName><forename type="first">Robert</forename><surname>Eymard</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thierry</forename><surname>Gallouët</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Raphaèle</forename><surname>Herbin</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/s1570-8659(00)07005-8</idno>
+		<ptr target="http://dx.doi.org/10.1016/s1570-8659(00" />
+	</analytic>
+	<monogr>
+		<title level="j">Elsevier</title>
+		<imprint>
+			<biblScope unit="page" from="7005" to="7008" />
+			<date type="published" when="2000">2000</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<monogr>
+		<title level="m" type="main">Fast graph representation learning with pytorch geometric</title>
+		<author>
+			<persName><forename type="first">Matthias</forename><surname>Fey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jan</forename><surname>Eric Lenssen</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/1903.02428" />
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Physics-informed graph neural galerkin networks: A unified framework for solving pde-governed forward and inverse problems</title>
+		<author>
+			<persName><forename type="first">Han</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><forename type="middle">J</forename><surname>Zahr</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian-Xun</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.cma.2021.114502</idno>
+		<ptr target="http://dx.doi.org/10.1016/j.cma.2021.114502" />
+	</analytic>
+	<monogr>
+		<title level="j">Computer Methods in Applied Mechanics and Engineering</title>
+		<idno type="ISSN">0045-7825</idno>
+		<imprint>
+			<biblScope unit="volume">390</biblScope>
+			<biblScope unit="page">114502</biblScope>
+			<date type="published" when="2022-02">February 2022</date>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<monogr>
+		<title level="m" type="main">Implicit graph neural networks</title>
+		<author>
+			<persName><forename type="first">Fangda</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heng</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenwu</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Somayeh</forename><surname>Sojoudi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laurent</forename><forename type="middle">El</forename><surname>Ghaoui</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2009.06211" />
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">Inductive representation learning on large graphs</title>
+		<author>
+			<persName><forename type="first">William</forename><forename type="middle">L</forename><surname>Hamilton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rex</forename><surname>Ying</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jure</forename><surname>Leskovec</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 31st International Conference on Neural Information Processing Systems, NIPS&apos;17</title>
+		<meeting>the 31st International Conference on Neural Information Processing Systems, NIPS&apos;17<address><addrLine>Red Hook, NY, USA</addrLine></address></meeting>
+		<imprint>
+			<publisher>Curran Associates Inc</publisher>
+			<date type="published" when="2017">2017</date>
+			<biblScope unit="page" from="1025" to="1035" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<monogr>
+		<title level="m" type="main">Graph neural pde solvers with conservation and similarityequivariance</title>
+		<author>
+			<persName><forename type="first">Masanobu</forename><surname>Horie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naoto</forename><surname>Mitsume</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2405.16183" />
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<title level="m" type="main">Finite volume features, global geometry representations, and residual training for deep learning-based cfd simulation</title>
+		<author>
+			<persName><forename type="first">Loh</forename><surname>Sher</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">En</forename><surname>Jessica</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naheed</forename><surname>Anjum Arafat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><forename type="middle">Xian</forename><surname>Lim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wai</forename><surname>Lee Chan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adams</forename><surname>Wai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kin</forename><surname>Kong</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2311.14464" />
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">Semi-supervised classification with graph convolutional networks</title>
+		<author>
+			<persName><forename type="first">N</forename><surname>Thomas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Max</forename><surname>Kipf</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Welling</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">ICLR</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<monogr>
+		<title/>
+		<author>
+			<persName><surname>Yu</surname></persName>
+		</author>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<analytic>
+		<title level="a" type="main">Numerical analysis of a two-level preconditioner for the diffusion equation with an anisotropic diffusion tensor</title>
+		<author>
+			<persName><forename type="first">A</forename><surname>Kuznetsov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">O</forename><forename type="middle">V</forename><surname>Boiarkine</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">I</forename><forename type="middle">V</forename><surname>Kapyrin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">N</forename><forename type="middle">B</forename><surname>Yavich</surname></persName>
+		</author>
+		<idno type="DOI">10.1515/rnam.2007.018</idno>
+		<ptr target="https://doi.org/10.1515/rnam.2007.018" />
+	</analytic>
+	<monogr>
+		<title level="j">Russian Journal of Numerical Analysis and Mathematical Modelling</title>
+		<imprint>
+			<biblScope unit="volume">22</biblScope>
+			<biblScope unit="issue">4</biblScope>
+			<biblScope unit="page" from="377" to="391" />
+			<date type="published" when="2007">2007</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Deepxde: A deep learning library for solving differential equations</title>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuhui</forename><surname>Meng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiping</forename><surname>Mao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">George</forename><forename type="middle">Em</forename><surname>Karniadakis</surname></persName>
+		</author>
+		<idno type="DOI">10.1137/19M1274067</idno>
+		<ptr target="https://doi.org/10.1137/19M1274067" />
+	</analytic>
+	<monogr>
+		<title level="j">SIAM Review</title>
+		<imprint>
+			<biblScope unit="volume">63</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="208" to="228" />
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Uwe Naumann. The art of differentiating computer programs : an introduction to algorithmic differentiation. SIAM, 1st edition</title>
+		<author>
+			<persName><forename type="first">Matthieu</forename><surname>Nastorg</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michele-Alessandro</forename><surname>Bucci</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thibault</forename><surname>Faney</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jean-Marc</forename><surname>Gratien</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guillaume</forename><surname>Charpiat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Schoenauer</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.camwa.2024.10.036</idno>
+		<ptr target="http://dx.doi.org/10.1016/j.camwa.2024.10.036" />
+	</analytic>
+	<monogr>
+		<title level="m">Computers &amp; Mathematics with Applications</title>
+		<imprint>
+			<date type="published" when="2012">December 2024. 2012</date>
+			<biblScope unit="volume">176</biblScope>
+			<biblScope unit="page" from="270" to="288" />
+		</imprint>
+	</monogr>
+	<note>An implicit gnn solver for poisson-like problems</note>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations</title>
+		<author>
+			<persName><forename type="first">M</forename><surname>Raissi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">P</forename><surname>Perdikaris</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">G</forename><forename type="middle">E</forename><surname>Karniadakis</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.jcp.2018.10.045</idno>
+		<ptr target="https://www.sciencedirect.com/science/article/pii/S0021999118307125" />
+	</analytic>
+	<monogr>
+		<title level="j">Journal of Computational Physics</title>
+		<idno type="ISSN">0021-9991</idno>
+		<imprint>
+			<biblScope unit="volume">378</biblScope>
+			<biblScope unit="page" from="686" to="707" />
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<monogr>
+		<title level="m" type="main">Forward and inverse modeling</title>
+		<author>
+			<persName><forename type="first">André</forename><surname>Revil</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abderrahim</forename><surname>Jardani</surname></persName>
+		</author>
+		<idno type="DOI">10.1017/CBO9781139094252.006</idno>
+		<ptr target="http://dx.doi.org/10.1017/CBO9781139094252.006" />
+		<imprint>
+			<date type="published" when="2013">2013</date>
+			<publisher>Cambridge University Press</publisher>
+			<biblScope unit="page" from="110" to="153" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">Self-supervised coarsening of unstructured grid with automatic differentiation</title>
+		<author>
+			<persName><forename type="first">Sergei</forename><surname>Shumilin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Ryabov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikolay</forename><surname>Yavich</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Evgeny</forename><surname>Burnaev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vladimir</forename><surname>Vanovskiy</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Forty-first International Conference on Machine Learning</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">Graph attention networks</title>
+		<author>
+			<persName><forename type="first">Petar</forename><surname>Veličković</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guillem</forename><surname>Cucurull</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arantxa</forename><surname>Casanova</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adriana</forename><surname>Romero</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pietro</forename><surname>Liò</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yoshua</forename><surname>Bengio</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=rJXMpikCZ" />
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">How powerful are graph neural networks?</title>
+		<author>
+			<persName><forename type="first">Keyulu</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weihua</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jure</forename><surname>Leskovec</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefanie</forename><surname>Jegelka</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=ryGs6iA5Km" />
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<title level="m" type="main">Learning to solve pde-constrained inverse problems with graph networks</title>
+		<author>
+			<persName><forename type="first">Qingqing</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><forename type="middle">B</forename><surname>Lindell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gordon</forename><surname>Wetzstein</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Geophysical Inverse Theory and Regularization Problems</title>
+		<author>
+			<persName><forename type="first">M</forename><forename type="middle">S</forename><surname>Zhdanov</surname></persName>
+		</author>
+		<ptr target="https://books.google.ru/books?id=tHtDETv7VCoC" />
+	</analytic>
+	<monogr>
+		<title level="m">Methods in Geochemistry and Geophysics</title>
+		<imprint>
+			<publisher>Elsevier Science</publisher>
+			<date type="published" when="2002">2002</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

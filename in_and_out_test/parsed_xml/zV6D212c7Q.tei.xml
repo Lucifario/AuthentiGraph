@@ -1,0 +1,2082 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 MASKED CROSS-ATTENTION ADAPTERS ENABLE THE CHARACTERIZATION OF DENSE FEATURES</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 MASKED CROSS-ATTENTION ADAPTERS ENABLE THE CHARACTERIZATION OF DENSE FEATURES</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">A1FF1B53D3CB6AF34A1C1E3B70574BC0</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:13+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Learning meaningful representations is a core topic of deep learning. Throughout the last decade, many strategies for learning image representations have been proposed involving supervision and self-supervision and various data sources. In most current work, evaluation is focused on classification tasks while neglecting dense prediction tasks, possibly because linear probing is more challenging in the latter case. Furthermore, dense prediction heads are often large and come with specific inductive biases that distort performance measurement further. In this work we propose masked cross-attention adapters (MAXA), a minimal adapter method that is capable of dense prediction independent of the size and resolution of the encoder output. This allows us to make dense predictions using a small number of additional parameters (&lt; 0.3%) while allowing for fast training using frozen backbones. Using this adapter, we run a comprehensive evaluation assessing instance awareness, local semantics and spatial representation of a diverse set of backbones. We find that DINOv2 outperforms all other backbones testedincluding those supervised with masks and language -across all three task categories.</p><p>Code is available at https://to.be.released.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>Computer vision builds to a large extent on a transfer learning-based paradigm. Instead of training specific tasks from scratch, large-scale models (foundation models) are pre-trained on a large dataset once. These models are often called backbone or feature extractor as they are used to address multiple specific tasks, for example through in-context learning, adapters or (often costly) finetuning. For pre-training the backbone, different variants exist, including classic supervised, selfsupervised, and vision-language training. The latter two variants tend to scale better as they are not constrained by availability of labels and can use the internet as a data source. Many factors influence the quality of the resulting backbone: the pre-training paradigm, model architecture, the training data. For both, computer vision scientists and practitioners, it is crucial to work out strengths and weaknesses of individual backbones through systematic benchmarks. Established approaches are linear and attentive probing. For (whole-image) classification performance such benchmarks are readily available (ImageNet <ref type="bibr" target="#b40">(Russakovsky et al., 2014)</ref>, VTAB <ref type="bibr" target="#b56">(Zhai et al., 2019)</ref>). However, for dense tasks, where the model output has spatial dimensions (for example semantic segmentation or monocular depth estimation) such an evaluation is more challenging: Linear and attentive probing can be applied but the prediction has the same resolution as the feature volume which is usually low and varies across backbones. On the other hand, using standard task heads for dense prediction adds a large number of parameters and introduces its own inductive biases. The measure performance would depend to a large extent on the chosen task head and not on the underlying backbone.</p><p>Here we address the problem of measuring performance of feature backbones as directly as possible by introducing a dense equivalent to attentive probing that requires only a small number of parameters. Our goal is to obtain a holistic characterization of strengths and weaknesses of common feature extractors. To this end, we propose a novel method that uses masked cross-attention (Fig. <ref type="figure">1</ref>) to extract relevant features from the backbone activations. By using cross-attention, we decouple the size and resolution of the input image and encoder output from that of the dense output, i.e. generate outputs at any resolution. We introduce a learnable masking radius in the cross-attention Under review as a conference paper at ICLR 2025 Figure <ref type="figure">1</ref>: Masked cross-attention adapter (MAXA) design: Queries that consist only of positions (bottom) attend to features extracted from an arbitrary backbone. The transformed queries are processed by a small CNN to yield a task-specific output. Our adapter decouples the output size from the feature volume. layer, which allows the readout adapter to adapt to varying feature locality. Intuitively, our adapter can be viewed as analogous to linear probing for dense prediction tasks.</p><p>We use the new adapter to characterize features along these three dimensions: (1) instance disentanglement, i.e. how well are individual instances recognizable from the features; (2) local semantics, evaluating how meaningful the features are for a local classification; (3) spatial understanding, how well is the 3d structure of the scene captured. Our main contributions are:</p><p>• MAXA, a lightweight adapter based on masked cross-attention, designed to operate on frozen features. As features are frozen, training is fast and activations can be cached for interactive use-cases. The adapter decouples feature resolution from output resolution.</p><p>• Characterization of several state-of-the-art feature extractors on dense prediction tasks. It allows gaining insights into what is learned by different learning paradigms and datasets, which can be used as a guide for practitioners and an informative signal for researchers.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">RELATED WORK</head><p>Representation learning Self-supervised representation learning was a popular research topic with multiple approaches that can roughly be categorized into joint-embedding <ref type="bibr" target="#b11">(Chen et al., 2020;</ref><ref type="bibr">2021;</ref><ref type="bibr" target="#b8">Caron et al., 2021)</ref> and reconstruction-based <ref type="bibr" target="#b22">(He et al., 2022)</ref>. DINOv2 is based on the iBot <ref type="bibr" target="#b58">(Zhou et al., 2021)</ref> method which uses a joint-embedding architecture in combination with self-distillation and reconstruction. VicRegL <ref type="bibr" target="#b2">(Bardes et al., 2021)</ref> and many other recent methods explicitly addresses local features by modeling losses at the token level. There has been a discussion about which techniques leads to better and more efficient features for perception tasks <ref type="bibr" target="#b1">(Balestriero &amp; LeCun, 2024)</ref>. While the approaches discussed above mainly address classification, another stream of research focused on representation learning that disentangles objects, called object-centric learning. While early methods only worked on synthetic data <ref type="bibr" target="#b6">(Burgess et al., 2019;</ref><ref type="bibr" target="#b30">Locatello et al., 2020)</ref> more recent approaches succeed on natural images <ref type="bibr" target="#b54">(Zadaianchuk et al., 2024;</ref><ref type="bibr" target="#b0">Aydemir et al., 2023)</ref>.</p><p>Recently, a new method for evaluating such object-centric representations was proposed: <ref type="bibr" target="#b13">Didolkar et al. (2024)</ref>. The main difference to object-centric methods is that we assume features encode object instances whereas object-centric methods explicitly represent objects in their architecture (e.g. in slots). The seminal CLIP model <ref type="bibr" target="#b37">(Radford et al., 2021)</ref> introduced another stream of research called vision-language models, where the model is trained on aligning text-image pairs. Later, this training paradigm was simplified to use a sigmoid-based loss function <ref type="bibr" target="#b57">(Zhai et al., 2023)</ref> instead of a softmax-basde loss, making the method less dependent on the batch size. Recently, the role of data is investigated more closely in the context of vision-language models <ref type="bibr" target="#b20">(Gadre et al., 2024;</ref><ref type="bibr" target="#b49">Xu et al., 2024;</ref><ref type="bibr" target="#b20">Fang et al., 2024)</ref>.  <ref type="bibr" target="#b48">(Wightman, 2019)</ref> for image classification, CLIP benchmark (LAION-AI, 2022) for vision-language models and CV-Bench for multimodal large language models (MLLMs) <ref type="bibr" target="#b46">(Tong et al., 2024)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Feature evaluation</head><p>Adapters and parameter-efficient fine-tuning Adapters are (often small) sub-networks that are trained to take generic features and use them to solve a specific task. For computer vision problems, many adapters were proposed that address whole-image classification <ref type="bibr" target="#b10">(Chen et al., 2022;</ref><ref type="bibr" target="#b45">Steitz &amp; Roth, 2024)</ref>. Also, the attentive probing (or attentional pooling) used in the CoCa <ref type="bibr" target="#b53">(Yu et al., 2022)</ref> and V-JEPA evaluation <ref type="bibr" target="#b3">(Bardes et al., 2023)</ref> can be considered a minimal adapter for whole image classification. These methods are not straightforward applicable for dense prediction. Based on the upsampling method FeatUp <ref type="bibr" target="#b19">(Fu et al., 2024)</ref>, linear evaluation can be applied in higher resolutions.</p><p>To our knowledge this has not been done before but we compare to a baseline that uses this approach. The methods by <ref type="bibr">Bhattacharjee et al. and Yang et al. adapt</ref> to dense images but address multiple tasks at once. In both methods, the backbones are not entirely frozen.</p><p>In another research stream, learnable parameters are added inside the frozen backbone network, for instance in Adapter <ref type="bibr" target="#b23">(Houlsby et al., 2019)</ref>, low-rank adaptation <ref type="bibr" target="#b24">(Hu et al., 2021)</ref> and scaling-andshifting <ref type="bibr" target="#b27">(Lian et al., 2022)</ref>. ViT-Adapter applies this paradigm for dense prediction tasks but builds on established task heads for segmentation (UperNet) and detection (Mask RCNN and HTC++). Furthermore, the number of parameters introduced by the adapter depends on the backbone, ranging from 2.5M to 23.7M parameters. For full review on adapters we refer to the survey of Yu et al..</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">MASKED CROSS-ATTENTION ADAPTER (MAXA)</head><p>In this section, we introduce MAXA. It is designed to be parameter and compute efficient adapter model by using cross-attention to make dense predictions and operating on a frozen backbone. An arbitrary (frozen) image backbone ϕ receives an image x of size (Hs, W s, 3) and generates features of size (H, W, D ′ ) with s indicating the backbone's stride. These features are concatenated with a fixed positional encoding P . The resulting activations are projected to the internal dimension D and flattened along the spatial dimensions (both by ψ), yielding F(x) of size (H, W, D):</p><formula xml:id="formula_0">F(x) = ψ(P (ϕ(x)))<label>(1)</label></formula><p>To generate a dense output, we use a cross-attention-based approach: All spatial queries Q of size</p><formula xml:id="formula_1">(H Q W Q , 16</formula><p>), attend to the feature volume F, where each query Q j ∈ R 16 is responsible for generating the output of a certain region. The queries Q are fixed, 16-dimensional positional encodings of the respective output positions and thus have no learnable parameters.</p><p>We modify the cross-attention under consideration of spatial proximity by adding M(q, σ). The computation per head is described by</p><formula xml:id="formula_2">q ′ = softmax W q QW k F(x) √ d k + M(q, σ) W v F(x) (2) with W v , W k ∈ R D×D and W q ∈ R D×16 .</formula><p>The attention operates over all backbone pixels for each query, hence M(q, σ) has size (HW,</p><formula xml:id="formula_3">H Q W Q ).</formula><p>Each element M ij depends on the euclidean distance d ij between pixel i in the feature volume and j in the output (i.e. q) through a Gaussian function</p><formula xml:id="formula_4">M ij = 1 σ √ 2π exp - d 2 ij 2σ 2 . (3)</formula><p>Here, σ is a learned parameter per attention head. This means the size of the region around each query position from which features are considered is adaptable for each model. In our model, we use Under review as a conference paper at ICLR 2025</p><formula xml:id="formula_5">Supervised Supervised ViT-B (86M) ImageNet SAM2 Sam B+ SA-1B Self-supervised MoCoV3 J ViT-B (86M) ImageNet MAE R ViT-B (86M) ImageNet Hiera R Hiera B+ (69M) ImageNet DINO J ViT-B (86M) ImageNet DINOv2 J &amp; R ViT-B (86M) LVD-142M DINOv2 J &amp; R ViT-L (304M) LVD-142M Vision-language CLIP ViT-B (86M) CLIP MetaCLIP ViT-B (86M) CC-400M SigLIP ViT-B (86M) Webli SigLIP (SO) ViT (414M) Webli SigLIP 512 ViT-B (86M) Webli Aim2 (300M) many ViTamin-L2 (333M) DataComp-1 ConvNeXt-L LAION-2B Phi3.5</formula><p>ViT-L (304M) many</p><p>Table <ref type="table">1</ref>: Models, their backbone architectures (with parameters) and their training datasets. J and R denote joint-embedding and reconstruction self-supervised learning methods.</p><p>two cross-attention layers, with only the first one using adaptable spatial regions while the second layer can attend to any position.</p><p>For the final adapter, we use two cross-attention layers with masking activated only in the first one. Instead of using a separate query for every output pixel, regions of size 8 × 8 are processed jointly for efficiency reasons, i.e. each query q generates 64 pixels of the output. This is realized through a small CNN operating on the output of all queries using transposed convolutions to increase spatial size. The number of channels in this CNN is given by D CNN = max (D/4, D out ), with the number of output channels D out being task-dependent.</p><p>The queries only receive a position as input and can attend to all features, thus the architecture resembles implicit networks <ref type="bibr" target="#b31">(Mescheder et al., 2019;</ref><ref type="bibr" target="#b35">Park et al., 2019)</ref>, especially PiFU <ref type="bibr" target="#b42">(Saito et al., 2019)</ref> and PixelNerf <ref type="bibr" target="#b51">(Yu et al., 2021)</ref> which involve feature extraction. The modification of the attention through a bias term is similar to GraphDINO <ref type="bibr" target="#b47">(Weis et al., 2021)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">EXPERIMENTS</head><p>Choice of models and training datasets We select a broad range of feature backbones that encompass different training paradigms and were trained on different datasets (Tab. 1). This enables us to conduct controlled comparisons along several axes, for instance, datasets and pre-training task.</p><p>In general, we differentiate between three broad classes of methods: supervised <ref type="bibr" target="#b14">(Dosovitskiy et al., 2021;</ref><ref type="bibr" target="#b39">Ravi et al., 2024)</ref>, self-supervised <ref type="bibr" target="#b8">(Caron et al., 2021;</ref><ref type="bibr" target="#b22">He et al., 2022;</ref><ref type="bibr">Ryali et al., 2023)</ref>, and vision-language <ref type="bibr" target="#b37">(Radford et al., 2021;</ref><ref type="bibr" target="#b49">Xu et al., 2024;</ref><ref type="bibr" target="#b18">Fini et al., 2024;</ref><ref type="bibr" target="#b9">Chen et al., 2024;</ref><ref type="bibr" target="#b29">Liu et al., 2022)</ref>. The latter involves training on image-caption pairs often obtained from the Internet, while self-supervised training operates on images only. Most models are trained on the ImageNet dataset <ref type="bibr" target="#b40">(Russakovsky et al., 2014)</ref>, but there are several exceptions: All SigLIP models are trained on the Webli dataset, a Google-internal dataset of 10 billion images with 12 billion multi-lingual text-image pairs. MetaCLIP uses a selection of the open LAION dataset <ref type="bibr" target="#b43">(Schuhmann et al., 2021)</ref>, CLIP is trained on the unpublished CLIP dataset by OpenAI. DINOv2 <ref type="bibr" target="#b34">(Oquab et al., 2023)</ref> is trained on the LVD-142M, a Meta-internal dataset of 142M images which were deduplicated and curated to be similar to ImageNet-22k images. The data mix of Aim2 Fini et al. ( <ref type="formula">2024</ref>) contains DFN-2B, COYO, the proprietary HQITP dataset and synthetic data.</p><p>We decide to mainly focus on vision transformers as many approaches share the same architecture and checkpoints are available for a large number of training paradigms. To ensure comparability with other work and control for model architecture, we primarily use ViT-B/16 and similarly sized models in our experiments. We also include larger models in some cases to obtain an estimate of how much performance can be improved simply by scaling-up model size. Pretrained-weights are obtained from timm <ref type="bibr" target="#b48">(Wightman, 2019)</ref>.</p><p>Experiment design We provide images in the native resolution of the respective backbones to prevent out-of-distribution input. For generating predictions, we make use of the capability of our model to decouple input and output resolution (see Sec. 3): The output size is fixed to 224 × 224 for all models, ensuring a fair comparison across models and limiting the advantage of large input sizes for the backbone. In the masked cross attention we use a dimension D = 32 and eight attention heads (i.e. four dimensions per head). Although the adapter could attend to backbone tokens at different levels we opt for using only the last layer, motivation by the simple pyramid from Li et al..</p><p>We pursue a straightforward approach to comparison: We freeze the backbone features, train the small readout adapter in a supervised way and evaluate on a hold-out test set. The rationale is that the low expressivity and capacity of the adapter forces the adapter to directly rely on the features volume for making a dense prediction. This is different from conventional task heads (e.g. in detection) which are able to execute more complex computations on the features. For example, Faster R-CNN with a ResNet50 backbone add around 18 million parameters to the backbone<ref type="foot" target="#foot_0">1</ref> </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.1">EVALUATION TASKS</head><p>To characterize a broad spectrum of traits of the features we implement the following tasks:</p><p>Instance awareness In this task we evaluate how well the features are able to disentangle individual instances. In the field of object-centric machine learning <ref type="bibr" target="#b6">(Burgess et al., 2019)</ref> models are designed to disentangle instances, here we ask to which degree this is already achieved in different backbones. Individual instances can be encoded in various ways in the features. We consider the following three notions of how instances are encoded (Fig. <ref type="figure" target="#fig_0">2</ref>):</p><p>• Instance boundaries: The objective is to outline individual objects in the image. We frame this problem as a binary segmentation and consequently use an output dimension D out = 1 as well as the binary cross-entropy loss function on the adapter output. • Distance Transform: This is similar to boundaries but computes a single dense map (D out = 1) of normalized distances to the instance boundaries. Here we apply the mean squared error as loss and metric. • Instance discrimination: Another way to encode instances is to generate a latent space where features within instances are the same (or similar) while being different to all other instances. If this works perfectly, clustering the latent vectors of all pixels would yield instances. This task is sometimes also called coloring <ref type="bibr" target="#b33">(Novotny et al., 2018)</ref>. We train on only 8,000 sample images and treat every instance as an individual class (resulting in a around 60,000 classes). The dense adapter maps the features to a latent space (in our case 32, D out = 32). Then, a linear layer maps each local 32-dimensional feature to a probability over all instances in the dataset. Thus, the problem is essentially framed as semantic segmentation with 60,000 classes. This way, the latent features before the classification head learn to discriminate instances. For testing, we cluster these features obtained from unseen images. For clustering we use k-means and provide the groundtruth number of instances as well as a foreground mask. Then we compare the predicted foreground instances with the ground truth instance segmentation based on the adjusted rand index. For these experiments, we use the COCO dataset <ref type="bibr" target="#b28">(Lin et al., 2014)</ref>, with the 5,000 images from the validation set being used for testing.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Image Distance transform</head><note type="other">Boundaries Colorization</note><p>For instance discrimination, we consider only images with at least three large objects (resulting in a subset of 754 images). Note, these tasks do not involve classifying the instances into object categories, unlike typically done in instance segmentation (this is assessed below in "local semantics").  (i.e. position along the z-axis) for every pixel of the visible scene based on the features provided by the backbone. We frame this as a depth map problem, i. e. D out = 1, relying on the NYUv2 dataset <ref type="bibr" target="#b32">(Nathan Silberman &amp; Fergus, 2012)</ref> for training and testing the adapter.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.2">COMPARISON ON BACKBONES</head><p>Results (Tab. 2) indicate that DINOv2 has the best instance awareness. The backbone of SAM2 shows a fairly low performance despite being trained for instance discrimination. This suggest that objects are not disentangled before SAM2's mask decoder. Despite following the same reconstruction-based training, MAE performs better than Hiera which could potentially be due to the more intensive spatial compression in Hiera. Among the vision-language models CLIP, Meta-CLIP and SigLIP we did not find meaningful differences. The evaluation on spatial understanding shows mixed results. Larger backbones tend to perform better, with exception of Hiera-B+. Again, DINOv2 performs best, in this case by a large margin. Vison-language tend to show stronger local semantics (Tab. 3). While all VLM 224px models show similar performance, the larger versions of SigLIP (i.e. 384 and SO) perform better but at a higher cost. Also in this evaluation, DINOv2 achieves the best scores. All things considered, possibly the most striking finding is the dominance of DINOv2. While one might argue that this is due to large image sizes and feature volumes, the mediocre performance of SigLIP-512 and Hiera-B+ show that cannot be the only factor.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.3">ADAPTER DESIGN</head><p>We next explore design choices of MAXA by varying relevant hyperparameters of our readout adapter (Tab. 4). The two-layer cross-attention and the introduction of the σ parameter are crucial for good performance. The latter suggests that information is organized locally in the feature volume. Reducing the dimensionality impacts instance discrimination, possibly as space is scarce for embedding 60,000 instances. Thus, an even smaller adapter could be used for the other tasks.  Oquab et al. report scores for different readout methods in the depth prediction task. As this is a dense prediction tasks, we can directly compare against their scores. They compare against a 1layer, a 4-layer readout as well as the DPT method <ref type="bibr" target="#b38">(Ranftl et al., 2021)</ref>. Our scores are consistently better, even when comparing ViT-H with ViT-B features of MAE.</p><p>A natural approach for dense prediction is to employ a convolutional neural network with transposed convolutional layers on top of the feature volume. We implement such a baseline that first applies self-attention on the feature volume to enable context integration and then uses a convolutional neural network to generate the output. Furthermore, we employ FeatUp <ref type="bibr" target="#b19">(Fu et al., 2024)</ref> for imageaware feature volume upsampling and then apply linear probing. The results (Fig. <ref type="figure" target="#fig_2">3</ref>) show that MAXA is more parameter efficient and achieves better scores than this baseline in all three tasks. An additional advantage of our method over CNNs is decoupling input and output resolution, in a CNN, a higher feature volume size would cause a larger output. FeatUp is highly parameter efficient has high memory demands and requires long computation times (factor 4 compared to MAXA).</p><p>Variable output size To ensure a fair comparison, the readout size is fixed in the previous experiments. However, it is possible to generate outputs at an arbitrary resolution, because the adapter    takes positions as inputs (similar to implicit neural fields). Instead of using the standard query position grid for a 224 px output, we can sample different query coordinates at test time (Fig. <ref type="figure" target="#fig_3">4</ref>).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.4">ADAPTER RESULT CORRELATE WITH DOWNSTREAM TASKS</head><p>To assess the reliability of our findings, we consider previous work in object-centric representation learning and a classification-based evaluation (Fig. <ref type="figure" target="#fig_4">5</ref> left and middle). Object-centric learning shares the goal of disentangling instances but tries to achieve this through specific model architectures whereas we evaluate model-agnostic features for instance-specific signals. Relating to the instance clustering performance by Aydemir et al. we find an almost linear relationship between their and our scores. Comparing with DINOSAUR <ref type="bibr" target="#b44">(Seitzer et al., 2023)</ref>, we find the ordering of the scores to be consistent. Note, no statement regarding better performance can be made since the evaluation protocols do not match. The evaluation of Goldblum et al. shares the goal of characterizing current backbones with our work but put more emphasis on out-of-distribution and backbone architecture. We found our results (Fig. <ref type="figure" target="#fig_4">5</ref>, right) to be consistent with their COCO fine-tuning scores, except for DINO. Note, to obtain their scores, a resource-intensive object detection training is required. Summed up, our method can be used to obtain similar insights on relative backbone performance to more complex evaluations, but much faster. Under review as a conference paper at ICLR 2025 Figure <ref type="figure">6</ref>: Inference speed over performance on three tasks, relative to the ViT-B/16 with 224px image input (the fastest and most frequent architecture in our evaluation).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.5">SPEED-PERFORMANCE TRADEOFF</head><p>In Fig. <ref type="figure">8</ref> we report inference speed over performance. We measure the time to ran ten batches with eight samples each in inference mode (i.e. without gradient computation). The fastest model in our evaluation set is the ViT-B/16 at a resolution of 224, therefore we indicate the factor by which the runtime is extended with respect to this model. For example, the slowest model, SigLIP-SO requires 26 times as long as the reference model.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">DISCUSSION</head><p>In this work we proposed the masked cross-attention adapter, a fast and parameter-efficient method for evaluating backbones. For example, our standard training for an adapter on a ViT-B/16 224 pixel backbone on Pascal VOC adds less than 200,000 parameters and takes less than 16 minutes (using a single Nvidia RXT2080 GPU). We use this method to systematically analyze common vision backbones with respect to the three complementary aspects: instance awareness, depth and local semantics. Our results suggest that DINOv2 is a highly capable backbone, it is the best ViT-B model across all experiments. Using DINOv2 with a ViT-L backbone performs improves performance further but at a three times longer runtime. Classic supervised pre-training on ImageNet results in fairly poor performance. Based on our results, a promising direction would be to use DINOv2-like objective function for pre-training in object detection, where ImageNet is currently the standard. Also VLMs and MLLMs could benefit from adopting the DINOv2 loss into their training algorithms. We identified a trend that local semantics is better captured by language-vision models while reconstruction-based self-supervised learning appears to have better instance awareness. We also found the input image resolution to play a significant role, despite decoupling input and output resolution.</p><p>For practitioners, DINOv2 is a natural choice if enough compute is available. For computeconstrained cases the decision is more complex. Vision-language models generally perform well on tasks that require local semantics, while for instance discrimination reconstruction-based selfsupervised learning methods excel. We plan to retain an online leaderboard where new backbones can easily be incorporated to help tracking future progress of dense prediction performance.</p><p>Limitations While we use a fairly small decoder (in terms of parameters), even this decoder can have inductive biases and favor certain backbones such that results might get distorted. Using more complex task heads would enable more complex feature processing. In fact, this could be the reason why SAM performs comparably poorly in instance awareness in our hands. A more direct comparison to object-centric approaches would be interesting, but is challenging as these approaches explicitly encode objects (e.g. in attention slots) which can be compared to ground truth. The current selection of tasks we evaluated is limited to three broad categories and a few instances of those. Adding additional task categories (e.g. as in Taskonomy <ref type="bibr" target="#b55">(Zamir et al., 2018)</ref>) would be desirable for a more detailed characterization of backbones.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 2 :</head><label>2</label><figDesc>Figure 2: We use three tasks to probe instance awareness. Top-left: input image.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head></head><label></label><figDesc>Local semantics A natural choice for evaluating local semantics is a semantic segmentation task. Here we rely on two benchmarks: Pascal VOC 2012<ref type="bibr" target="#b16">(Everingham et al., 2015)</ref> andCOCO Stuff (Caesar et al., 2018). The Pascal VOC 2012 encompasses a fairly small set of only 1,464 training images. For COCO Stuff, we train on 100,000 images. We account for the larger number of classes in COCO stuff by setting the internal dimension of the CNN, D CNN , to 64.Spatial understandingTo assess how well the features capture the 3D structure of the scene, we implement the well-known monocular depth estimation task: The adapter needs to infer the depth Under review as a conference paper at ICLR 2025</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: Comparison between a CNN-based readout and our adapter (instances: ↑ = better; depth ↓, semantic seg. ↑).</figDesc><graphic coords="8,226.40,245.15,64.89,64.87" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Figure 4 :</head><label>4</label><figDesc>Figure 4: After training, our adapter can be queried to output different resolutions from the same backbone. Here we use a DINOv2 backbone trained on Pascal VOC.</figDesc><graphic coords="8,135.92,245.15,64.89,64.87" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Figure 5 :</head><label>5</label><figDesc>Figure 5: Our findings are consistent with previous work where object-centric learning is used (left and middle) and on fine-tuned Faster R-CNN detection heads (right).</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head></head><label></label><figDesc>Evaluations on features predate the deep learning era in computer vision. Recently, there have been numerous attempts at characterizing and comparing common feature backbones but with different objectives. The works byBonnen et al. and El Banani et al.  focus on 3d shape understanding. Chen et al. design a zero-shot benchmark for image encoders in contrastive vision-language pre-training setting and propose the ViTamin architecture. Goldblum et al. evaluate classification, instance segmentation, object detection and retrieval. Our work differs in focusing on dense prediction tasks without large heads enabling a more direct measurement of the feature quality. Further efforts to characterize vision backbones include the timm leaderboard</figDesc><table /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 2 :</head><label>2</label><figDesc></figDesc><table><row><cell>Inst. Disc.</cell><cell>Boundaries Distance Transform</cell></row></table><note><p>Instance awareness results in all three categories. I denotes image size, F denotes feature volume size, P and P learn refer to all and only learnable parameters. Metrics are intersection over union (IoU), cross-entropy (CE), mean-squared error (MSE) and adjusted rand index (ARI).</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_3"><head>Table 3 :</head><label>3</label><figDesc>Local semantics results on Pascal and COCO Stuff as well as spatial understanding on NYUv2 (right). I denotes image size, F denotes feature volume size, P and P learn refer to all and only learnable parameters.</figDesc><table><row><cell></cell><cell></cell><cell>Inst. Disc.</cell><cell></cell><cell>Semseg</cell><cell></cell><cell>Depth ↓</cell><cell></cell></row><row><cell></cell><cell cols="7">Dino V2 SigLIP-384 MAE Dino V2 SigLIP-384 MAE Dino V2 SigLIP-384 MAE</cell></row><row><cell>base (our)</cell><cell>0.5287</cell><cell>0.4180</cell><cell>0.4832 85.5</cell><cell>77.1</cell><cell>60.9 0.2330</cell><cell>0.3850</cell><cell>0.4051</cell></row><row><cell>D = 16</cell><cell>0.4777</cell><cell>0.3650</cell><cell>0.3799 83.7</cell><cell>74.5</cell><cell>60.1 0.2284</cell><cell>0.3887</cell><cell>0.4156</cell></row><row><cell>no σ</cell><cell>0.3303</cell><cell>0.2833</cell><cell>0.3744 64.3</cell><cell>46.5</cell><cell>53.5 0.3039</cell><cell>0.4391</cell><cell>0.4409</cell></row><row><cell>no indiv. σ</cell><cell>0.4887</cell><cell>0.3699</cell><cell>0.4360 85.0</cell><cell>75.3</cell><cell>62.6 0.2488</cell><cell>0.4091</cell><cell>0.4175</cell></row><row><cell cols="2">single MCA layer 0.4581</cell><cell>0.3755</cell><cell>0.4301 85.0</cell><cell>75.5</cell><cell>61.4 0.2296</cell><cell>0.4025</cell><cell>0.4077</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_4"><head>Table 4 :</head><label>4</label><figDesc>Ablation. The base model is the variant we use in all other experiments in this work.</figDesc><table /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_6"><head>Table 5 :</head><label>5</label><figDesc>MSE comparison against readouts on depth prediction. Scores for other models are taken from from<ref type="bibr" target="#b34">Oquab et al. (2023)</ref>.</figDesc><table /></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="1" xml:id="foot_0"><p>These calculations were obtained using the Faster R-CNN implementation in PyTorch vision(Paszke et al.,   </p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" xml:id="foot_1"><p>2019), in more detail FPN: 3.3M, RPN: 0.6M, ROI heads: 14.3M parameters.</p></note>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A APPENDIX</head><p>A.1 IMPLEMENTATION We use the Adam optimier with a learning rate of 0.001, except for boundary prediction and depth where it is set to 0.002. We use 8 attention heads in all models. On COCO and Pascal we use the validation sets for testing, while model selection is carried out on a separate part of the training set via validation loss.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.2 COMPARISON WITH OPEN-VOCABULARY SEGMENTATION</head><p>We report the performance of our method and state-of-the-art open vocabulary segmentation methods on Pascal VOC2012 (with background, also called VOC-21) in Tab. 6. Please note, this is not a fair comparison as our method was trained on Pascal VOC2012. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.3 RELATION SEMANTIC SEGMENTATION AND IMAGE CLASSIFICATION PERFORMANCE</head><p>In Fig. <ref type="figure">7</ref> we show the semantic segmentation performance in relation to timm leaderboard? Ima-geNet accuracy. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.5 FEATURE VISUALIZATION</head><p>We visualize the backbones output features (Fig. <ref type="figure">9</ref> by reducing the number of feature dimensions to three and interpreting these three dimensions as RGB color.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.6 CNN CODE</head><p>Below the source code of the CNN baseline in the adapter is shown. D CNN is referred to by dim internal.</p><p>def __init__(self): ...   ... x = self.skip_cnn(x) + self.cnn(x)</p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<analytic>
+		<title level="a" type="main">Self-supervised object-centric learning for videos</title>
+		<author>
+			<persName><forename type="first">Görkay</forename><surname>Aydemir</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weidi</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fatma</forename><surname>Guney</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page" from="32879" to="32899" />
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<monogr>
+		<title level="m" type="main">Learning by reconstruction produces uninformative features for perception</title>
+		<author>
+			<persName><forename type="first">Randall</forename><surname>Balestriero</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yann</forename><surname>Lecun</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.11337</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<monogr>
+		<title level="m" type="main">Vicreg: Variance-invariance-covariance regularization for self-supervised learning</title>
+		<author>
+			<persName><forename type="first">Adrien</forename><surname>Bardes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jean</forename><surname>Ponce</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yann</forename><surname>Lecun</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2105.04906</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<monogr>
+		<title level="m" type="main">V-jepa: Latent video prediction for visual representation learning</title>
+		<author>
+			<persName><forename type="first">Adrien</forename><surname>Bardes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quentin</forename><surname>Garrido</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jean</forename><surname>Ponce</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinlei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Rabbat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yann</forename><surname>Lecun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mido</forename><surname>Assran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicolas</forename><surname>Ballas</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<analytic>
+		<title level="a" type="main">Vision transformer adapters for generalizable multitask learning</title>
+		<author>
+			<persName><forename type="first">Deblina</forename><surname>Bhattacharjee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sabine</forename><surname>Süsstrunk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mathieu</forename><surname>Salzmann</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF International Conference on Computer Vision</title>
+		<meeting>the IEEE/CVF International Conference on Computer Vision</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="19015" to="19026" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<monogr>
+		<author>
+			<persName><forename type="first">Tyler</forename><surname>Bonnen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephanie</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yutong</forename><surname>Bai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">O'</forename><surname>Thomas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yoni</forename><surname>Connell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nancy</forename><surname>Friedman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joshua</forename><forename type="middle">B</forename><surname>Kanwisher</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexei</forename><forename type="middle">A</forename><surname>Tenenbaum</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Efros</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2409.05862</idno>
+		<title level="m">Evaluating multiview object consistency in humans and image models</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<monogr>
+		<title level="m" type="main">Monet: Unsupervised scene decomposition and representation</title>
+		<author>
+			<persName><forename type="first">Christopher</forename><forename type="middle">P</forename><surname>Burgess</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Loïc</forename><surname>Matthey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicholas</forename><surname>Watters</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rishabh</forename><surname>Kabra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Irina</forename><surname>Higgins</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><forename type="middle">M</forename><surname>Botvinick</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Lerchner</surname></persName>
+		</author>
+		<idno>ArXiv, abs/1901.11390</idno>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Coco-stuff: Thing and stuff classes in context</title>
+		<author>
+			<persName><forename type="first">Holger</forename><surname>Caesar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jasper</forename><surname>Uijlings</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vittorio</forename><surname>Ferrari</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+			<biblScope unit="page" from="1209" to="1218" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">Emerging properties in self-supervised vision transformers</title>
+		<author>
+			<persName><forename type="first">Mathilde</forename><surname>Caron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ishan</forename><surname>Misra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hervé</forename><surname>Jégou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Mairal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piotr</forename><surname>Bojanowski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Armand</forename><surname>Joulin</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF international conference on computer vision</title>
+		<meeting>the IEEE/CVF international conference on computer vision</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="9650" to="9660" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">Vitamin: Designing scalable vision models in the vision-language era</title>
+		<author>
+			<persName><forename type="first">Jieneng</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qihang</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaohui</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alan</forename><surname>Yuille</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liang-Chieh</forename><surname>Chen</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition</title>
+		<meeting>the IEEE/CVF Conference on Computer Vision and Pattern Recognition</meeting>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="page" from="12954" to="12966" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<analytic>
+		<title level="a" type="main">Adaptformer: Adapting vision transformers for scalable visual recognition</title>
+		<author>
+			<persName><forename type="first">Shoufa</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chongjian</forename><surname>Ge</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhan</forename><surname>Tong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiangliu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yibing</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jue</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ping</forename><surname>Luo</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="16664" to="16678" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">A simple framework for contrastive learning of visual representations</title>
+		<author>
+			<persName><forename type="first">Ting</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Simon</forename><surname>Kornblith</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mohammad</forename><surname>Norouzi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Geoffrey</forename><surname>Hinton</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="1597" to="1607" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">An empirical study of training self-supervised vision transformers</title>
+		<author>
+			<persName><forename type="first">Xinlei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saining</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaiming</forename><surname>He</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF international conference on computer vision</title>
+		<meeting>the IEEE/CVF international conference on computer vision</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="9640" to="9649" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<title level="m" type="main">Georg Martius, and Maximilian Seitzer. Zero-shot object-centric representation learning</title>
+		<author>
+			<persName><forename type="first">Aniket</forename><surname>Didolkar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrii</forename><surname>Zadaianchuk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anirudh</forename><surname>Goyal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mike</forename><surname>Mozer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yoshua</forename><surname>Bengio</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2408.09162</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<monogr>
+		<title level="m" type="main">An image is worth 16x16 words: Transformers for image recognition at scale</title>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Dosovitskiy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lucas</forename><surname>Beyer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Kolesnikov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dirk</forename><surname>Weissenborn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaohua</forename><surname>Zhai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Unterthiner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mostafa</forename><surname>Dehghani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthias</forename><surname>Minderer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Georg</forename><surname>Heigold</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sylvain</forename><surname>Gelly</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<publisher>ICLR</publisher>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Probing the 3d awareness of visual foundation models</title>
+		<author>
+			<persName><forename type="first">Mohamed</forename><forename type="middle">El</forename><surname>Banani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amit</forename><surname>Raj</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevis-Kokitsi</forename><surname>Maninis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abhishek</forename><surname>Kar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhen</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Rubinstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deqing</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Leonidas</forename><surname>Guibas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Justin</forename><surname>Johnson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Varun</forename><surname>Jampani</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition</title>
+		<meeting>the IEEE/CVF Conference on Computer Vision and Pattern Recognition</meeting>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="page" from="21795" to="21806" />
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">The pascal visual object classes challenge: A retrospective</title>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Everingham</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ali</forename><surname>Sm</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luc</forename><surname>Eslami</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Van Gool</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">K</forename><forename type="middle">I</forename><surname>Christopher</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><surname>Williams</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><surname>Winn</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zisserman</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">International journal of computer vision</title>
+		<imprint>
+			<biblScope unit="volume">111</biblScope>
+			<biblScope unit="page" from="98" to="136" />
+			<date type="published" when="2015">2015</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<monogr>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Fang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Albin Madappally</forename><surname>Jose</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amit</forename><surname>Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ludwig</forename><surname>Schmidt</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Toshev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vaishaal</forename><surname>Shankar</surname></persName>
+		</author>
+		<title level="m">Data filtering networks. International Conference on Learning Representations (ICLR)</title>
+		<imprint>
+			<biblScope unit="page">2024</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<monogr>
+		<title/>
+		<author>
+			<persName><forename type="first">Enrico</forename><surname>Fini</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mustafa</forename><surname>Shukor</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiujun</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Philipp</forename><surname>Dufter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michal</forename><surname>Klein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Haldimann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sai</forename><surname>Aitharaju</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guilherme Turrisi</forename><surname>Victor</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Louis</forename><surname>Da Costa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhe</forename><surname>Béthune</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><forename type="middle">T</forename><surname>Gan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marcin</forename><surname>Toshev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Moin</forename><surname>Eichner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yinfei</forename><surname>Nabi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joshua</forename><forename type="middle">M</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alaaeldin</forename><surname>Susskind</surname></persName>
+		</author>
+		<author>
+			<persName><surname>El-Nouby</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note>Multimodal autoregressive pre-training of large vision encoders</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">Featup: A model-agnostic framework for features at any resolution</title>
+		<author>
+			<persName><forename type="first">Stephanie</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Hamilton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laura</forename><forename type="middle">E</forename><surname>Brandt</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Axel</forename><surname>Feldmann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhoutong</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><forename type="middle">T</forename><surname>Freeman</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=GkJiNn2QDF" />
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">Datacomp: In search of the next generation of multimodal datasets</title>
+		<author>
+			<persName><forename type="first">Yitzhak</forename><surname>Samir</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriel</forename><surname>Gadre</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Ilharco</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Fang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Georgios</forename><surname>Hayase</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thao</forename><surname>Smyrnis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ryan</forename><surname>Nguyen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mitchell</forename><surname>Marten</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dhruba</forename><surname>Wortsman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jieyu</forename><surname>Ghosh</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zhang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<analytic>
+		<title level="a" type="main">Battle of the backbones: A large-scale comparison of pretrained models across computer vision tasks</title>
+		<author>
+			<persName><forename type="first">Micah</forename><surname>Goldblum</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hossein</forename><surname>Souri</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Renkun</forename><surname>Ni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Manli</forename><surname>Shu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Viraj</forename><surname>Prabhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gowthami</forename><surname>Somepalli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prithvijit</forename><surname>Chattopadhyay</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Ibrahim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adrien</forename><surname>Bardes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Judy</forename><surname>Hoffman</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Masked autoencoders are scalable vision learners</title>
+		<author>
+			<persName><forename type="first">Kaiming</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinlei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saining</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanghao</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piotr</forename><surname>Dollár</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ross</forename><surname>Girshick</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE/CVF conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="16000" to="16009" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">Parameter-efficient transfer learning for nlp</title>
+		<author>
+			<persName><forename type="first">Neil</forename><surname>Houlsby</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrei</forename><surname>Giurgiu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stanislaw</forename><surname>Jastrzebski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bruna</forename><surname>Morrone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quentin</forename><surname>De Laroussilhe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrea</forename><surname>Gesmundo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mona</forename><surname>Attariyan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sylvain</forename><surname>Gelly</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<publisher>PMLR</publisher>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="page" from="2790" to="2799" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<monogr>
+		<author>
+			<persName><forename type="first">J</forename><surname>Edward</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yelong</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Phillip</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Wallis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Allen-Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shean</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Lora</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2106.09685</idno>
+		<title level="m">Low-rank adaptation of large language models</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<monogr>
+		<author>
+			<persName><surname>Laion-Ai</surname></persName>
+		</author>
+		<ptr target="https://github.com/LAION-AI/CLIP_benchmark" />
+		<title level="m">Clip benchmark</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title level="a" type="main">Exploring plain vision transformer backbones for object detection</title>
+		<author>
+			<persName><forename type="first">Yanghao</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hanzi</forename><surname>Mao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ross</forename><surname>Girshick</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaiming</forename><surname>He</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">European conference on computer vision</title>
+		<imprint>
+			<publisher>Springer</publisher>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="280" to="296" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<analytic>
+		<title level="a" type="main">Scaling &amp; shifting your features: A new baseline for efficient model tuning</title>
+		<author>
+			<persName><forename type="first">Dongze</forename><surname>Lian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daquan</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiashi</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinchao</forename><surname>Wang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="109" to="123" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<analytic>
+		<title level="a" type="main">Microsoft coco: Common objects in context</title>
+		<author>
+			<persName><forename type="first">Tsung-Yi</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Maire</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Serge</forename><forename type="middle">J</forename><surname>Belongie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Hays</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pietro</forename><surname>Perona</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deva</forename><surname>Ramanan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piotr</forename><surname>Dollár</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">C</forename><forename type="middle">Lawrence</forename><surname>Zitnick</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">European Conference on Computer Vision</title>
+		<imprint>
+			<date type="published" when="2014">2014</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">A convnet for the 2020s</title>
+		<author>
+			<persName><forename type="first">Zhuang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hanzi</forename><surname>Mao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chao-Yuan</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christoph</forename><surname>Feichtenhofer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Trevor</forename><surname>Darrell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saining</forename><surname>Xie</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE/CVF conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="11976" to="11986" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<analytic>
+		<title level="a" type="main">Object-centric learning with slot attention</title>
+		<author>
+			<persName><forename type="first">Francesco</forename><surname>Locatello</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dirk</forename><surname>Weissenborn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Unterthiner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aravindh</forename><surname>Mahendran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Georg</forename><surname>Heigold</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakob</forename><surname>Uszkoreit</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Dosovitskiy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Kipf</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in neural information processing systems</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="page" from="11525" to="11538" />
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Occupancy networks: Learning 3d reconstruction in function space</title>
+		<author>
+			<persName><forename type="first">Lars</forename><surname>Mescheder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Oechsle</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Niemeyer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sebastian</forename><surname>Nowozin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andreas</forename><surname>Geiger</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE/CVF conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="page" from="4460" to="4470" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<analytic>
+		<title level="a" type="main">Indoor segmentation and support inference from rgbd images</title>
+		<author>
+			<persName><forename type="first">Pushmeet</forename><surname>Kohli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nathan</forename><surname>Silberman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Derek</forename><surname>Hoiem</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rob</forename><surname>Fergus</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ECCV</title>
+		<imprint>
+			<date type="published" when="2012">2012</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<analytic>
+		<title level="a" type="main">Semi-convolutional operators for instance segmentation</title>
+		<author>
+			<persName><forename type="first">David</forename><surname>Novotny</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Samuel</forename><surname>Albanie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Diane</forename><surname>Larlus</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrea</forename><surname>Vedaldi</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the European Conference on Computer Vision (ECCV)</title>
+		<meeting>the European Conference on Computer Vision (ECCV)</meeting>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+			<biblScope unit="page" from="86" to="102" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">Learning robust visual features without supervision</title>
+		<author>
+			<persName><forename type="first">Maxime</forename><surname>Oquab</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Timoth'ee</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Darcet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">'</forename><surname>Th</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Moutakanni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Q</forename><surname>Huy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Vo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vasil</forename><surname>Szafraniec</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierre</forename><surname>Khalidov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Fernandez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Francisco</forename><surname>Haziza</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alaaeldin</forename><surname>Massa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mahmoud</forename><surname>El-Nouby</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicolas</forename><surname>Assran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wojciech</forename><surname>Ballas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Russ</forename><surname>Galuba</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Po-Yao</forename><surname>Howes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shang-Wen</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ishan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><forename type="middle">G</forename><surname>Misra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vasu</forename><surname>Rabbat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriel</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huijiao</forename><surname>Synnaeve</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hervé</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Jégou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Patrick</forename><surname>Mairal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Armand</forename><surname>Labatut</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piotr</forename><surname>Joulin</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Bojanowski</surname></persName>
+		</author>
+		<idno>ArXiv, abs/2304.07193</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Dinov</title>
+		<imprint>
+			<biblScope unit="volume">2</biblScope>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Deepsdf: Learning continuous signed distance functions for shape representation</title>
+		<author>
+			<persName><forename type="first">Jeong Joon</forename><surname>Park</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Florence</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julian</forename><surname>Straub</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Richard</forename><surname>Newcombe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Lovegrove</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE/CVF conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="page" from="165" to="174" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">Pytorch: An imperative style, highperformance deep learning library</title>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Paszke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Gross</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Francisco</forename><surname>Massa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Lerer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Bradbury</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gregory</forename><surname>Chanan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Trevor</forename><surname>Killeen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeming</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Natalia</forename><surname>Gimelshein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luca</forename><surname>Antiga</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="page">32</biblScope>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<analytic>
+		<title level="a" type="main">Learning transferable visual models from natural language supervision</title>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jong</forename><forename type="middle">Wook</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><surname>Hallacy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aditya</forename><surname>Ramesh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriel</forename><surname>Goh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Girish</forename><surname>Sastry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Askell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pamela</forename><surname>Mishkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jack</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gretchen</forename><surname>Krueger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Sutskever</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<analytic>
+		<title level="a" type="main">Vision transformers for dense prediction</title>
+		<author>
+			<persName><forename type="first">René</forename><surname>Ranftl</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Bochkovskiy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vladlen</forename><surname>Koltun</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF international conference on computer vision</title>
+		<meeting>the IEEE/CVF international conference on computer vision</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="12179" to="12188" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<monogr>
+		<author>
+			<persName><forename type="first">Nikhila</forename><surname>Ravi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Valentin</forename><surname>Gabeur</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuan-Ting</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ronghang</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chaitanya</forename><surname>Ryali</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tengyu</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haitham</forename><surname>Khedr</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roman</forename><surname>Rädle</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chloe</forename><surname>Rolland</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laura</forename><surname>Gustafson</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2408.00714</idno>
+		<title level="m">Segment anything in images and videos</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="volume">2</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<analytic>
+		<title level="a" type="main">Imagenet large scale visual recognition challenge</title>
+		<author>
+			<persName><forename type="first">Olga</forename><surname>Russakovsky</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jia</forename><surname>Deng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Krause</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanjeev</forename><surname>Satheesh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sean</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiheng</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrej</forename><surname>Karpathy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aditya</forename><surname>Khosla</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><forename type="middle">S</forename><surname>Bernstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><forename type="middle">C</forename><surname>Berg</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Li</forename><surname>Fei-Fei</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">International Journal of Computer Vision</title>
+		<imprint>
+			<biblScope unit="volume">115</biblScope>
+			<biblScope unit="page" from="211" to="252" />
+			<date type="published" when="2014">2014</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<monogr>
+		<author>
+			<persName><forename type="first">Chaitanya</forename><surname>Ryali</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuan-Ting</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Bolya</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chen</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haoqi</forename><surname>Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Po-Yao</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vaibhav</forename><surname>Aggarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arkabandhu</forename><surname>Chowdhury</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Omid</forename><surname>Poursaeed</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Judy</forename><surname>Hoffman</surname></persName>
+		</author>
+		<title level="m">A hierarchical vision transformer without the bells-and-whistles. International Conference on Machine Learning (ICML)</title>
+		<imprint>
+			<biblScope unit="page">2023</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<analytic>
+		<title level="a" type="main">Pifu: Pixel-aligned implicit function for high-resolution clothed human digitization</title>
+		<author>
+			<persName><forename type="first">Shunsuke</forename><surname>Saito</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeng</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ryota</forename><surname>Natsume</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shigeo</forename><surname>Morishima</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Angjoo</forename><surname>Kanazawa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Li</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF international conference on computer vision</title>
+		<meeting>the IEEE/CVF international conference on computer vision</meeting>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="page" from="2304" to="2314" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<monogr>
+		<title level="m" type="main">Laion-400m: Open dataset of clip-filtered 400 million image-text pairs</title>
+		<author>
+			<persName><forename type="first">Christoph</forename><surname>Schuhmann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Richard</forename><surname>Vencu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Romain</forename><surname>Beaumont</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Robert</forename><surname>Kaczmarczyk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clayton</forename><surname>Mullis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aarush</forename><surname>Katta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Theo</forename><surname>Coombes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jenia</forename><surname>Jitsev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aran</forename><surname>Komatsuzaki</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2111.02114</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<monogr>
+		<title level="m" type="main">Bridging the gap to real-world object-centric learning</title>
+		<author>
+			<persName><forename type="first">Maximilian</forename><surname>Seitzer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Max</forename><surname>Horn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrii</forename><surname>Zadaianchuk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dominik</forename><surname>Zietlow</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianjun</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carl-Johann</forename><surname>Simon-Gabriel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tong</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zheng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bernhard</forename><surname>Schölkopf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Brox</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<analytic>
+		<title level="a" type="main">Adapters strike back</title>
+		<author>
+			<persName><forename type="first">Jan-Martin O</forename><surname>Steitz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefan</forename><surname>Roth</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition</title>
+		<meeting>the IEEE/CVF Conference on Computer Vision and Pattern Recognition</meeting>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="page" from="23449" to="23459" />
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<monogr>
+		<title level="m" type="main">Cambrian-1: A fully open, vision-centric exploration of multimodal llms</title>
+		<author>
+			<persName><forename type="first">Shengbang</forename><surname>Tong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ellis</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Penghao</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanghyun</forename><surname>Woo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Manoj</forename><surname>Middepogu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Charitha</forename><surname>Sai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jihan</forename><surname>Akula</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shusheng</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adithya</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xichen</forename><surname>Iyer</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Pan</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2406.16860</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b47">
+	<monogr>
+		<title level="m" type="main">Self-supervised representation learning of neuronal morphologies</title>
+		<author>
+			<persName><forename type="first">Marissa</forename><forename type="middle">A</forename><surname>Weis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laura</forename><surname>Pede</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Timo</forename><surname>Lüddecke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><forename type="middle">S</forename><surname>Ecker</surname></persName>
+		</author>
+		<idno>ArXiv, abs/2112.12482</idno>
+		<ptr target="https://api.semanticscholar.org/CorpusID" />
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page">245424769</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b48">
+	<monogr>
+		<author>
+			<persName><forename type="first">Ross</forename><surname>Wightman</surname></persName>
+		</author>
+		<ptr target="https://github.com/rwightman/pytorch-image-models" />
+		<title level="m">Pytorch image models</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b49">
+	<monogr>
+		<title level="m" type="main">Demystifying clip data</title>
+		<author>
+			<persName><forename type="first">Hu</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saining</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ellen</forename><surname>Xiaoqing</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Po-Yao</forename><surname>Tan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Russell</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vasu</forename><surname>Howes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shang-Wen</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gargi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Ghosh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christoph</forename><surname>Zettlemoyer</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Feichtenhofer</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b50">
+	<analytic>
+		<title level="a" type="main">Polymax: General dense prediction with mask transformer</title>
+		<author>
+			<persName><forename type="first">Xuan</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liangzhe</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kimberly</forename><surname>Wilber</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Astuti</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiuye</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Siyuan</forename><surname>Qiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephanie</forename><surname>Debats</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huisheng</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hartwig</forename><surname>Adam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mikhail</forename><surname>Sirotenko</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision</title>
+		<meeting>the IEEE/CVF Winter Conference on Applications of Computer Vision</meeting>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="page" from="1050" to="1061" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b51">
+	<analytic>
+		<title level="a" type="main">pixelnerf: Neural radiance fields from one or few images</title>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vickie</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><surname>Tancik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Angjoo</forename><surname>Kanazawa</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE/CVF conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="4578" to="4587" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b52">
+	<analytic>
+		<title level="a" type="main">Visual tuning</title>
+		<author>
+			<persName><forename type="first">Jianlong</forename><surname>Bruce Xb Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haixin</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lingbo</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shijie</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junfan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lingxi</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haojie</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhouchen</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Lin</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">ACM Computing Surveys</title>
+		<imprint>
+			<biblScope unit="volume">56</biblScope>
+			<biblScope unit="issue">12</biblScope>
+			<biblScope unit="page" from="1" to="38" />
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b53">
+	<monogr>
+		<title level="m" type="main">Coca: Contrastive captioners are image-text foundation models</title>
+		<author>
+			<persName><forename type="first">Jiahui</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zirui</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vijay</forename><surname>Vasudevan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Legg</forename><surname>Yeung</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mojtaba</forename><surname>Seyedhosseini</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yonghui</forename><surname>Wu</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b54">
+	<analytic>
+		<title level="a" type="main">Object-centric learning for real-world videos by predicting temporal feature similarities</title>
+		<author>
+			<persName><forename type="first">Andrii</forename><surname>Zadaianchuk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maximilian</forename><surname>Seitzer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Georg</forename><surname>Martius</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b55">
+	<analytic>
+		<title level="a" type="main">Taskonomy: Disentangling task transfer learning</title>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Amir R Zamir</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><surname>Sax</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Leonidas</forename><forename type="middle">J</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jitendra</forename><surname>Guibas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Silvio</forename><surname>Malik</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Savarese</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE conference on computer vision and pattern recognition</title>
+		<meeting>the IEEE conference on computer vision and pattern recognition</meeting>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+			<biblScope unit="page" from="3712" to="3722" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b56">
+	<monogr>
+		<title level="m" type="main">A large-scale study of representation learning with the visual task adaptation benchmark</title>
+		<author>
+			<persName><forename type="first">Xiaohua</forename><surname>Zhai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joan</forename><surname>Puigcerver</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Kolesnikov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierre</forename><surname>Ruyssen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carlos</forename><surname>Riquelme</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mario</forename><surname>Lucic</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Josip</forename><surname>Djolonga</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andre</forename><forename type="middle">Susano</forename><surname>Pinto</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maxim</forename><surname>Neumann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Dosovitskiy</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1910.04867</idno>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b57">
+	<analytic>
+		<title level="a" type="main">Sigmoid loss for language image pre-training</title>
+		<author>
+			<persName><forename type="first">Xiaohua</forename><surname>Zhai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Basil</forename><surname>Mustafa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Kolesnikov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lucas</forename><surname>Beyer</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE/CVF International Conference on Computer Vision</title>
+		<meeting>the IEEE/CVF International Conference on Computer Vision</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="11975" to="11986" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b58">
+	<monogr>
+		<author>
+			<persName><forename type="first">Jinghao</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chen</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huiyu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cihang</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alan</forename><surname>Yuille</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Kong</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2111.07832</idno>
+		<title level="m">ibot: Image bert pre-training with online tokenizer</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

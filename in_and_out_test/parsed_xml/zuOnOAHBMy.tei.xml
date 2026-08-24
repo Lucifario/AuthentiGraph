@@ -1,0 +1,1590 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 HELENE: HESSIAN LAYER-WISE CLIPPING AND GRADIENT ANNEALING FOR ACCELERATING FINE-TUNING LLM WITH ZEROTH-ORDER OPTIMIZATION</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 HELENE: HESSIAN LAYER-WISE CLIPPING AND GRADIENT ANNEALING FOR ACCELERATING FINE-TUNING LLM WITH ZEROTH-ORDER OPTIMIZATION</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">1626EF840E6D4AABAE5188ECC27B7EB9</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:13+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Fine-tuning large language models (LLMs) poses significant memory challenges, as the back-propagation process demands extensive resources, especially with growing model sizes. Recent work, MeZO, addresses this issue using a zerothorder (ZO) optimization method, which reduces memory consumption by matching the usage to the inference phase. However, MeZO experiences slow convergence due to varying curvatures across model parameters. To overcome this limitation, we introduce HELENE, a novel scalable and memory-efficient optimizer that integrates annealed A-GNB gradients with a diagonal Hessian estimation and layerwise clipping, serving as a second-order pre-conditioner. This combination allows for faster and more stable convergence. Our theoretical analysis demonstrates that HELENE improves convergence rates, particularly for models with heterogeneous layer dimensions, by reducing the dependency on the total parameter space dimension. Instead, the method scales with the largest layer dimension, making it highly suitable for modern LLM architectures. Experimental results on RoBERTa-large and OPT-1.3B across multiple tasks show that HELENE achieves up to a 20× speedup compared to MeZO, with average accuracy improvements of 1.5%. Furthermore, HELENE remains compatible with both full parameter tuning and parameter-efficient fine-tuning (PEFT), outperforming several state-of-the-art optimizers. The codes will be released after reviewing.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>LLMs have demonstrated remarkable capabilities across various downstream tasks. Fine-tuning these models has become the standard approach for improving task-specific performance, in which the firstorder optimizers like Stochastic Gradient Descent (SGD) <ref type="bibr" target="#b40">(Robbins &amp; Monro, 1951)</ref>, Adam <ref type="bibr" target="#b14">(Diederik, 2014)</ref> and AdamW <ref type="bibr" target="#b22">(Hutter &amp; Loshchilov, 2017)</ref> are widely used. While effective, however, these methods demand significant memory resources primarily due to the backpropagation process, which makes fine-tuning challenging, especially for large-scale models. To overcome this limitation, <ref type="bibr" target="#b31">Malladi et al. (2023)</ref> proposed a memory-efficient zeroth-order optimizer (MeZO) that estimates gradients using only two forward passes per training step, contributing to considerable memory savings.</p><p>However, recent studies show that loss functions in deep learning often exhibit heterogeneous curvatures across different model parameters and different model layers <ref type="bibr" target="#b41">(Sagun et al., 2016;</ref><ref type="bibr" target="#b18">Ghorbani et al., 2019;</ref><ref type="bibr">Zhang et al., 2022;</ref><ref type="bibr" target="#b52">Yao et al., 2020)</ref>, which poses challenges to zeroth-order (ZO) optimization. This variation in curvature can overall hinder training efficiency and lead to the suboptimal solution. To address this issue, more advanced techniques are required, such as incorporating second-order information to better account for curvature differences <ref type="bibr" target="#b26">(Liu et al., 2023;</ref><ref type="bibr" target="#b47">Tran &amp; Cutkosky, 2022;</ref><ref type="bibr" target="#b23">Jahani et al., 2021)</ref>. However, in ZO optimization, directly computing the Hessian from first-order derivatives is nearly impossible, and partial Hessian evaluations are computationally intensive, leading to slower convergence. Moreover, we also observe that these methods like Naive Newton's method and Sophia <ref type="bibr" target="#b26">(Liu et al., 2023)</ref> fail in fine-tuning LLMs in practice as illustrated in Figure <ref type="figure">1</ref> and Figure <ref type="figure">2</ref>.</p><p>To overcome the aforementioned challenges, we propose HELENE, a novel optimizer designed to estimate second-order curvature information efficiently in the context of ZO optimization. Originating Under review as a conference paper at ICLR 2025 from label-sampling-based Gaussian-Newton Garlett (GNB) Estimator <ref type="bibr" target="#b43">(Schraudolph, 2002;</ref><ref type="bibr" target="#b50">Wei et al., 2020;</ref><ref type="bibr" target="#b32">Martens, 2020)</ref>, in our HELENE algorithm, we introduce a label-sampling-free and efficient Hessian estimator called the asymptotic Gauss-Newton-Bartlett estimator (A-GNB) Estimator, which estimates the diagonal of the Hessian matrix. A-GNB is proven to asymptotically converge to the unbiased Gauss Newton matrix. Additionally, HELENE includes a layer-wise adaptive clipping mechanism that enables more precise curvature-aware updates, while magnitude-based clipping helps prevent the overestimation of extreme values in the Hessian diagonal. Unlike existing methods that rely on global clipping, which can distort gradient signals, HELENE preserves the integrity of gradient information by applying clipping on a per-layer basis.</p><p>One of the key innovations of HELENE is its ability to adaptively clip Hessian updates according to the curvature of each layer, which significantly enhances convergence rates. While the convergence of state-of-the-art optimizers like MeZO-Sophia which may require O(d) steps; in contrast, the convergence of HELENE requires significantly less steps, which is O(max i d i ) based on the largest layer dimension max i d i across all layers, making it more suitable for modern deep architectures. We observed that zero-order methods require a stronger emphasis on momentum due to the increasing noise in SPSA gradient estimation as optimization progresses, due to the greater difficulty of training as the model parameters approach a local minimum, causing the noise magnitude from sampling perturbations to exceed that of the true gradient signal.So contracting to most momentum design in first-order methods, the proposed HELENE algorithm also integrates an novel annealing exponential moving average (EMA) of the gradients, tailored for Zero-order methods, where the factor alpha dynamically reduce the weight of the gradient in the momentum update.</p><p>Overall, our key contributions can be summarized as follows:</p><p>1. HELENE integrates a novel asymptotic Gauss-Newton-Bartlett (A-GNB) estimator that efficiently estimates the diagonal of the Hessian matrix without the need for label sampling which may incur more noise in the Hessian estimation. This estimator asymptotically converges to the unbiased diagonal Gauss Newton matrix, improving the efficiency and precision of curvature-aware updates. In our proposed method, we also devise a new layerwise adaptive clipping mechanism by adjusting Hessian updates according to the curvature of each layer. HELENE integrates an new annealing exponential moving average (EMA) of the gradients, ensuring robustness in non-convex loss landscapes.</p><p>2. Our theoretical analysis demonstrates that HELENE achieves improved convergence rates compared to existing methods, particularly for models with many layers. By reducing the convergence steps from O(d) to O(max i d i ), HELENE is provably more scalable for modern deep learning architectures, especially LLM fine-tuning.</p><p>Under review as a conference paper at ICLR 2025 3. HELENE achieves up to 20× speedup compared to MeZO and improves performance by 1.5% on average. We conduct extensive experiments on RoBERTa-large and OPT-1.3B across various downstream tasks to verify HELENE's effectiveness. Furthermore, we demonstrate that HELENE not only remains compatible with full parameter tuning and PEFT, but also outperforms many of the latest optimizers across a range of tasks.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">PRELIMINARIES</head><p>In this section, we briefly review essential background concepts related to zeroth-order optimization and diagonal Hessian approximation, which are fundamental to the design of our proposed method.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.1">ZEROTH-ORDER GRADIENT ESTIMATORS AND MEZO</head><p>Zeroth-order (ZO) optimization has long been studied in the context of convex and non-convex objectives. One of the typical ZO gradient estimators is the simultaneous perturbation stochastic approximation (SPSA) <ref type="bibr" target="#b44">(Spall, 1992;</ref><ref type="bibr" target="#b36">Maryak &amp; Chin, 2001)</ref>. Given a model with parameters θ ∈ R d and loss function L, SPSA estimates the gradient on a minibatch B as:</p><formula xml:id="formula_0">g ϵ (θ) = L(θ + ϵz; B) -L(θ -ϵz; B) 2ϵ z ≈ zz ⊤ ∇L(θ; B)<label>(1)</label></formula><p>where z ∈ R d with z ∼ N (0, I d ) and ϵ is the perturbation scale.</p><p>Building on the basic principles of ZO optimization, MeZO <ref type="bibr" target="#b31">(Malladi et al., 2023)</ref> introduces a memory-efficient implementation of ZO-SGD. This approach reduces memory requirements, allowing optimization to proceed with the same memory usage as the inference phase of a model. The key innovation in MeZO lies in its use of a consistent random seed s to sample the random vector z, ensuring the same perturbation z at each step.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.2">DIAGONAL HESSIAN APPROXIMATION</head><p>While zeroth-order methods like MeZO provide valuable tools for gradient estimation, optimization can be significantly enhanced by incorporating second-order information, such as curvature. However, directly computing and applying the full Hessian matrix is computationally expensive, particularly in high-dimensional parameter spaces. Specifically, directly applying the Hessian pre-conditioner by calculating the inverse Hessian and multiplying it with the gradient vector at each iteration H -1 g is particularly computationally expensive. To address this challenge, inexact Newton methods have been developed, where approximations of the Hessian are used instead of the full matrix <ref type="bibr" target="#b12">(Dembo et al., 1982;</ref><ref type="bibr" target="#b3">Bollapragada et al., 2019;</ref><ref type="bibr" target="#b51">Xu et al., 2020)</ref>.</p><p>A simple yet effective alternative is to approximate the Hessian by its diagonal elements, which reduces computational complexity while retaining useful curvature information. In this approach, a general descent direction can be written as follows:</p><formula xml:id="formula_1">∆θ ≈ diag(H) -1 g,</formula><p>where diag(H) represents the diagonal elements of the Hessian matrix. This method enhances optimization by enabling efficient inverse Hessian application and supporting inexact Newton methods, providing improved convergence in complex problems.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">METHOD</head><p>In this section, we formally present HELENE in Section 3.2, with pseudo-code provided in Algorithm 1. In Section 3.4, we introduce A-GNB, followed by a detailed discussion of layer-wise clipped diagonal Hessian in Section 3.5.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.1">MOTIVATION</head><p>Highly variable curvature across different layers and parameters. Fine-tuning large language models (LLMs) has become essential for achieving state-of-the-art performance on various downstream tasks. Commonly employed first-order optimizers such as Stochastic Gradient Descent (SGD) <ref type="bibr" target="#b40">(Robbins &amp; Monro, 1951</ref><ref type="bibr">), Adam(Diederik, 2014)</ref>, and AdamW <ref type="bibr" target="#b22">(Hutter &amp; Loshchilov, 2017)</ref> have proven effective in this regard. However, these methods require substantial memory, making them difficult to apply to large models in memory-constrained environments. To mitigate this, zeroth-order (ZO) optimizers, such as MeZO <ref type="bibr" target="#b31">(Malladi et al., 2023)</ref>, have been introduced, offering memory-efficient solutions by approximating gradients through forward passes. Nevertheless, even with memory savings, existing ZO methods encounter significant challenges when dealing with heterogeneous curvatures in LLMs, which can lead to inefficient convergence and sub-optimal solutions. One key challenge is the inability of optimizers to adapt to the highly variable curvature across different layers and parameters in large models <ref type="bibr" target="#b41">(Sagun et al., 2016;</ref><ref type="bibr" target="#b18">Ghorbani et al., 2019;</ref><ref type="bibr">Zhang et al., 2022)</ref>. While techniques that estimate second-order information-such as curvatureaware methods-have shown promise in improving optimization efficiency <ref type="bibr" target="#b26">(Liu et al., 2023;</ref><ref type="bibr" target="#b47">Tran &amp; Cutkosky, 2022;</ref><ref type="bibr" target="#b23">Jahani et al., 2021)</ref>, they are challenging to integrate into ZO optimizers due to the noise from label-sampling and the difficulty of computing or approximating the Hessian efficiently in high-dimensional spaces.</p><p>Limitation of EMA to balance short-term gradient noise and long-term convergence. A commonly used technique to manage these curvature variations is the Exponential Moving Average (EMA), which smooths the gradient updates over iterations. However, EMA alone can be insufficient for highly non-convex loss landscapes, especially when it lacks mechanisms to adaptively adjust the weights between the past momentum and the current gradient in the presence of strong noise in gradient estimation. Without annealing, EMA risks accumulating excessive bias over time, particularly when ZO gradient estimation is noisy, leading to suboptimal convergence. This issue is compounded when the optimizer needs to balance short-term gradient noise and long-term convergence, calling for more ZO-specific strategies to mitigate these effects.</p><p>Challenge in managing extreme curvature values using Universal clipping. Furthermore, clipping the Hessian to manage extreme curvature values is another widely adopted strategy. Sophia <ref type="bibr" target="#b26">(Liu et al., 2023)</ref>, for example, performs global clipping with value 1 of Hessian-based updates to ensure numerical stability, which essentially can slow down the convergence. While effective at curbing extreme updates, applying a universal clipping threshold across all parameters is inherently suboptimal for models with heterogeneous curvatures. A universal clip might suppress meaningful gradient information in some layers while insufficiently addressing extreme Hessian values in others, thus limiting the optimizer's ability to adaptively handle the diverse learning dynamics across layers <ref type="bibr" target="#b47">(Tran &amp; Cutkosky, 2022)</ref>. This approach may result in slower convergence or failure to escape saddle points and local maxima, where more flexible, curvature-aware updates are required <ref type="bibr" target="#b52">(Yao et al., 2020)</ref>.</p><p>To overcome these limitations, HELENE addresses both the limitation of EMA and the issue of global Hessian clipping. We instantiate MeZO-Gradient Descent, MeZO-Adam, MeZO-Newton's method, MeZO-Sophia, and HELENE on a simplified 2D problem to illustrate the advantages HELENE, as shown in Figure <ref type="figure">1</ref>. A visual comparison of the methods reveals that while MeZO-Adam and MeZO-Gradient Descent struggle to converge effectively, Newton's method and Sophia find it hard to maintain stability when facing heterogeneous curvature, whereas HELENE succeeds. Refer to Section 5 for a more comprehensive empirical analysis, including up to 20× faster convergence and improved accuracy across various tasks and datasets.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">HELENE: HESSIAN LAYER-WISE CLIPPING AND GRADIENT ANNEALING</head><p>In HELENE, we introduce an annealing mechanism to mitigate bias in SPSA-estimated gradients, combined with a clipped diagonal Hessian pre-conditioner that adjusts parameter update step sizes based on layer-wise curvature. First, the gradient is calculated using the SPSA, while the diagonal Hessian is efficiently estimated by the proposed new A-GNB method, to eliminate the noise incured in sampling labels from the model output used in GNB and Sophia. At each iteration, SPSA provides an estimate g t using two forward passes with random perturbations, and A-GNB returns h t , the diagonal Hessian of the mini-batch loss.</p><p>We apply an exponential moving average (EMA) to both the gradient and diagonal Hessian estimates to reduce noise and improve stability. To further enhance convergence, we apply layer-wise magnitudebased clipping to the diagonal Hessian, ensuring extreme values do not disproportionately affect parameter updates. We provide our pseudo code in Algorithm 1 and each module description in the following section in details.</p><p>Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.3">EMA OF DIAGONAL HESSIAN ESTIMATES</head><p>When using a mini-batch to compute the local Hessian (curvature), the resulting estimates are often noisy. The Hessian diagonal can fluctuate significantly across different parameter dimensions of the problem. Inspired by the exponential moving average (EMA) of gradient moments in Adam, we apply a similar technique to reduce noise in the Hessian diagonal estimates over iterations. The updated Hessian diagonal is computed in the following:</p><formula xml:id="formula_2">h t = β 2 h t-k + (1 -β 2 ) ĥt ,</formula><p>where h t represents the denoised Hessian diagonal at iteration t and ĥt is the current estimate of the diagonal at the k-th iteration.</p><p>Algorithm 1 HELENE with Layer-wise Clipping 1: Input: Initial parameters θ 1 , step budget T , learning rate schedule {η t } T t=1 , hyperparameters</p><formula xml:id="formula_3">{λ i } , γ, β 1 , β 2 , ϵ. 2: Set m 0 = 0, h 0 = 0 3: for t = 1 to T do 4:</formula><p>Estimate gradient g t from ∇L t (θ t ) obtained from Eq. (1).</p><p>5:</p><formula xml:id="formula_4">α = Anneal(t) 6: m t = β 1 m t-1 + αg t 7: if t mod k = 1 then 8:</formula><p>Compute diagonal Hessian estimator ĥt = A-GNB(θ t ) 9:</p><formula xml:id="formula_5">h t = β 2 h t-k + (1 -β 2 ) ĥt 10: else 11: h t = h t-1 12: end if 13:</formula><p>Apply weight decay: θ t = θ t -η t ϵθ t 14:</p><p>For each layer i, update:</p><formula xml:id="formula_6">θ t+1,i = θ t,i -η t • mt,i γ•max(ht,i,λi)+ϵ 15: end for 1: Subroutine Anneal(t) α ← β 1 + (1 -β 1 ) • exp (-t/T )<label>(2)</label></formula></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.3.1">ANNEALING MECHANISM</head><p>As illustrated in Figure <ref type="figure" target="#fig_4">5</ref>, the native gradient EMA introduces bias, which adversely affects the training process and results in an increase in loss during the later stages. To mitigate these issues, we introduce a gradient annealing mechanism to work in tandem with EMA. This adaptive adjustment is crucial for ensuring that the model becomes less influenced by noisy or outdated gradients in later stages. We observe that, unlike first-order methods such as SGD, Zero-order methods require a stronger emphasis on momentum due to the increasing noise in SPSA gradient estimation as optimization progresses, as illustrated in Appendix Figure <ref type="figure">7</ref>. To address this, we introduce a novel annealing strategy tailored for Zero-order methods, where the factor α, dynamically adjusts the weight of the gradient in the momentum update. The increase in noise in SPSA is likely due to the greater difficulty of training as the model parameters approach a local minimum, causing the noise magnitude from sampling perturbations to exceed that of the true gradient signal. Notably, our annealing approach is simple to implement, requiring the tuning of only a single hyperparameter.</p><p>At each iteration, the annealing mechanism computes α using an exponential decay schedule in Eq. 2, where T is a predefined hyperparameter controlling the annealing rate. The increase in noise in SPSA is likely due to the greater difficulty of training as the model parameters approach a local minimum, causing the noise magnitude from sampling perturbations to exceed that of the true gradient signal.</p><p>To address this, as t increases, α gradually decreases to reduce the impact of gradient on the update, mitigating the bias introduced by EMA. This ensures that, in the later stages of training, the model focuses more on stable gradient estimates and less on noisy or rapidly changing updates via SPSA estimated gradient. The annealing mechanism is incorporated into the EMA update rule as line 6 in Algorithm 1. Via dynamical α the annealing mechanism ensures that the optimizer can effectively balance short-term noise with long-term convergence.</p><p>Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.4">ASYMPTOTIC GAUSS-NEWTON-BARTLETT (A-GNB) ESTIMATOR</head><p>The original GNB <ref type="bibr" target="#b32">(Martens, 2020)</ref> estimator relies on sampled labels ŷb drawn from the categorical distribution based on the model's output. However, this induces stochasticity due to label sampling, which could be problematic when label distributions are highly imbalanced, as is the case in large language model (LLM) training. We propose a new estimator, which we call the Asymptotic Gauss-Newton-Bartlett (A-GNB) Estimator, that replaces the sampled labels ŷb with the true labels y b and asymptotically converges to the true diagonal of the Gauss-Newton matrix, which is a biased estimator for the diagonal of the Hessian as shown below:</p><formula xml:id="formula_7">∇ 2 θ L(θ) ≈ J θ f (θ, x) • S • J θ f (θ, x) ⊤ (3)</formula><p>where J θ f (θ, x) is the Jacobian of the model's output f (θ, x) with respect to the parameters θ, and</p><formula xml:id="formula_8">S = ∂ 2 L(t,y) ∂t 2</formula><p>is the second-order derivative of the loss w.r.t. the logits t = f (θ, x) and</p><formula xml:id="formula_9">y ∼ p(y|x), which implies that S = E y∼p(θ,x) ∂ 2 L(t,y) ∂t 2</formula><p>assuming that L is the Cross-Entropy loss. Consequently, the diagonal of the Gauss-Newton matrix for the mini-batch loss is estimated as:</p><formula xml:id="formula_10">diag(J θ f (θ, x) • S • J θ f (θ, x) ⊤ ]) = E y∼p(y|x) diag(J θ f (θ, x) ∂L(t, y) ∂t ∂L(t, y) ∂t ⊤ J θ f (θ, x) ⊤ ) = E y∼p(y|x) diag(∇ θ L(f (θ, x), y)∇ θ L(f (θ, x), y) ⊤ ) ≈ 1 B B b=1 [(g(θ, x b , y b )] ⊙ [(g(θ, x b , y b )]</formula><p>where diag(•) represents the diagonal elements of a matrix, and B denotes the batch size and g is the estimated gradient from Eq. ( <ref type="formula" target="#formula_0">1</ref>). In contrast to GNB estimator, which includes sampling label ŷ from the logit probability output from the model, we replace it by y b , the true label, thereby avoiding the need for post-output label sampling. By eliminating the stochasticity induced by sampled labels ŷ, we reduce the variance caused by sampling noise, and it is especially beneficial in imbalanced data scenarios, when samples from minor class is rarely selected unless sampling significantly many times.</p><p>The estimated gradient terms now correspond directly to the true labels, and their outer product sums up to the true Gauss-Newton approximation of the Hessian. As the batch size B → ∞, the A-GNB estimator converges to the true Hessian's diagonal:</p><formula xml:id="formula_11">lim B→∞ 1 B B b=1 [g(θ, x b , y b )] ⊙ [g(θ, x b , y b )] = diag(J θ f (θ, x) • S • J θ f (θ, x) ⊤ )</formula><p>Therefore, The A-GNB estimator asymptotically converges to the true diagonal of the Gauss-Newton matrix as B increases.</p><formula xml:id="formula_12">Algorithm 2 Asymptotic Gauss-Newton-Bartlett (A-GNB) 1: Parameters: θ 2: Draw a mini-batch of the input {x b } B b=1 3: Estimate diagnal Hessian matrix by h = B b=1 [g(θ, x b , y b )] ⊙ [g(θ, x b , y b )] 4: return h</formula></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.5">LAYWERWISE CLIPPED DIAGONAL HESSIAN TO HELP NEWTON'S METHOD</head><p>As discussed in the motivating examples, fine-tuning LLMs and optimizing non-convex functions pose challenges for Newton's method, which uses the Hessian as a pre-conditioner. The method may converge to local maxima rather than local minima. Moreover, the inaccuracy of Hessian estimates and changes in the Hessian along the optimization trajectory can render second-order information unreliable. To address these issues, we draw inspiration from Sophia. While Sophia performs clipping on the Newton update H -1 g, we propose a more robust approach by applying layer-wise clipping directly to the Hessian matrix H.using a universal clipping threshold for the update H -1 g disregards the differences in layer-wise Hessian and gradient magnitudes, which are frequently observed during DNN training, and may distort valuable gradient information. Moreover, H -1 g introduces excessive bias, potentially distorting useful gradient information, whereas clipping extreme Hessian values more effectively preserves essential second-order information.</p><p>In particular, we improve convergence rates by (1) considering only the positive entries of the diagonal Hessian and (2) introducing per-coordinate, layer-wise clipping of the Hessian values. This approach adapts the clipping threshold across layers to account for the diverse curvature across different parts of the model. Given a clipping threshold λ i &gt; 0 for layer i, the clipping function is defined as:</p><formula xml:id="formula_13">clip(h i ) = max(h i , λ i ), λ i ∈ R,</formula><p>where all operations are applied element-wise for each layer. The update rule for layer i is then written as:</p><formula xml:id="formula_14">θ t+1,i = θ t,i -η • m t,i γ • max(h t,i , λ i ) + ϵ ,</formula><p>where ϵ &gt; 0 is a small constant to avoid division by zero, and λ i controls the fraction of clipped Hessian values per layer. By applying layer-wise clipping, we ensure that the optimizer is capable of adapting to the curvature of each layer individually, leading to improved stability and convergence rates across different parts of the model. We present the pseudo-code of our Hessian-clipped method in Algorithm 1.</p><p>For further information about the differences of HELENE with previous work, please reference the related work in Appendix A.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">CONVERGENCE ANALYSIS</head><p>In this section, we provide a theoretical analysis of the convergence of our proposed method. The key improvement in our method comes from the use of layer-wise parameters λ i , which reduces the dependency on the total dimension d and instead relies on the maximum layer dimension max i d i .</p><p>The theoretical bound for the number of steps T in our method is given by the following theorem with two assumptions: Assumption 1. Let L : R d → R be a loss function. We assume L is twice continuously differentiable strictly convex, and has a unique minimizer denoted by θ * . For each layer i, define µ i as the minimum eigenvalue of the Hessian matrix of L concerning the parameters of that layer evaluated at its minimizer:</p><formula xml:id="formula_15">µ i ≡ λ min (∇ 2 θi L(θ * )) where ∇ 2</formula><p>θi denotes the Hessian with respect to the parameters of the i-th layer. Assumption 2. Regarding the Hessian ∇<ref type="foot" target="#foot_0">2</ref> L(θ) of the loss function, we assume:</p><formula xml:id="formula_16">• There exists a radius R i &gt; 0 such that for any θ i , θ ′ i ∈ R d with ∥θ i -θ ′ i ∥ 2 ≤ R i , the following inequality holds: ∇ 2 L(θ ′ i | θ -i ) -1 ∇ 2 L(θ i | θ -i ) 2 ≤ 2 where ∥ • ∥ 2 represents the spectral norm.</formula><p>Theorem 1. Under Assumptions 1 and 2, let η = 1 2 and</p><formula xml:id="formula_17">λ i = Ri 2 √ di .</formula><p>The update reaches a loss at most ϵ in</p><formula xml:id="formula_18">T ≤ max i d i • (L(θ 0,i ) -min L) + ln µ i R 2 i 32d i ϵ .</formula><p>steps, where L is the loss function, θ 0,i is the initial parameter vector for layer i, µ i is the strong convexity constant for layer i, and R i is the bound on the distance between θ 0,i and θ * i .</p><p>The best known theoretical bound for the number of steps T required by Sophia to reach a loss at most ϵ is given by Sophia in which T SOPHIA ∼ O(d), where d is the total dimension of the parameter space. This result implies that the convergence rate depends linearly on the total dimension d, which can lead to slow convergence for models with large parameter spaces. In contrast, our method introduces layerwise parameters</p><formula xml:id="formula_19">ρ i = Ri</formula><p>Under review as a conference paper at ICLR 2025 and the optimal parameters θ * i for layer i, and d i is the dimension of the parameter space for layer i. This layer-wise setting significantly reduces the complexity to T SOPHIA ∼ O(max i d i ), which is the maximum dimension across layers. Besides the lower runtime bound, our method allow each layer to have its own parameter ρ i , allowing the method to adapt to the specific geometry of each layer. Refer to Appendix B.3 for the empirical study on the significant variance using unified parameter clipping across different layers. This flexibility leads to a more efficient optimization process, as each layer is treated independently based on its characteristics. In large models where some layers have much smaller dimensions than others, our method is able to achieve faster convergence by focusing on the most difficult layer with the largest dimension, therefore making our method more scalable for deep models with many layers. Detailed proof can be seen in the Appendix C.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">EXPERIMENTS</head><p>Since the introduction of the Transformer <ref type="bibr" target="#b48">(Vaswani, 2017)</ref>, language models (LMs) have progressively developed through the use of different Transformer-based architectures. One of the iconic work is BERT <ref type="bibr" target="#b13">(Devlin, 2018)</ref>, which is based on the encoder architecture of Transformer and pre-trained with techniques like masked language modeling. As the field of natural language processing (NLP) develops, more powerful decoder-only LLMs also have shown their great potential.</p><p>Therefore, to rigorously evaluate the capability and universality of HELENE, we follow the experiments conducted in MeZO on both medium-sized masked LMs (RoBERTa-large <ref type="bibr">(Liu, 2019)</ref>, 350M) and auto-regressive LLMs (OPT-1.3B <ref type="bibr" target="#b56">(Zhang et al., 2023)</ref>) under both few-shot and manyshot settings. Additionally, all optimization algorithms are evaluated with three tuning methods: fine-tuning (FT) and two parameter-efficient fine-tuning (PEFT) methods, LoRA <ref type="bibr" target="#b21">(Hu et al., 2021)</ref> and prefix-tuning <ref type="bibr" target="#b25">(Li &amp; Liang, 2021)</ref>. We also do experiments with zeroth-order (ZO) versions of some optimizers as well as ZO-SGD variants introduced in <ref type="bibr" target="#b57">Zhang et al. (2024)</ref>, and present them in Section 5.3.</p><p>The experimental results show that across all settings, HELENE not only outperforms MeZO on most datasets by approximately 1.5% on average, but also makes the convergence process of gradient-free optimization more stable and faster, boosting to 20× times the original speed.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.1">MASKED LANGUAGE MODELS</head><p>For masked LMs, we conduct experiments using RoBERTa-large on three types of NLP tasks, sentiment classification, natural language inference, and topic classification with k = 16 examples per class. We run HELENE for 5,000 steps and FT for 1,000 steps. The experimental results are listed in Table <ref type="table" target="#tab_0">1</ref>.   HELENE largely outperforms zero-shot and linear probing. On all six datasets, HELENE can stably optimize the pre-trained LM and consistently perform better than zero-shot and linear probing.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Task</head><p>HELENE delivers a 20× speed improvement over MeZO while also maintaining its performance. With the guidance of layer-wise clipped Hessian information, HELENE can reach convergence in about 5000 steps on average across the datasets, accelerating the optimization process by approximate 20× times than MeZO. Meanwhile, the results show that HELENE can still achieve performance on par with MeZO, with leading average accuracy of three tuning methods on the dataset SST-2, SST-5, MNLI and RTE.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.2">AUTO-REGRESSIVE LLMS</head><p>LLMs such as GPT-3 <ref type="bibr" target="#b4">(Brown et al., 2020)</ref>, LLaMA <ref type="bibr" target="#b46">(Touvron et al., 2023)</ref>, and ChatGLM <ref type="bibr" target="#b15">(Du et al., 2021)</ref> have become the predominant models in NLP, we include experiments with auto-regressive LLM OPT-1.3B on three different task: text classification, multiple choice, and text generation. We use various datasets from the SuperGLUE benchmark <ref type="bibr" target="#b49">(Wang et al., 2019)</ref>, which includes the following datasets: SST-2, RTE, CB, WSC, WIC, COPA, and ReCoRD. Additionally, we also experiment on BoolQ <ref type="bibr" target="#b10">(Clark et al., 2019)</ref> and SQuAD <ref type="bibr" target="#b39">(Rajpurkar, 2016)</ref>. We run HELENE with about 10,000 training steps for each dataset. The results are summarized in Table <ref type="table" target="#tab_1">2</ref>, from which we can have the following observations. HELENE has clear performance advantages compared with MeZO. Table <ref type="table" target="#tab_1">2</ref> shows that HELENE with its LoRA and prefix variants can consistently outperform MeZO. Specifically, the average performances of HELENE with its LoRA and prefix variants remarkably exceed MeZO's by 5.3%, 2.1% and 1.3% on CB, SQuAD and COPA, respectively.</p><p>HELENE accelerates 10× times while remaining compatible with PEFT methods. In Figure <ref type="figure" target="#fig_2">3</ref>, we present results from four selected datasets across different tasks under three tuning methods. It indicates that HELENE can consistently speed up the convergence by up to 10× times, and also enhances the capability.</p><p>Under review as a conference paper at ICLR 2025  <ref type="formula">2020</ref>). Therefore, we reference the statistics of performances summarized in <ref type="bibr" target="#b57">Zhang et al. (2024)</ref> and experiment under the same setting with them (Table <ref type="table">3</ref>), through which HELENE shows good functionality especially for FT and prefix-tuning.</p><p>We further implement the ZO versions of Adam, AdamW and Lion <ref type="bibr" target="#b8">(Chen et al., 2024)</ref> and plot the results in Figure <ref type="figure">4</ref>. The results indicate that HELENE helps the model converge faster as well as obtain lower validation loss value.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.4">ABLATION STUDY</head><p>We conduct a comprehensive ablation study on the key techniques of HELENE in Appendix B, including in-depth analysis of the effects of magnitude clipping across different ranges. Additionally, we explore the factors resulting in Sophia's initial convergence and subsequent divergence.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6">CONCLUSION</head><p>In this paper, we present a novel optimizer, HELENE, which is designed to address the challenges of fine-tuning LLMs. HELENE integrates a new asymptotic Gauss-Newton-Bartlett (A-GNB) estimator for diagonal Hessian estimation, and a novel layer-wise clipping with the annealing module. The A-GNB estimator eliminates the need for label sampling, providing an unbiased Hessian approximation and improving the precision of curvature-aware updates. Furthermore, our layer-wise clipping mechanism provably ensures more adaptive Hessian updates based on the curvature of each layer, enhancing stability and scalability. Theoretical analysis shows that HELENE reduces convergence steps from O(d) to O(max i d i ), making it highly scalable for modern architectures with many layers. Experimental results on models like RoBERTa-large and OPT-1.3B demonstrate that HELENE achieves up to a 20× speedup compared to MeZO and improves performance by 1.5% on average. Compatible with both full parameter tuning and parameter-efficient fine-tuning, HELENE outperforms many state-of-the-art optimizers across diverse tasks and datasets.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A RELATED WORK</head><p>A.1 ZERO-ORDER OPTIMIZATION Zeroth-order (ZO) optimization, which only relies on the forward passes of neural networks, offers significant memory savings during the training process. Recently, MeZO <ref type="bibr" target="#b31">(Malladi et al., 2023)</ref> adapted the traditional zeroth-order SGD optimization method for fine-tuning LMs, achieving performance comparable to full-parameter fine-tuning while significantly reducing memory usage. Thus, zerothorder optimization is regarded as a promising approach for memory-efficient fine-tuning of LLMs.</p><p>Several studies have aimed to improve the MeZO algorithm. For instance, <ref type="bibr" target="#b16">Gautam et al. (2024)</ref> introduced a zeroth-order optimization algorithm that integrates both full-batch and mini-batch information to produce asymptotically unbiased, low-variance gradient estimations. However, the convergence rate of their approach still leaves room for improvement. In pursuit of better gradient estimation, <ref type="bibr" target="#b24">Jiang et al. (2024)</ref> proposed an innovative perturbation sampling technique inspired by the Adam optimizer. Other methods, such as SPSA <ref type="bibr" target="#b44">(Spall, 1992;</ref><ref type="bibr" target="#b36">Maryak &amp; Chin, 2001)</ref>, have shown to be effective in non-convex multi-agent optimization <ref type="bibr" target="#b45">(Tang et al., 2020;</ref><ref type="bibr" target="#b20">Hajinezhad &amp; Zavlanos, 2018)</ref> and in generating black-box adversarial examples <ref type="bibr" target="#b7">(Chen et al., 2017;</ref><ref type="bibr" target="#b6">Cai et al., 2021;</ref><ref type="bibr">Liu et al., 2019;</ref><ref type="bibr" target="#b53">Ye et al., 2018)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.2 SECOND-ORDER INFORMATION FOR FINE-TUNING LLMS</head><p>Classic second-order optimization algorithms pre-condition the gradient with curvature information <ref type="bibr" target="#b5">(BROYDEN, 1970;</ref><ref type="bibr" target="#b37">Nesterov &amp; Polyak, 2006;</ref><ref type="bibr" target="#b11">Conn et al., 2000)</ref>. Over the years, people have developed numerous ways to adapt these methods to deep learning. To the best of our knowledge, <ref type="bibr" target="#b2">BECKER (1988)</ref> was the first to use diagonal Hessian as the pre-conditioner. <ref type="bibr" target="#b35">Martens et al. (2010)</ref> approximated the Hessian with conjugate gradient. <ref type="bibr" target="#b42">Schaul et al. (2013)</ref> automatically tuned the learning rate of SGD by considering diagonal Hessian. <ref type="bibr" target="#b38">Pascanu (2013)</ref> considered Gaussian Newton's approximation of Hessian and Fisher information matrix. <ref type="bibr" target="#b33">Martens &amp; Grosse (2015)</ref> and follow-up works <ref type="bibr" target="#b1">(Ba et al., 2017;</ref><ref type="bibr" target="#b17">George et al., 2018;</ref><ref type="bibr" target="#b34">Martens et al., 2018;</ref><ref type="bibr">Zhang et al., 2022)</ref> proposed to approximate the Hessian based on the structure of neural networks. Despite these progress on deep learning applications, for decoder-only LLMs, Adam still appears to be the most popular optimizer. The authors of this paper suspect that many previous second-order optimizers face the challenge that the computational / memory overhead due to frequent Hessian computation hinders improvements in wall-clock time <ref type="bibr" target="#b33">(Martens &amp; Grosse, 2015;</ref><ref type="bibr" target="#b19">Gupta et al., 2018)</ref>. Some of them also depend on specific model architecture or hardware structures, e.g., <ref type="bibr" target="#b0">Anil et al. (2020)</ref> offloads hessian computation to CPUs, and <ref type="bibr" target="#b17">George et al. (2018)</ref> needs ResNet and very large batch size to approximate the Fisher information matrix. To the best of our knowledge, there was no previous report that second-order optimizers can achieve a speed-up on LLMs in total compute.</p><p>There is also a concurrent work HiZOO <ref type="bibr" target="#b58">(Zhao et al., 2024)</ref> that utilizes Hessian information to enhance zeroth-order optimization for fine-tuning LLMs. A major focus of HiZOO is to introduce one more forward pass to handle heterogeneous curvatures across parameter dimensions. However, our work focus on incorporating layer-wise clipping to exclude extreme Hessian values and Exponential Moving Average (EMA) to improve generalization.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.3 GRADIENT CLIPPING</head><p>Global gradient clipping has been a widely adopted practice in fine-tuning LLMs <ref type="bibr" target="#b9">(Chen et al., 2020;</ref><ref type="bibr" target="#b54">Zhang et al., 2019;</ref><ref type="bibr" target="#b27">Liu et al., 2022)</ref>. This technique stabilizes training by mitigating the impact of rare examples and large gradient noise. In addition to gradient clipping, HELENE is the first method to clip the Hessian matrix in second-order optimization techniques. This approach addresses the issue of the Hessian matrix fluctuating along the optimization trajectory and reduces the errors in Hessian approximations.  To counter this, we added an annealing term to make the gradient asymptotically unbiased, which stabilizes the loss.</p><p>Inspired by Sophia, we introduced the clipped Hessian to address heterogeneous curvatures, further improving convergence speed. Our ablation study validates both the motivation and effectiveness of these components.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.2 MAGNITUDE CLIPPING</head><p>Figure <ref type="figure">6</ref> addresses the robustness of clipping in our optimizer. Our empirical study is as follows: First, we explored the impact of lower bounds ranging from 1 to 3, all of which demonstrated stability. As a hyperparameter, this lower bound shows consistent robustness. However, when the lower bound was set to 0.9, the model performance dropped by 10 points, leading us to believe that problematic Hessian values are concentrated below 1, while values above 1 are less critical. Second, we argue that layer-wise clipping based on magnitude is reasonable in a zeroth-order setting, as performing percentage-based clipping for each layer would be time-consuming.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.3 INVESTIGATION INTO THE CONVERGENCE INSTABILITY OF SOPHIA</head><p>We study the reasons for Sophia's failure in the Figure <ref type="figure">1</ref> by counting the number of clip triggers. We computed the loss between timesteps 400 and 800, with a mean value of 0.57. The average loss between timesteps 1400 and 1800 was 0.65. We then analyzed the number of times the Sophia clipping mechanism was triggered within these two time intervals. Our analysis covered the Q, K, V matrices, fully connected layers, and bias layers. We found that the frequency of clipping in the interval where the mean loss was 0.65 was 1.18 to 1.22 times higher than in the interval where the mean loss was 0.57.</p><p>Based on these experimental observations, we conclude that Sophia's clipping mechanism tends to be over-triggered in complex data scenarios, particularly when faced with heterogeneous curvature. This over-triggering can result in non-convergence, aligning with our intuition. In the zeroth-order setting, gradients are estimated using SPSA, and excessive clipping of the g H terms can lead to instability and failure of the model to converge. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C DETAILED CONVERGENCE ANALYSIS</head><p>Lemma 1 (Divergence to Infinity). Under Assumption 1, for each layer i in a neural network model, assume the function L : R di → R is strictly convex, twice continuously differentiable, and has a unique minimizer denoted by θ * i . For any parameter vector θ i of layer i such that ∥θ i -</p><formula xml:id="formula_20">θ * i ∥ 2 ≥ 1, the function L(θ i ) diverges to infinity as ∥θ i ∥ 2 → ∞.</formula><p>Under review as a conference paper at ICLR 2025 Proof. By the strict convexity of L, for any θ i such that ∥θ i -θ * i ∥ 2 ≥ 1, we have:</p><formula xml:id="formula_21">L(θ i ) -L(θ * i ) ∥θ i -θ * i ∥ 2 ≥ min ∥ϕ∥2=1 L(θ * i + ϕ) -L(θ * i ),<label>(4)</label></formula><p>where ϕ is a unit vector. For the convenience, here L(θ i ) denotes L(θ i |θ -i ) where θ -i denotes the parameters in the whole model except θ i , and</p><formula xml:id="formula_22">L(θ * i ) denotes L(θ * i |θ * -i ). Define ∆ i as: ∆ i = min ∥ϕ∥2=1 L(θ * i + ϕ) -L(θ * i ),<label>(5)</label></formula><p>a positive constant due to the strict convexity of L indicating the minimal rate of increase of L around θ * i . Thus, the inequality can be written as:</p><formula xml:id="formula_23">L(θ i ) ≥ ∥θ i -θ * i ∥ 2 ∆ i + L(θ * i ).<label>(6)</label></formula><p>This implies that as ∥θ i ∥ 2 → ∞, which necessarily implies ∥θ i -θ * i ∥ 2 → ∞, the loss L(θ i ) also diverges to infinity, since the term ∥θ i -θ * i ∥ 2 ∆ i dominates and increases without bound.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Note:</head><p>We do not require the Hessian of the loss function, ∇ 2 L(θ i ), to be Lipschitz continuous; Assumption 2 only requires that the Hessian is continuous in a multiplicative sense within a neighborhood of constant radius.</p><p>Lemma 2 (Parameter Bound). Let L : R d → R be a loss function for a neural network composed of multiple layers, each with parameters θ i , and L is twice continuously differentiable and strictly convex with respect to each layer's parameters at a global minimizer θ * . Assume each layer i satisfies the following condition:</p><formula xml:id="formula_24">L(θ i ) -min L ≤ µ i R 2 i 4 ,</formula><p>where µ i is the minimum eigenvalue of the Hessian of L at the minimizer for parameters of layer i, and R i is a predefined radius. Then, it holds that</p><formula xml:id="formula_25">∥θ i -θ * i ∥ 2 ≤ R i .</formula><p>Proof. Suppose, by way of contradiction, there exists a θ i such that L(θ i ) ≤</p><formula xml:id="formula_26">µiR 2 i 4 , but ∥θ i -θ * i ∥ 2 &gt; R i . Define θ ′ i as: θ ′ i = θ * i + 2(L(θ i ) -min L) θ i -θ * i µ i ∥θ i -θ * i ∥ 2 . (<label>7</label></formula><formula xml:id="formula_27">)</formula><p>Since θ ′ i is a point between θ i and θ * i , and due to the strict convexity of L, we have L(θ ′ i ) &lt; L(θ i ) by convexity. Considering the Taylor expansion of L at θ * i along the direction towards θ ′ i , we have:</p><formula xml:id="formula_28">f (t) = L(θ * i + t(θ ′ i -θ * i )), f (1) = L(θ ′ i ), f (0) = L(θ * i ), f ′ (0) = 0,<label>(8)</label></formula><formula xml:id="formula_29">f ′′ (t) = (θ ′ i -θ * i ) T ∇ 2 L(tθ ′ i + (1 -t)θ * i )(θ ′ i -θ * i ),<label>(9)</label></formula><p>Given</p><formula xml:id="formula_30">f ′′ (t) ≥ µi 2 ∥θ ′ i -θ * i ∥ 2 2</formula><p>from Assumption 2 and the convexity, the Taylor expansion yields:</p><formula xml:id="formula_31">f (1) ≥ f (0) + f ′ (0) + 1 2 f ′′ (t) = L(θ * i ) + µ i 2 ∥θ ′ i -θ * i ∥ 2 2 , thus, L(θ ′ i ) ≥ L(θ * i ) + µ i 2 ∥θ ′ i -θ * i ∥ 2 2</formula><p>which contradicts the assumption that L(θ ′ i ) &lt; L(θ i ). Therefore, the original assumption that</p><formula xml:id="formula_32">|θ i -θ * i ∥ 2 &gt; R i must be false, concluding that∥θ i -θ * i ∥ 2 ≤ R i .</formula><p>Lemma 3 ( Gradient Norm Bound). For any θ i in layer i of a neural network, satisfying ∥∇L(θ i )∥ 2 ≤ µiRi 2 , where µ i is the minimum eigenvalue of the Hessian of L at the minimizer for layer i parameters, it holds that ∥θ i -</p><formula xml:id="formula_33">θ * i ∥ 2 ≤ R i .</formula><p>Under review as a conference paper at ICLR 2025 Proof. Assume, by way of contradiction, there exists a θ i with ∥∇L(θ i )∥ 2 ≤ µiRi 2 and ∥θ i -θ * i ∥ 2 &gt; R i . Define a function f (t) by:</p><formula xml:id="formula_34">f (t) = ∇L(θ * i + t • (θ i -θ * i )) • θ i -θ * i ∥θ i -θ * i ∥ 2 , (<label>10</label></formula><formula xml:id="formula_35">)</formula><p>where f (0) = ∇L(θ * i ) due to θ * i being a minimizer, and f (R i ) = ∇L(θ i ). Due to the strict convexity of L, f (t) is a strictly monotone increasing function. The derivative with respect to t, must satisfy:</p><formula xml:id="formula_36">f ′ (t) = d dt ∇L(θ * i + t • (θ i -θ * i )) • θ i -θ * i ∥θ i -θ * i ∥ 2 ≥ ∥∇L(θ i )∥ 2 2 , (<label>11</label></formula><formula xml:id="formula_37">)</formula><p>by Assumption 2 and the fact that the gradient norm does not increase more than twice in any direction within the ball of radius R i .</p><p>The fundamental theorem of calculus and the above inequality imply:</p><formula xml:id="formula_38">f (R i ) = f (0) + Ri 0 f ′ (t)dt ≥ Ri 0 ∥∇L(θ i )∥ 2 2 dt = R i ∥∇L(θ i )∥ 2 2 ,<label>(12)</label></formula><p>However, f (R i ) = ∥∇L(θ i )∥ 2 and this leads to</p><formula xml:id="formula_39">∥∇L(θ i )∥ 2 ≥ R i ∥∇L(θ i )∥ 2 2 ,<label>(13)</label></formula><p>a contradiction unless ∥θ i -θ * i ∥ 2 ≤ R i . Therefore, the original assumption that ∥θ i -θ * i ∥ 2 &gt; R i must be false, proving the lemma. Lemma 4 (Stability of Gradient Flow). Suppose the gradient ∇L(θ i (t)) and the Hessian ∇ 2 L(θ i (t)) of the loss function L satisfy the conditions for all t ∈ [0, 1] that ensure stability and convergence to a minimizer θ * i . Assume the differential equation</p><formula xml:id="formula_40">dθ i (t) dt = -∇ 2 L(θ i (t)) -1 ∇L(θ i (t)), θ i (0) = θ i , θ i (1) = θ * i ,<label>(14)</label></formula><p>has at least one solution on the interval [0, 1] and satisfies ∇L(θ i (t)) = (1 -t)∇L(θ i ) for all t ∈ [0, 1].</p><p>Proof. We demonstrate this by showing that the given ordinary differential equation (ODE) is well-posed under the assumptions. The initial value problem</p><formula xml:id="formula_41">dθ i (t) dt = -∇ 2 L(θ i (t)) -1 ∇L(θ i (t)),<label>(15)</label></formula><p>can be solved over the interval [0, 1] due to the continuity and positive definiteness of ∇ 2 L, which ensures the existence and uniqueness of the solution by the Picard-Lindelöf theorem.</p><p>Define T max,i as the largest positive number such that the solution exists on [0, T max,i ]. We claim T max,i ≥ 1, based on the behavior of the gradient along the solution path. Considering:</p><formula xml:id="formula_42">d dt ∇L(θ i (t)) = ∇ 2 L(θ i (t)) dθ i (t) dt = -∇L(θ i (t)),<label>(16)</label></formula><p>which implies that ∇L(θ i (t)) = e -t ∇L(θ i ). Since ∇L(θ i (t)) = (1 -t)∇L(θ i ) for t ∈ [0, 1], the condition aligns perfectly.</p><p>Finally, since θ i (1) has zero gradient by the construction of the ODE, θ i (1) must be θ * i . This completes the proof.</p><p>Lemma 5 (Quadratic Form Integration). Assume the gradient norm ∥∇L(θ i )∥ 2 and the Hessian ∇ 2 L(θ i ) satisfy certain conditions over the interval [0, 1]. Suppose either</p><formula xml:id="formula_43">1. L(θ i ) -min L ≤ µiR 2 i 16 , or</formula><p>Under review as a conference paper at ICLR 2025</p><formula xml:id="formula_44">≤ T 0 ∥∇ 2 L(θ i (t)) -1 ∥ 2 ∥∇L(θ i (t))∥ 2 dt.</formula><p>From Assumption 2, we know that:</p><formula xml:id="formula_45">∇ 2 L(θ i ) -1 ≤ 2(∇ 2 L(θ i (t))) -1 .</formula><p>Thus, we can bound this integral:</p><formula xml:id="formula_46">≤ 2 T 0 ∥∇ 2 L(θ i (t)) -1 ∇L(θ i (t))∥ 2 dt ≤ 2T ∥∇ 2 L(θ i (t)) -1 ∇L(θ i (t))∥ 2 .</formula><p>Using the assumption that ∥∇ 2 L(θ i ) -1 ∇L(θ i )∥ 2 ≤ Ri 2 , we get:</p><formula xml:id="formula_47">≤ 2T R i 2 = R i T,</formula><p>which implies that T = 1.</p><p>Therefore, for all t ∈ [0, 1], ∥θ i (t) -θ i ∥ 2 ≤ R i . By Assumption 2, we also have:</p><formula xml:id="formula_48">2(∇ 2 L(θ i )) -1 ⪯ (∇ 2 L(θ i (t))) -1 ⪯ 1 2 (∇ 2 L(θ i )) -1 .</formula><p>Now, we compute the difference in the loss function:</p><formula xml:id="formula_49">L(θ i ) -min L = L(θ i (0)) -L(θ i (1)) = 1 0 ∇L(θ i (t)) T (∇ 2 L(θ i (t))) -1 ∇L(θ i (t))dt. = 1 0 (1 -t)∇L(θ i ) T (∇ 2 L(θ i )) -1 ∇L(θ i )dt. Thus: L(θ i ) -min L ≤ 1 2 ∇L(θ i ) T (∇ 2 L(θ i )) -1 ∇L(θ i ).</formula><p>Finally, using the fact that 1 0 (1 -t)dt = 1 2 , we complete the proof, showing that:</p><formula xml:id="formula_50">L(θ i ) -min L ≤ ∇L(θ i ) T (∇ 2 L(θ i )) -1 ∇L(θ i ) ≤ 4(L(θ i ) -min L). Lemma 9. If λ i ≤ Ri 2 √</formula><p>di , then for any ∆ ≤ Riµ 10 and any</p><formula xml:id="formula_51">θ i ∈ R ℶ di satisfying di i=1 min p T i ∇L(θ i )σ -1 i p T i ∇L(θ i ) ≤ ∆, where ∇ 2 L(θ i ) = V i Σ i V T i is the eigen-decomposition of ∇ 2 L(θ i ), p i is the i-th row of V i ,<label>and</label></formula><formula xml:id="formula_52">Σ i = diag(σ 1 , . . . , σ di ), it holds that L(θ i ) -min L ≤ 25∆ 2 λ 2 i µ . Proof. Let {θ i (t)} 1 t=0 be the solution to the ODE dθ i (t) dt = -(∇ 2 L(θ i (t))) -1 ∇L(θ i (t)),</formula><p>starting from θ i (0) = θ i and assume θ i (1) = θ * i as derived in previous lemmas. By <ref type="bibr">Lemma 2,</ref><ref type="bibr">∥θ</ref> </p><formula xml:id="formula_53">i (t) -θ * i ∥ 2 ≤ R i for all t ∈ [0, 1]. Define I 0 ⊆ [d i ]</formula><p>as the indices where clipping does not occur. We have:</p><formula xml:id="formula_54">i∈I0 σ -1 i p T i ∇L(θ i ) 2 ≤ ∆.</formula><p>Under review as a conference paper at ICLR 2025 Using Assumption 2, the Hessian continuity within a local radius implies:</p><formula xml:id="formula_55">i∈I0 p T i ∇L(θ i (t)) 2 ≤ ∆.</formula><p>For the newly restricted convex function L 0 on R ℶ I0 , which is L restricted to the subspace of R ℶ di spanned by vectors corresponding to I 0 , by Lemma 1 and assuming L 0 is strictly convex, we apply Lemmas 6 and 8 by restricting to I 0 :</p><formula xml:id="formula_56">∥∇L 0 (θ i ) + V T I0 θ * i ∥ 2 2 = ∥∇L 0 (θ i )∥ 2 2 ≤ µ -1 ∥∇L 0 (θ i )∥ 2 2 ≤ 25∆ 2 λ 2 i µ .</formula><p>Integrating the differential for L 0 , we can show:</p><formula xml:id="formula_57">L(θ i ) -min L ≤ 1 0 ∇L(θ i (t)) T (∇ 2 L(θ i (t))) -1 ∇L(θ i (t))dt ≤ 25∆ 2 λ 2 i µ .</formula><p>This completes the proof.</p><p>Lemma 10 (Descent Lemma). For any η &gt; 0 and per-layer</p><formula xml:id="formula_58">λ i &gt; 0 with ηλ i ≤ Ri √ di , define L(θ + i ) -L(θ i ) ≤ -(η -η 2 β i λ i ) di j=1 min λ i , 1 σ i,j |v T i,j ∇L(θ i )| 2 + C(δ 2 g + δ 2 H ) . (<label>26</label></formula><formula xml:id="formula_59">) θ + i = θ i -ηclip (ĝ i ĝi ) -1 ĝi , λ i ,</formula><p>where ĝi is the estimated gradient using a zero-order finite difference method with noise ϵ, such that:</p><formula xml:id="formula_60">ĝi = ∇L(θ i ) + ϵ.</formula><p>The theoretical bound for the descent is given by:</p><formula xml:id="formula_61">L(θ + i ) -L(θ i ) ≤ -(η -η 2 β i λ i ) di j=1 min λ i , 1 σ i,j |v T i,j ∇L(θ i )| 2 + C(δ 2 g + δ 2 H ) ≤ -(η -η 2 ) d i=1 min λ i |ĝ i |, (ĝ i ĝi ) -1 |ĝ i | 2 + O(h) + O(1/ √ m),</formula><p>where h is the step size of the finite difference and m is the number of perturbations performed for finite difference estimation.</p><p>Proof.</p><p>Step 1. Derivation of the upper bound for ∥ĝ i -∇L(θ i )∥. To derive a theoretical bound for ∥ĝ i -∇L(θ i )∥, where ĝi is the gradient estimated using our proposed zero-order method, and ∇L(θ i ) is the true gradient, we need to quantify the error due to using finite perturbations to approximate the gradient. Let's denote this error by ϵ, such that:</p><formula xml:id="formula_62">ϵ i = ĝi -∇L(θ i )</formula><p>Specifically, the gradient estimate for dimension i is obtained by:</p><formula xml:id="formula_63">ĝi = 1 m m k=1 L(θ + hu k ) -L(θ) h u (i) k ,</formula><p>where m is the number of perturbations,h is the step size for finite differences, and u</p><p>k represents the i-th component of the random vector u k . The true gradient, on the other hand, is:</p><p>Under review as a conference paper at ICLR 2025</p><formula xml:id="formula_65">∇L(θ i ) = lim h→0 L(θ + hu k ) -L(θ) h u (i) k ,</formula><p>The error between the estimated gradient ĝi and the true gradient ∇L(θ i ) arises from two main sources. To derive a theoretical bound for the estimation error, ∥ĝ i -∇L(θ i )∥, we consider both sources of error.</p><p>1. Finite Difference Approximation Error. By Taylor expansion, for a small step size h, we have:</p><formula xml:id="formula_66">L(θ + hu k ) = L(θ) + h∇L(θ) T u k + h 2 2 u T k H(θ)u k + O(h 3 ),</formula><p>where H(θ) is the Hessian of L at θ. -Thus, the error due to finite differences is of order O(h). Specifically, the bias in the gradient estimate is proportional to:</p><formula xml:id="formula_67">Bias = O h 2 ∥H(θ)∥ .</formula><p>2. Monte Carlo Sampling Error. The gradient estimate involves averaging over m samples of random perturbations. By the Central Limit Theorem, the variance of the gradient estimate decreases with the number of samples m. Specifically:</p><formula xml:id="formula_68">Variance = O σ 2 m ,</formula><p>where σ 2 is the variance of the directional derivative ∇L(θ) T u k .</p><p>The total error can be expressed as a combination of the bias and variance components. Using a norm (e.g., Euclidean norm) to quantify the error, we have:</p><formula xml:id="formula_69">∥ĝ i -∇L(θ i )∥ ≤ O (h∥H(θ)∥) + O σ √ m .</formula><p>Thus, the theoretical bound on the error is:</p><formula xml:id="formula_70">∥ĝ i -∇L(θ i )∥ = O h∥H(θ)∥ + σ √ m .</formula><p>Step 2. Derivation of the upper bound for ∥ĝ</p><formula xml:id="formula_71">2 i -diag(∇ 2 L(θ i ))∥. Let's denote diag(∇ 2 L(θ i ))</formula><p>as the diagonal of the true Hessian, and Ĥi = ĝ2 i as the diagonal Hessian estimated from the zero-order gradient estimate, where each diagonal element is given by ĝi ĝi .</p><p>To derive the theoretical bound for ∥ Ĥi -H i ∥, we consider:</p><formula xml:id="formula_72">∥ Ĥi -H i ∥ = ∥ĝ 2 i -diag(∇ 2 L(θ i ))∥.</formula><p>Let's rewrite ĝi as:</p><formula xml:id="formula_73">ĝi = ∇L(θ i ) + ϵ i ,</formula><p>where ϵ i represents the noise introduced due to the limited number of perturbations.</p><p>The estimated diagonal Hessian element for each component i can be written as:</p><formula xml:id="formula_74">Ĥ(i) i = (∇L(θ i ) + ϵ i ) 2 .</formula><p>Expanding this expression gives:</p><formula xml:id="formula_75">Ĥ(i) i = (∇L(θ i )) 2 + 2∇L(θ i )ϵ i + ϵ 2 i .</formula><p>The true diagonal Hessian element is:</p><formula xml:id="formula_76">H (i) i = diag(∇ 2 L(θ i )) (i) .</formula><p>Thus, the error for each component can be expressed as:</p><formula xml:id="formula_77">Ĥ(i) i -H (i) i = (∇L(θ i )) 2 + 2∇L(θ i )ϵ i + ϵ 2 i -H (i) i .</formula><p>To find the bound for the error, we need to bound the terms involving ϵ i :</p><p>1. Term 1: 2∇L(θ i )ϵ i</p><p>This term represents the interaction between the true gradient and the noise. Since ∥ϵ i ∥ ≤ O h∥H(θ i )∥ + σ √ m , we can bound this term as:</p><formula xml:id="formula_78">|2∇L(θ i )ϵ i | ≤ 2∥∇L(θ i )∥O h∥H(θ i )∥ + σ √ m .</formula><p>2. Term 2: ϵ 2 i</p><p>The noise squared term can be bounded by:</p><formula xml:id="formula_79">ϵ 2 i ≤ O h 2 ∥H(θ i )∥ 2 + σ 2 m .</formula><p>Combining these results, we have:</p><formula xml:id="formula_80">∥ Ĥi -H i ∥ = O (∇L(θ i )) 2 -H i + 2∥∇L(θ i )∥ h∥H(θ i )∥ + σ √ m + h 2 ∥H(θ i )∥ 2 + σ 2 m .</formula><p>Thus, the error bound for the diagonal Hessian estimation is:</p><formula xml:id="formula_81">∥ Ĥi -H i ∥ = O h 2 ∥H(θ i )∥ 2 + σ 2 m + 2h∥∇L(θ i )∥∥H(θ i )∥ + 2∥∇L(θ i )∥σ √ m .</formula><p>Step 3. Combination of the bounds. Let u i = clip (ĝ i ĝi ) -1 ĝi , λ i . By the definition of the clipping operation:</p><formula xml:id="formula_82">||u i || ∞ ≤ λ i .</formula><p>Thus:</p><formula xml:id="formula_83">||θ + i -θ i || = η||u i || ≤ ηλ i d i .</formula><p>Define the function:</p><formula xml:id="formula_84">f (t) = L(θ i + (1 -t)u i ).</formula><p>By Assumption 4.2, we know that:</p><p>Under review as a conference paper at ICLR 2025 f ′′ (t) ≤ 2f ′′ (0) for all t ∈ [0, 1],</p><p>and hence:</p><formula xml:id="formula_85">f (1) = f (0) + f ′ (0) + 1 0 s 0 f ′′ (s) ds dt ≤ f (0) + f ′ (0) + f ′′ (0).</formula><p>The zero-order estimate introduces noise ϵ in the estimated gradient: ĝi = ∇L(θ i ) + ϵ.</p><p>Thus:</p><formula xml:id="formula_86">f ′ (0) = -η d i=1 min λ i |ĝ i |, (ĝ i ĝi ) -1 |ĝ i | 2 .</formula><p>Using the bound for the error ||ϵ|| ≤ O h ||H(θ i )|| + σ √ m , the noise affects the effective descent rate. Therefore, the new bound for f ′ (0) is:</p><formula xml:id="formula_87">f ′ (0) ≈ -η d i=1 min λ i (|∇L(θ i )| + |ϵ|), (ĝ i ĝi ) -1 (|∇L(θ i )| + |ϵ|) 2 .</formula><p>The Hessian is estimated using ĝ2</p><p>i . The noise in the diagonal Hessian estimate affects the curvature. Therefore, for the second derivative, we have:</p><formula xml:id="formula_88">f ′′ (0) ≤ η 2 d i=1 min λ i |ĝ i |, (ĝ i ĝi ) -1 |ĝ i | 2 .</formula><p>The noise in the Hessian (δ H ) affects the estimation, and thus the bound is affected as follows:</p><formula xml:id="formula_89">f ′′ (0) ≤ η 2 d i=1</formula><p>min λ i (|∇L(θ i ) + ϵ|), (ĝ i ĝi ) -1 (|∇L(θ i ) + ϵ|) 2 .</p><p>Combining these results, the descent bound is affected by both the gradient and Hessian noise. We obtain:</p><formula xml:id="formula_90">L(θ + i ) -L(θ i ) ≤ -(η -η 2 ) d i=1 min λ i |ĝ i |, (ĝ i ĝi ) -1 |ĝ i | 2 + C(δ 2 g + δ 2 H ),</formula><p>where C is a constant that depends on the properties of the function L. δ g represents the bound on the gradient estimation noise δ g = O h ||H(θ i )|| + σ √ m , and δ H represents the bound on the Hessian estimation noise:</p><formula xml:id="formula_91">δ H = O h 2 ||H(θ i )|| 2 + σ 2 m + 2h ||∇L(θ i )|| ||H(θ i )|| + 2||∇L(θ i )||σ √ m .</formula><p>Lemma 11 (Convergence Lemma). For any λ i ≤ Ri √ di and some T i ∈ N, if L(θ Ti,i ) -min L ≤ µ 2 i 8 , then for all t ≥ T i , 1. θ t+1,i = θ t,i -η(∇ 2 θi L(θ t,i )) -1 ∇L(θ t,i ),</p><p>2. L(θ t,i ) -min L ≤ (1 -η(1 -η)) t-Ti (L(θ Ti,i ) -min L).</p><p>Proof. By Lemma 10, we have for all t ≥ T , (θ t,i ) -min L ≤ L(θ T,i ) -min L ≤ µ 2 8 . Therefore, by Lemma 7, we have that ∥∇ 2 L(θ t,i ) -∇L(θ t,i )∥ 2 ≤ λ i for all t ≥ T , which implies clipping will not happen.</p><p>For the second claim, by Lemmas 5 and 10, we have that</p><formula xml:id="formula_92">L(θ t+1,i ) -L(θ t,i ) ≤ -(η -η 2 ) d i=1 σ -1 i |v T i ∇L(θ t,i )| 2 , (<label>27</label></formula><formula xml:id="formula_93">)</formula><p>where v i is the i-th row of matrix V from the eigen-decomposition of ∇ 2 L(θ i ). By further simplification,</p><p>-(η -η 2 )∇L(θ t,i ) T (∇ 2 L(θ t,i )) -1 ∇L(θ t,i ) ≤ -η(1 -η)(L(θ t,i ) -min L), thus, we conclude that the loss decreases at least geometrically by the factor (1 -η(1 -η)) each step after time T , thereby proving the convergence rate.</p><p>Theorem 2. Under Assumptions 1 and 2, let η = 1 2 and λ i = Ri 2 √ di . The update reaches a loss at most ϵ in</p><formula xml:id="formula_94">T ≤ max i d i • (L(θ 0,i ) -min L) + ln µ i R 2 i 32d i ϵ . (<label>28</label></formula><formula xml:id="formula_95">)</formula><p>steps, where L is the loss function, θ 0,i is the initial parameter vector for layer i.</p><p>Proof. Phase 1: Initial Rapid Decrease.</p><p>By Lemma 10 (Descent Lemma), we have a guarantee on the descent rate per step for each layer i:</p><formula xml:id="formula_96">L(θ t+1,i ) -L(θ t,i ) ≤ -(η -η 2 ) di j=1 min λ i ; 1 σ i,j v T i,j ∇L(θ t,i ) 2 ,</formula><p>where σ i,j is the j-th eigenvalue corresponding to the i-th layer, and v i,j is the corresponding eigenvector.</p><p>Applying this result, we estimate a decrease in the loss function per layer under the condition that the gradient norm for layer i is significantly larger than the error threshold ϵ. This phase continues until the loss reduction per step for each layer falls below a certain threshold, say when:</p><formula xml:id="formula_97">L(θ t,i ) -min L ≤ µ 2 i 8 .</formula><p>Phase 2: Exponential Decay.</p><p>Once the loss for each layer is sufficiently reduced, Lemma 11 guides the convergence from this point: L(θ t,i ) -min L ≤ (1 -η(1 -η)) t-Ti (L(θ Ti,i ) -min L),</p><p>indicating an exponential decay in error for each layer. The factor (1 -η(1 -η)) represents the contraction per step, dependent on the learning rate η.</p><p>To calculate the total number of steps T i for each layer, consider that:</p><formula xml:id="formula_98">µ 2 i 8 ≈ ϵ ⇒ T i ≈ ln L(θ0,i)-min L ϵ -ln(1 -η(1 -η)) .</formula><p>Simplifying the expression for η = 1 2 , we get:</p><formula xml:id="formula_99">T i ≈ 2 ln L(θ 0,i ) -min L ϵ ,</formula><p>since ln(1 -η(1 -η)) ≈ -η(1 -η) for small η.</p><p>Combining Phases 1 and 2.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 1 :Figure 2 :</head><label>12</label><figDesc>Figure 1: The motivating toy example. HE-LENE can maintain stable updates when facing curvature issues, while other second-order optimizers are severely affected by them.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head></head><label></label><figDesc>46.7 (±0.8) 72.0 (±2.6) 58.9 (±1.1) 65.7 (±1.2) 78.1 (±1.5) HELENE (LoRA) 90.6 (±0.3) 41.8 (±1.0) 68.5 (±2.0) 59.0 (±1.1) 66.8 (±3.2) 67.4 (±2.1) HELENE (Prefix) 91.7 (±0.6) 46.0 (±0.7) 69.5 (±1.9) 64.6 (±2.1) 66.1 (±1.8) 77.4 (±2.1)</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: Performance and convergence of MeZO and HELENE for fine-tuning, LoRA, and prefixtuning of OPT-1.3B on different datasets. HELENE achieves approximate 10× speedup and up to 15% accuracy improvement compared to MeZO.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head></head><label></label><figDesc>Ablation study for key components of HELENE. The effectiveness of annealing and the clipped diagonal Hessian are demonstrated progressively from high to low. (b) The image on the right is a zoomed-in view of the left one, showing that our proposed HELENE is twice as fast as the compared methods.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Figure 5 :</head><label>5</label><figDesc>Figure 5: Comparison of tuning processes and ablation studies with different optimization algorithms.</figDesc><graphic coords="16,348.65,81.86,152.31,141.73" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_5"><head>Figure 6 :Figure 7 :</head><label>67</label><figDesc>Figure 6: Performance and convergence of HELENE for fine-tuning of OPT-1.3B on SST2 with different clipping lower bound.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head>Table 1 :</head><label>1</label><figDesc>Experiments on RoBERTa-large (350M parameters, k = 16). PEFT represents the LoRA and prefix and we report the best of them. All reported numbers are averaged accuracy (standard deviation) across 5 runs.</figDesc><table><row><cell cols="4">Under review as a conference paper at ICLR 2025</cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Task</cell><cell cols="3">SST-2 RTE CB BoolQ WSC</cell><cell>WIC</cell><cell cols="2">COPA ReCoRD</cell><cell>SQuAD</cell></row><row><cell>Task type</cell><cell cols="7">-------classification --------multiple choice --generation -</cell></row><row><cell>Zero-shot</cell><cell cols="2">53.4 53.1 37.5 45.7</cell><cell>44.2</cell><cell>57.0</cell><cell>75.0</cell><cell>70.3</cell><cell>27.1</cell></row><row><cell>ICL</cell><cell cols="2">80.3 53.1 48.2 58.5</cell><cell>44.2</cell><cell>50.6</cell><cell>69.0</cell><cell>71.0</cell><cell>59.0</cell></row><row><cell>LP</cell><cell cols="2">80.3 52.7 44.6 58.9</cell><cell>47.1</cell><cell>50.6</cell><cell>69.0</cell><cell>71</cell><cell>75.9</cell></row><row><cell>MeZO</cell><cell cols="2">89.6 55.8 77.0 59.6</cell><cell>55.0</cell><cell>58.0</cell><cell>74.0</cell><cell>60.0</cell><cell>62.2</cell></row><row><cell>MeZO (LoRA)</cell><cell cols="2">90.8 63.0 78.0 67.2</cell><cell>51.2</cell><cell>58.0</cell><cell>79.0</cell><cell>59.8</cell><cell>67.6</cell></row><row><cell>MeZO (prefix)</cell><cell cols="2">92.4 52.8 66.0 61.6</cell><cell>51.6</cell><cell>52.8</cell><cell>74.0</cell><cell>56.8</cell><cell>56.0</cell></row><row><cell>HELENE</cell><cell cols="2">91.2 64.4 87.0 60.8</cell><cell>55.4</cell><cell>58.4</cell><cell>69.0</cell><cell>55.6</cell><cell>63.8</cell></row><row><cell cols="2">HELENE (LoRA) 91.4 50.6 76</cell><cell>64.0</cell><cell>49.6</cell><cell>52.6</cell><cell>82.0</cell><cell>60.2</cell><cell>60.4</cell></row><row><cell cols="3">HELENE (prefix) 92.4 51.6 74.0 62.5</cell><cell>52</cell><cell>57.2</cell><cell>80.0</cell><cell>58.8</cell><cell>68.4</cell></row><row><cell>FT (12× memory)</cell><cell>90.8 73.4 77</cell><cell>70.2</cell><cell>53</cell><cell>60.2</cell><cell>81.0</cell><cell>59.6</cell><cell>70.9</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 2 :</head><label>2</label><figDesc>Experiments on OPT-1.3B (with 1000 examples). ICL: in-context learning; LP: linear probing; FT: full-parameter fine-tuning with Adam. We highlight the best results in bold to facilitate comparison.</figDesc><table><row><cell></cell><cell>0.9 1.0</cell><cell></cell><cell></cell><cell cols="6">OPT/1.3B on SST2 MeZO_finetuning:89.6% Helene_finetuning:90.2%</cell><cell></cell><cell>2.5 2.6</cell><cell></cell><cell></cell><cell cols="3">OPT/1.3B on Copa</cell><cell cols="2">MeZO_LoRA:59.8% Helene_LoRA:60.2%</cell><cell>1.1 1.2</cell><cell></cell><cell></cell><cell></cell><cell>OPT/1.3B on CB</cell><cell></cell><cell cols="2">MeZO_prefix:66% Helene_prefix:74%</cell><cell>1.8 2.0</cell><cell></cell><cell></cell><cell></cell><cell cols="3">OPT/1.3B on SQuAD</cell><cell cols="2">MeZO_prefix:56% Helene_prefix:68.4%</cell></row><row><cell></cell><cell>0.8</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>2.4</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>1.0</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>1.6</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell>0.7</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>2.3</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>0.9</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>1.4</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Loss</cell><cell>0.2 0.3 0.4 0.5 0.6</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>Loss</cell><cell>1.9 2.0 2.1 2.2</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>Loss</cell><cell>0.4 0.5 0.6 0.7 0.8</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>Loss</cell><cell>0.6 0.8 1.0 1.2</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell>0</cell><cell>2500</cell><cell>5000</cell><cell>7500</cell><cell>10000 Step</cell><cell>12500</cell><cell>15000</cell><cell>17500</cell><cell>20000</cell><cell></cell><cell>1.8</cell><cell>0</cell><cell>1000</cell><cell>2000</cell><cell>Step</cell><cell>3000</cell><cell>4000</cell><cell>5000</cell><cell>0.3</cell><cell>0</cell><cell>2000</cell><cell>4000</cell><cell>6000 Step</cell><cell>8000</cell><cell>10000</cell><cell>12000</cell><cell>0.4</cell><cell>0</cell><cell>2500</cell><cell>5000</cell><cell>7500</cell><cell>10000 Step</cell><cell>12500</cell><cell>15000</cell><cell>17500</cell><cell>20000</cell></row><row><cell></cell><cell cols="9">(a) OPT-1.3B on SST2</cell><cell cols="9">(b) OPT-1.3B on COPA</cell><cell></cell><cell cols="6">(c) OPT-1.3B on CB</cell><cell cols="10">(d) OPT1.3B on SQuAD</cell></row></table></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="2" xml:id="foot_0"><p>√di , where R i is the bound on the distance between the initial parameters θ 0,i</p></note>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Under review as a conference paper at ICLR 2025 2. ∥∇L(θ i )∥ 2 ≤ µiRi 4 , where µ i is the minimum eigenvalue of the Hessian at the minimizer for the parameters of layer i, then it holds that ∇L(θ i ) T (∇ 2 L(θ i )) -1 ∇L(θ i ) ≤ 4(L(θ i ) -min L).</p><p>(17)</p><p>Proof. Let {θ i (t)} 1 t=0 be the solution of the following differential equation:</p><p>From Lemma 4, adapted for each layer, we have</p><p>by Lemmas 2 and 3. By Assumption 2, for each layer, this implies:</p><p>Integrating the quadratic form along the path, we have:</p><p>Substituting the inequality from equation 19, we simplify:</p><p>This integration shows that ∇L(θ i ) T (∇ 2 L(θ i )) -1 ∇L(θ i ) ≤ 4(L(θ i ) -min L), completing the proof.</p><p>Lemma 6 (Gradient and Loss Bound). Assuming the gradient norm ∥∇L(θ i )∥ 2 and the conditions on the loss function L are such that either</p><p>Proof. The proof follows a reasoning similar to that of Lemma 5 but adapted for each layer. Given the conditions on L(θ i ) -min L or the norm of the gradient ∥∇L(θ i )∥ 2 , we utilize the connection between the gradient norm and the difference in loss to bound L(θ i ) -min L.</p><p>From the gradient norm bound ∥∇L(θ i )∥ 2 and the positive definiteness and continuity of ∇ 2 L, the loss function exhibits quadratic behavior near the minimizer. This is characterized by the Taylor expansion:</p><p>where θ * i is the minimizer of L. Using the bound ∥∇L(θ i )∥ 2 ≤ Riµi 2 , the Taylor series expansion around θ * i implies:</p><p>Under review as a conference paper at ICLR 2025 satisfying the condition given by Lemma 6.</p><p>This completes the proof by relating the behavior of the loss function's gradient at θ i to its minimum value, leveraging the quadratic approximation provided by the Hessian at the minimizer.</p><p>Lemma 7 (Norm Bound on Inverse Hessian and Gradient Product). Assuming the gradient ∇L(θ i ) and the Hessian ∇ 2 L(θ i ) satisfy certain conditions such that either</p><p>Proof. We derive this by using the properties of the Hessian and the gradient for the loss function L specific to layer i. From Lemma 2, we have:</p><p>, and from Lemma 5 adapted for layer i, it holds that:</p><p>Expanding and manipulating the inequality, we derive:</p><p>µi I, we can substitute this into our calculation to find:</p><p>and finally,</p><p>completing the proof.</p><p>Lemma 8. For any θ i ∈ R di , where θ i represents the parameters for the i-th layer, and satisfying that</p><p>Proof. Let {θ i (t)} 1 t=0 be the solution of the following differential equation:</p><p>where</p><p>We can now bound the distance:</p><p>Substituting the derivative expression for θ i (t), we get:</p><p>Under review as a conference paper at ICLR 2025</p><p>For each layer, combining the estimates from Phase 1 and Phase 2, the total number of steps T i needed to reach a loss of ϵ for layer i is given by:</p><p>Finally, to ensure convergence across all layers, we take the maximum over all layers:</p><p>This completes the proof by integrating the rapid initial decrease and the subsequent exponential decay for each layer.</p><p>This reflects an improved convergence rate due to the use of different λ i values for different layers, reducing the dependency on the total dimension d into the dimension max i d i .</p><p>C.1 LIMITATIONS Like other second-order optimizers, HELENE stores the history of gradients and Hessian values, with memory usage proportional to the size of the parameters. Therefore, both theoretically and practically, HELENE requires only three times the memory of MeZO. For example, in OPT-1.3b, MeZO/zero-shot requires 4GB, ICL needs 6GB, Prefix Fine-Tuning uses 19GB, and full-parameter fine-tuning consumes 27GB, while HELENE needs just 14GB. Despite this, HELENE achieves up to 20 times faster convergence and delivers the best overall performance.</p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<title level="m" type="main">Scalable second order optimization for deep learning</title>
+		<author>
+			<persName><forename type="first">Rohan</forename><surname>Anil</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vineet</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomer</forename><surname>Koren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevin</forename><surname>Regan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yoram</forename><surname>Singer</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2002.09018</idno>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<analytic>
+		<title level="a" type="main">Distributed second-order optimization using kronecker-factored approximations</title>
+		<author>
+			<persName><forename type="first">Jimmy</forename><surname>Ba</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roger</forename><forename type="middle">B</forename><surname>Grosse</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Martens</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICLR (Poster)</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Improving the convergence of backpropagation learning with second order method</title>
+		<author>
+			<persName><forename type="first">S</forename><surname>Becker</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 1988 Connectionist Models Summer School</title>
+		<meeting>the 1988 Connectionist Models Summer School<address><addrLine>San Mateo, CA</addrLine></address></meeting>
+		<imprint>
+			<publisher>Morgan Kaufmann</publisher>
+			<date type="published" when="1988">1988</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Exact and inexact subsampled newton methods for optimization</title>
+		<author>
+			<persName><forename type="first">Raghu</forename><surname>Bollapragada</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Richard</forename><forename type="middle">H</forename><surname>Byrd</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jorge</forename><surname>Nocedal</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">IMA Journal of Numerical Analysis</title>
+		<imprint>
+			<biblScope unit="volume">39</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<biblScope unit="page" from="545" to="578" />
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<analytic>
+		<title level="a" type="main">Language models are few-shot learners</title>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Mann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nick</forename><surname>Ryder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Melanie</forename><surname>Subbiah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><forename type="middle">D</forename><surname>Kaplan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arvind</forename><surname>Neelakantan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pranav</forename><surname>Shyam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Girish</forename><surname>Sastry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Askell</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in neural information processing systems</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="page" from="1877" to="1901" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title level="a" type="main">The Convergence of a Class of Double-rank Minimization Algorithms 1. General Considerations</title>
+		<author>
+			<persName><forename type="first">C</forename><forename type="middle">G</forename><surname>Broyden</surname></persName>
+		</author>
+		<idno type="DOI">10.1093/imamat/6.1.76</idno>
+		<ptr target="https://doi.org/10.1093/imamat/6.1.76" />
+	</analytic>
+	<monogr>
+		<title level="j">IMA Journal of Applied Mathematics</title>
+		<idno type="ISSN">0272-4960</idno>
+		<imprint>
+			<biblScope unit="volume">6</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="76" to="90" />
+			<date type="published" when="1970">03 1970</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">A zeroth-order block coordinate descent algorithm for huge-scale black-box optimization</title>
+		<author>
+			<persName><forename type="first">Hanqin</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuchen</forename><surname>Lou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Mckenzie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wotao</forename><surname>Yin</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="1193" to="1203" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Zeroth order optimization based black-box attacks to deep neural networks without training substitute models</title>
+		<author>
+			<persName><forename type="first">Pin-Yu</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yash</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinfeng</forename><surname>Yi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cho-Jui</forename><surname>Hsieh</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zoo</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 10th ACM workshop on artificial intelligence and security</title>
+		<meeting>the 10th ACM workshop on artificial intelligence and security</meeting>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+			<biblScope unit="page" from="15" to="26" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">Symbolic discovery of optimization algorithms</title>
+		<author>
+			<persName><forename type="first">Xiangning</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chen</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Da</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Esteban</forename><surname>Real</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaiyuan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hieu</forename><surname>Pham</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuanyi</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thang</forename><surname>Luong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cho-Jui</forename><surname>Hsieh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yifeng</forename><surname>Lu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">Understanding gradient clipping in private sgd: A geometric perspective</title>
+		<author>
+			<persName><forename type="first">Xiangyi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><forename type="middle">Z</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mingyi</forename><surname>Hong</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="page" from="13773" to="13782" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kenton</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ming-Wei</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Kwiatkowski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Collins</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kristina</forename><surname>Toutanova</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Boolq</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1905.10044</idno>
+		<title level="m">Exploring the surprising difficulty of natural yes/no questions</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title/>
+		<author>
+			<persName><forename type="first">Andrew</forename><forename type="middle">R</forename><surname>Conn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">I</forename><forename type="middle">M</forename><surname>Nicholas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Philippe</forename><forename type="middle">L</forename><surname>Gould</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Toint</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Trust-Region Methods. Society for Industrial and Applied Mathematics</title>
+		<imprint>
+			<date type="published" when="2000">2000</date>
+			<pubPlace>USA</pubPlace>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">Inexact newton methods</title>
+		<author>
+			<persName><forename type="first">Ron</forename><forename type="middle">S</forename><surname>Dembo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stanley</forename><forename type="middle">C</forename><surname>Eisenstat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Trond</forename><surname>Steihaug</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">SIAM Journal on Numerical analysis</title>
+		<imprint>
+			<biblScope unit="volume">19</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<biblScope unit="page" from="400" to="408" />
+			<date type="published" when="1982">1982</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Devlin</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Bert</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1810.04805</idno>
+		<title level="m">Pre-training of deep bidirectional transformers for language understanding</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<monogr>
+		<author>
+			<persName><forename type="first">Diederik</forename><surname>Kingma</surname></persName>
+		</author>
+		<title level="m">Adam: A method for stochastic optimization. (No Title)</title>
+		<imprint>
+			<date type="published" when="2014">2014</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<monogr>
+		<author>
+			<persName><forename type="first">Zhengxiao</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yujie</forename><surname>Qian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ming</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiezhong</forename><surname>Qiu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhilin</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Glm</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2103.10360</idno>
+		<title level="m">General language model pretraining with autoregressive blank infilling</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<monogr>
+		<title level="m" type="main">Variancereduced zeroth-order methods for fine-tuning language models</title>
+		<author>
+			<persName><forename type="first">Tanmay</forename><surname>Gautam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Youngsuk</forename><surname>Park</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Parameswaran</forename><surname>Raman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wooseok</forename><surname>Ha</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.08080</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">Fast approximate natural gradient descent in a kronecker factored eigenbasis</title>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>George</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">César</forename><surname>Laurent</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xavier</forename><surname>Bouthillier</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicolas</forename><surname>Ballas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pascal</forename><surname>Vincent</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="page">31</biblScope>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">An investigation into neural net optimization via hessian eigenvalue density</title>
+		<author>
+			<persName><forename type="first">Behrooz</forename><surname>Ghorbani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shankar</forename><surname>Krishnan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><surname>Xiao</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="page" from="2232" to="2241" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">Shampoo: Preconditioned stochastic tensor optimization</title>
+		<author>
+			<persName><forename type="first">Vineet</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomer</forename><surname>Koren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yoram</forename><surname>Singer</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+			<biblScope unit="page" from="1842" to="1850" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">Gradient-free multi-agent nonconvex nonsmooth optimization</title>
+		<author>
+			<persName><forename type="first">Davood</forename><surname>Hajinezhad</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Michael M Zavlanos</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">2018 IEEE Conference on Decision and Control (CDC)</title>
+		<imprint>
+			<publisher>IEEE</publisher>
+			<date type="published" when="2018">2018</date>
+			<biblScope unit="page" from="4939" to="4944" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<author>
+			<persName><forename type="first">J</forename><surname>Edward</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yelong</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Phillip</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Wallis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Allen-Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shean</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Lora</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2106.09685</idno>
+		<title level="m">Low-rank adaptation of large language models</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<monogr>
+		<author>
+			<persName><forename type="first">Frank</forename><surname>Hutter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Loshchilov</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1711.05101</idno>
+		<title level="m">Decoupled weight decay regularization</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<monogr>
+		<title level="m" type="main">Doubly adaptive scaled algorithm for machine learning using second-order information</title>
+		<author>
+			<persName><forename type="first">Majid</forename><surname>Jahani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sergey</forename><surname>Rusakov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zheng</forename><surname>Shi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Richtárik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><forename type="middle">W</forename><surname>Mahoney</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Martin</forename><surname>Takáč</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2109.05198</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Zo-adamu optimizer: Adapting perturbation by the momentum and uncertainty in zeroth-order optimization</title>
+		<author>
+			<persName><forename type="first">Shuoran</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qingcai</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Youcheng</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Xiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yukang</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiangping</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chuanyi</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaobao</forename><surname>Song</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the AAAI Conference on Artificial Intelligence</title>
+		<meeting>the AAAI Conference on Artificial Intelligence</meeting>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="volume">38</biblScope>
+			<biblScope unit="page" from="18363" to="18371" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<monogr>
+		<title level="m" type="main">Prefix-tuning: Optimizing continuous prompts for generation</title>
+		<author>
+			<persName><forename type="first">Lisa</forename><surname>Xiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Percy</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Liang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2101.00190</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<monogr>
+		<author>
+			<persName><forename type="first">Hong</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Hall</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Percy</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tengyu</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Sophia</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.14342</idno>
+		<title level="m">A scalable stochastic second-order optimizer for language model pre-training</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<analytic>
+		<title level="a" type="main">A communication-efficient distributed gradient clipping algorithm for training deep neural networks</title>
+		<author>
+			<persName><forename type="first">Mingrui</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhenxun</forename><surname>Zhuang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunwen</forename><surname>Lei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chunyang</forename><surname>Liao</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="26204" to="26217" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<analytic>
+		<title level="a" type="main">signsgd via zeroth-order oracle</title>
+		<author>
+			<persName><forename type="first">Sijia</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pin-Yu</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiangyi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mingyi</forename><surname>Hong</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">A primer on zeroth-order optimization in signal processing and machine learning: Principals, recent advances, and applications</title>
+		<author>
+			<persName><forename type="first">Sijia</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pin-Yu</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bhavya</forename><surname>Kailkhura</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gaoyuan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alfred</forename><forename type="middle">O</forename><surname>Hero</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Iii</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pramod</forename><forename type="middle">K</forename><surname>Varshney</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">IEEE Signal Processing Magazine</title>
+		<imprint>
+			<biblScope unit="volume">37</biblScope>
+			<biblScope unit="issue">5</biblScope>
+			<biblScope unit="page" from="43" to="54" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yinhan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Roberta</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1907.11692</idno>
+		<title level="m">A robustly optimized bert pretraining approach</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Fine-tuning language models with just forward passes</title>
+		<author>
+			<persName><forename type="first">Sadhika</forename><surname>Malladi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianyu</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eshaan</forename><surname>Nichani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Damian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><forename type="middle">D</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Danqi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanjeev</forename><surname>Arora</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page" from="53038" to="53075" />
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<analytic>
+		<title level="a" type="main">New insights and perspectives on the natural gradient method</title>
+		<author>
+			<persName><forename type="first">James</forename><surname>Martens</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Journal of Machine Learning Research</title>
+		<imprint>
+			<biblScope unit="volume">21</biblScope>
+			<biblScope unit="issue">146</biblScope>
+			<biblScope unit="page" from="1" to="76" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<analytic>
+		<title level="a" type="main">Optimizing neural networks with kronecker-factored approximate curvature</title>
+		<author>
+			<persName><forename type="first">James</forename><surname>Martens</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roger</forename><surname>Grosse</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2015">2015</date>
+			<biblScope unit="page" from="2408" to="2417" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">Kronecker-factored curvature approximations for recurrent neural networks</title>
+		<author>
+			<persName><forename type="first">James</forename><surname>Martens</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jimmy</forename><surname>Ba</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matt</forename><surname>Johnson</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Deep learning via hessian-free optimization</title>
+		<author>
+			<persName><forename type="first">James</forename><surname>Martens</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Icml</title>
+		<imprint>
+			<date type="published" when="2010">2010</date>
+			<biblScope unit="volume">27</biblScope>
+			<biblScope unit="page" from="735" to="742" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">Global random optimization by simultaneous perturbation stochastic approximation</title>
+		<author>
+			<persName><forename type="first">L</forename><surname>John</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><forename type="middle">C</forename><surname>Maryak</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Chin</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 2001 American control conference</title>
+		<meeting>the 2001 American control conference</meeting>
+		<imprint>
+			<publisher>IEEE</publisher>
+			<date type="published" when="2001">2001</date>
+			<biblScope unit="volume">2</biblScope>
+			<biblScope unit="page" from="756" to="762" />
+		</imprint>
+	</monogr>
+	<note>Cat. No. 01CH37148</note>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<analytic>
+		<title level="a" type="main">Cubic regularization of newton method and its global performance</title>
+		<author>
+			<persName><forename type="first">Yurii</forename><surname>Nesterov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">B</forename><forename type="middle">T</forename><surname>Polyak</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Math. Program</title>
+		<idno type="ISSN">0025-5610</idno>
+		<imprint>
+			<biblScope unit="volume">108</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="177" to="205" />
+			<date type="published" when="2006-08">aug 2006</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<monogr>
+		<title level="m" type="main">Revisiting natural gradient for deep networks</title>
+		<author>
+			<persName><surname>Pascanu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1301.3584</idno>
+		<imprint>
+			<date type="published" when="2013">2013</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<monogr>
+		<author>
+			<persName><surname>Rajpurkar</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1606.05250</idno>
+		<title level="m">Squad: 100,000+ questions for machine comprehension of text</title>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<monogr>
+		<title level="m" type="main">A stochastic approximation method. The annals of mathematical statistics</title>
+		<author>
+			<persName><forename type="first">Herbert</forename><surname>Robbins</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sutton</forename><surname>Monro</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="1951">1951</date>
+			<biblScope unit="page" from="400" to="407" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<monogr>
+		<author>
+			<persName><forename type="first">Levent</forename><surname>Sagun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Leon</forename><surname>Bottou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yann</forename><surname>Lecun</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1611.07476</idno>
+		<title level="m">Eigenvalues of the hessian in deep learning: Singularity and beyond</title>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<analytic>
+		<title level="a" type="main">No more pesky learning rates</title>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Schaul</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sixin</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yann</forename><surname>Lecun</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2013">2013</date>
+			<biblScope unit="page" from="343" to="351" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<analytic>
+		<title level="a" type="main">Fast curvature matrix-vector products for second-order gradient descent</title>
+		<author>
+			<persName><forename type="first">N</forename><surname>Nicol</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Schraudolph</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Neural computation</title>
+		<imprint>
+			<biblScope unit="volume">14</biblScope>
+			<biblScope unit="issue">7</biblScope>
+			<biblScope unit="page" from="1723" to="1738" />
+			<date type="published" when="2002">2002</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<analytic>
+		<title level="a" type="main">Multivariate stochastic approximation using a simultaneous perturbation gradient approximation</title>
+		<author>
+			<persName><forename type="first">C</forename><surname>James</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Spall</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">IEEE transactions on automatic control</title>
+		<imprint>
+			<biblScope unit="volume">37</biblScope>
+			<biblScope unit="issue">3</biblScope>
+			<biblScope unit="page" from="332" to="341" />
+			<date type="published" when="1992">1992</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<analytic>
+		<title level="a" type="main">Distributed zero-order algorithms for nonconvex multiagent optimization</title>
+		<author>
+			<persName><forename type="first">Yujie</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junshan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Na</forename><surname>Li</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">IEEE Transactions on Control of Network Systems</title>
+		<imprint>
+			<biblScope unit="volume">8</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="269" to="281" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<monogr>
+		<title level="m" type="main">Llama 2: Open foundation and fine-tuned chat models</title>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Louis</forename><surname>Martin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevin</forename><surname>Stone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Albert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amjad</forename><surname>Almahairi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yasmine</forename><surname>Babaei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikolay</forename><surname>Bashlykov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Soumya</forename><surname>Batra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prajjwal</forename><surname>Bhargava</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shruti</forename><surname>Bhosale</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2307.09288</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b47">
+	<analytic>
+		<title level="a" type="main">Better sgd using second-order momentum</title>
+		<author>
+			<persName><forename type="first">Hoang</forename><surname>Tran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashok</forename><surname>Cutkosky</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page" from="3530" to="3541" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b48">
+	<analytic>
+		<title level="a" type="main">Attention is all you need</title>
+		<author>
+			<persName><surname>Vaswani</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b49">
+	<analytic>
+		<title level="a" type="main">Superglue: A stickier benchmark for general-purpose language understanding systems</title>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yada</forename><surname>Pruksachatkun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikita</forename><surname>Nangia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanpreet</forename><surname>Singh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julian</forename><surname>Michael</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Felix</forename><surname>Hill</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Omer</forename><surname>Levy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Samuel</forename><surname>Bowman</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="page">32</biblScope>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b50">
+	<analytic>
+		<title level="a" type="main">The implicit and explicit regularization effects of dropout</title>
+		<author>
+			<persName><forename type="first">Colin</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sham</forename><surname>Kakade</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tengyu</forename><surname>Ma</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="10181" to="10192" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b51">
+	<analytic>
+		<title level="a" type="main">Newton-type methods for non-convex optimization under inexact hessian information</title>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fred</forename><surname>Roosta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><forename type="middle">W</forename><surname>Mahoney</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Mathematical Programming</title>
+		<imprint>
+			<biblScope unit="volume">184</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="35" to="70" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b52">
+	<analytic>
+		<title level="a" type="main">Pyhessian: Neural networks through the lens of the hessian</title>
+		<author>
+			<persName><forename type="first">Zhewei</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amir</forename><surname>Gholami</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kurt</forename><surname>Keutzer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><forename type="middle">W</forename><surname>Mahoney</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">2020 IEEE international conference on big data (Big data)</title>
+		<imprint>
+			<publisher>IEEE</publisher>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="581" to="590" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b53">
+	<monogr>
+		<title level="m" type="main">Hessian-aware zerothorder optimization for black-box adversarial attack</title>
+		<author>
+			<persName><forename type="first">Haishan</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhichao</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cong</forename><surname>Fang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><forename type="middle">Junchi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tong</forename><surname>Zhang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1812.11377</idno>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b54">
+	<monogr>
+		<title level="m" type="main">Why gradient clipping accelerates training: A theoretical justification for adaptivity</title>
+		<author>
+			<persName><forename type="first">Jingzhao</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianxing</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Suvrit</forename><surname>Sra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ali</forename><surname>Jadbabaie</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1905.11881</idno>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b55">
+	<analytic>
+		<title level="a" type="main">Eva: Practical second-order optimization with kroneckervectorized approximation</title>
+		<author>
+			<persName><forename type="first">Lin</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shaohuai</forename><surname>Shi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Li</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b56">
+	<monogr>
+		<title level="m" type="main">Opt: Open pre-trained transformer language models</title>
+		<author>
+			<persName><forename type="first">Susan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Roller</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naman</forename><surname>Goyal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mikel</forename><surname>Artetxe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Moya</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuohui</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Dewan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mona</forename><surname>Diab</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xian</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xi</forename><surname>Victoria Lin</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2205.01068" />
+		<imprint>
+			<date type="published" when="2022">2022. 2023</date>
+			<biblScope unit="volume">3</biblScope>
+			<biblScope unit="page" from="19" to="19" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b57">
+	<monogr>
+		<title level="m" type="main">Revisiting zeroth-order optimization for memory-efficient llm fine-tuning: A benchmark</title>
+		<author>
+			<persName><forename type="first">Yihua</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pingzhi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junyuan</forename><surname>Hong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiaxiang</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yimeng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenqing</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pin-Yu</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><forename type="middle">D</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wotao</forename><surname>Yin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mingyi</forename><surname>Hong</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.11592</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b58">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yanjun</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sizhe</forename><surname>Dang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haishan</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guang</forename><surname>Dai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Qian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ivor</forename><forename type="middle">W</forename><surname>Tsang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.15173</idno>
+		<title level="m">Second-order fine-tuning without pain for llms: A hessian informed zeroth-order optimizer</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

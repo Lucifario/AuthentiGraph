@@ -1,0 +1,1252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 ACCELERATING BLOCK COORDINATE DESCENT FOR LLM FINETUNING VIA LANDSCAPE CORRECTION</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 ACCELERATING BLOCK COORDINATE DESCENT FOR LLM FINETUNING VIA LANDSCAPE CORRECTION</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">D4F2C1B1C2B8575218AD874CDC5A28F9</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:08+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Training and finetuning large language models (LLMs) are resource-intensive tasks, with memory limitations being a key bottleneck. A classic optimization method, block coordinate descent (BCD), offers solutions by segmenting the trainable parameters into multiple blocks and optimizing one active block at a time while freezing the others, thereby significantly reducing memory cost. However, we identify that blindly applying BCD to train LLMs can be inefficient for two reasons. First, optimizing only the active block requires backpropagating through multiple deeper yet inactive blocks, resulting in wasteful computations. Second, the frozen blocks, when they are not quite close to optimality, can narrow the optimization landscape, potentially misguiding the training of the active block. To address these issues simultaneously, we propose integrating BCD with landscape correction, which unfreezes the inactive blocks and updates them in a cost-efficient manner during the same backpropagation as the update to the active block. We show that our method empirically improves vanilla BCD with minimal additional computation and memory. Experiments on 8B and 70B models demonstrate that our proposed method surpasses memory efficient baselines and matches Adam's downstream performance while reducing memory cost by 80% compared to Adam.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>Large language models (LLMs) have gained significant popularity within the research community and industry. Training these models typically entails a pretraining phase on a vast dataset, followed by a series of finetuning adjustments to tailor the model for specific domain tasks. Both phases demand extensive computational resources, with memory being a primary constraint. For instance, optimizing a model containing N billion parameters using standard mixed-precision training requires at least 18N gigabytes of GPU memory (refer to Section 2 for additional details). Given the usual limitations of GPU memory, this constraint impedes researchers from experimenting with larger models.</p><p>To address this practical challenge, researchers have developed memory efficient algorithms for LLM training such as parameter efficient finetuning (PEFT), including Adapter <ref type="bibr" target="#b11">Houlsby et al. (2019</ref><ref type="bibr" target="#b13">), LoRA Hu et al. (2021)</ref>, prompt tuning <ref type="bibr" target="#b16">Lester et al. (2021)</ref>, prefix tuning Li &amp; Liang (2021), etc. These techniques focus on training a small set of additional parameters while maintaining the original pretrained model unchanged. Other memory efficient methods for full parameter training have also been investigated. For example, Galore <ref type="bibr" target="#b41">Zhao et al. (2024)</ref> applies a low-rank space projection to both the gradient and the optimizer's states to reduce memory consumption.</p><p>In addition to the existing approaches, a classic optimization paradigm, known as block coordinate descent (BCD), holds a strong potential for memory efficient LLM training and finetuning. Intuitively, BCD reduces the memory cost by partitioning the trainable parameters into several blocks and optimizing over only one active block at a time. For instance, segmenting an N -billion parameter model into D blocks decreases the memory consumption from 18N to 2N + 16N D GB, as only the gradient and optimizer states of the active block need to be stored. In fact, BCD has been the method of choice in many data science problems, with a wide array of variants developed for improving memory, performance, convergence, and efficiency; see, e.g., <ref type="bibr" target="#b12">(Hsieh et al., 2008;</ref><ref type="bibr" target="#b2">Chang &amp; Roth, 2011;</ref><ref type="bibr" target="#b25">Yu et al., 2012;</ref><ref type="bibr" target="#b34">Treister &amp; Turek, 2014;</ref><ref type="bibr" target="#b31">Richtárik &amp; Takáč, 2014)</ref>.</p><p>Under review as a conference paper at <ref type="bibr">ICLR 2025</ref> In stark contrast to the previous memory efficient methods, and despite its intuitive memory benefits, BCD has been overlooked and rarely explored in the context of LLMs. It was not until very recently that <ref type="bibr" target="#b20">Luo et al. (2024)</ref> proposed BAdam, which integrates BCD into an LLM finetuning framework by training each active block with several Adam steps. Even though BAdam has shown preliminary success in reducing memory cost during training and improving performance at test time, its direct use of vanilla BCD leaves at least two fundamental aspects to be questioned:</p><p>• Computing the (stochastic) gradient for a single active block via backpropagation necessitates calculating the partial derivatives of the activations of multiple deeper yet inactive layers. This is wasteful of computation as these partial derivatives are not even used to update their corresponding weights. • Given that the training objective is highly nonconvex, and since all blocks are frozen except for the active one, BCD tends to be misled by its local view of the optimization landscape, which potentially slows down its convergence speed.</p><p>Standing on the ground offered by BAdam, we push the research frontier by proposing a simple remedy to the above two issues. Our method, termed BREAD, is a blend of two components: (1) Similarly to BAdam, we update the active block using several Adam steps (the BCD component);</p><p>(2) differently, we unfreeze the inactive blocks and update them using lightweight memory efficient optimization techniques (the landscape correction component). Since landscape correction utilizes the gradients of the activations that are already calculated, it adds minimal additional computation and in fact addresses the wasteful computation issue. Furthermore, the landscape correction component provides BCD a better view of the optimization landscape for better updating the current active block, thereby addressing the second point of concern. In combination, BREAD maintains the memory efficient feature of BCD with improved learning capability and faster convergence. Our main contributions are outlined as follows:</p><p>• Limitations of Standard BCD in LLMs: Our research identifies two fundamental limits of vanilla BCD when applied to neural networks (hence LLMs): The wasted computation of gradients during backpropagation and the suboptimal landscape caused by freezing inactive blocks. These limitations partly explain why the application of BCD in neural networks is uncommon. • Blending BCD with Landscape Correction: We propose a new method termed BREAD, which combines BCD with a landscape correction technique to address these two limitations simultaneously. It unfreezes some of (or all) the inactive blocks and updates them using memory efficient optimization techniques. BREAD maintains the memory efficiency of BCD with improved optimization ability. • Excellent Performance: Our experiments on instruction tuning and preference optimization with the Llama 3.1-8B and Llama 3.1-70B models demonstrate that BREAD clearly outperforms state-of-the-art memory efficient training methods and achieves comparable downstream performance to that of Adam on five math benchmarks and MT-bench scores.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">PRELIMINARIES ON BLOCK COORDINATE DESCENT FOR LLM TRAINING</head><p>Our main focus lies in improving the efficiency of BCD when utilized to finetune LLMs. Therefore, we first review some preliminary concepts of LLM and BCD in this section.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Objective of training LLMs. Consider minimizing a general objective function min</head><formula xml:id="formula_0">W H(W ) = 1 n n j=1 h j (W )</formula><p>, where W ∈ R d , n is the number of data samples. In the context of training/finetuning LLMs, h j (W ) represents the negative log-likelihood of the autoregressive probability P W [y j |x j ] = m s=1 P W [y j,s |y j,1:s-1 , x j ] for the j-th prompt x j and its corresponding j-th output y j . In most LLM models, this autoregressive probability is modeled by a transformer architecture <ref type="bibr" target="#b35">Vaswani et al. (2017)</ref>, and thus W ∈ R d encompasses all trainable parameters of the transformer, including the query, key, value, and output attention matrices, as well as the gate, up, and down projection matrices of each transformer layer.</p><p>BCD for LLM training. Instead of minimizing the objective function over the entire set of trainable parameters W , the key idea of BCD is to break down this high dimensional optimization problem into a series of lower dimensional ones, thereby significantly reducing the memory requirement of GPU RAM. Specifically, BCD first splits the model parameters into D block, i.e.,</p><formula xml:id="formula_1">W = {W 1 , • • • , W ℓ , • • • , W D }, where W ℓ ∈ R d ℓ and D ℓ=1 d ℓ = d.</formula><p>The block partition in such a splitting can be very flexible. For instance, the block variable W ℓ can be either a single matrix or all the trainable matrices of a transformer layer. Then, at each block iteration, BCD updates only one active block while fixing the others at their most up-to-date values. This makes each sub-problem of BCD a D× smaller problem compared to the original one if the D blocks are partitioned evenly. Suppose at the (t + 1)-th block iteration the active block is W ℓ , BCD solves the following problem:</p><formula xml:id="formula_2">W t+1 ℓ ∈ argmin W ℓ ∈R d ℓ 1 |N | j∈N h j (W t+1 1 , • • • , W t+1 ℓ-1 , W ℓ , W t ℓ+1 , • • • , W t D )<label>(1)</label></formula><p>where N ⊆ {1,  BCD is a memory efficient full parameter optimization method for LLM training. It is evident to see that BCD is a full parameter optimization method, as all the trainable parameters W will be updated after one block-epoch. More importantly, BCD is also memory efficient.</p><p>Let us first analyze the memory consumption of the Adam optimizer under the mixed precision training setting <ref type="bibr" target="#b23">Micikevicius et al. (2017)</ref>. The memory cost is attributed to the storage of the model parameters, gradients, and optimizer states. We consider an LLM with N billion parameters and express GPU memory consumption in gigabytes (GB). Initially, one must store the FP16 model parameters for the backpropagation (BP) process, requiring 2N memory. Additionally, the optimizer maintains a copy of the model in FP32 precision, consuming another 4N memory. The gradients, momentum, and second moment vectors are all stored in FP32 precision with each requiring 4N memory. Consequently, the total memory required is at least 18N . For example, in order to train a Llama 3-8B or a Llama 3-70B model, Adam requires at least 144 GB or 1260 GB of GPU RAM, respectively, which can be prohibitive in limited memory scenarios.</p><p>In sharp contrast to Adam, BCD only requires storing the FP32 model parameters, gradients, and optimizer states for the active block W ℓ , which is only 1/D of the memory consumption needed for all the parameters. Thus, in addition to maintaining an FP16 model that requires 2N memory, BCD needs a total of only 2N + 16N D memory. Therefore, for training a Llama 3-8B or a Llama 3-70B model and when D = 32 or D = 80 (partition each transformer layer as a block), BCD only needs roughly 20 GB or 154 GB of GPU RAM, respectively, which is significantly cheaper compared to the costs of Adam. For a more detailed analysis on memory cost, we refer to <ref type="bibr" target="#b20">Luo et al. (2024)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">LIMITATIONS OF BCD FOR NEURAL NETWORKS</head><p>Although BCD is proven to be memory efficient for training and finetuning LLMs, we will illustrate two major limitations of the BCD optimization scheme when it is used for training models induced by a neural network structure in this section. The results apply to the setting of training and finetuning LLMs as well. Motivated by these limitations, we will develop a more efficient training method based on BCD, which achieves superior performance compared to that of the vanilla BCD.</p><p>To ease our analysis, let us consider a L-layer feedforward neural network model:</p><formula xml:id="formula_3">z ℓ+1 = f ℓ W ℓ (z ℓ ), ∀1 ≤ ℓ ≤ L, with z 1 = x, (<label>2</label></formula><formula xml:id="formula_4">)</formula><p>where L is the total number of layers, x is the input, f ℓ W ℓ is the ℓ-th layer's transform. Limitation I: Ineffective utilization of intermediate derivatives during backpropagation. Due to the compositional structure of deep neural networks, the gradients of the trainable parameters are calculated according to the chain rule. For example, taking the stochastic gradient of the ℓ-th layer's parameters W ℓ requires computing the partial derivatives with respect to all the activation values of deeper layers, as shown in the following equation:</p><formula xml:id="formula_5">∂H ∂W ℓ = ∂H ∂z L+1 ∂z L+1 ∂z L • • • ∂z ℓ+2 ∂z ℓ+1 I ℓ+1 ∂z ℓ+1 ∂W ℓ , (<label>3</label></formula><formula xml:id="formula_6">)</formula><p>where H is the objective function of the neural network training problem. During the backpropagation process in optimization method like Adam, the intermediate partial derivatives I ℓ+1 of the activations in (3) are properly utilized for computing the gradients of the L, L -1, • • • , ℓ + 1-th layers' weight parameters as well. However, since BCD only updates the active block W ℓ , the term I ℓ+1 is merely used for calculating the gradient of W ℓ , resulting in ineffective utilization of the computed partial derivatives of the activations during backpropagation.</p><p>Limitation II: Suboptimal landscape of BCD's sub-problem. To tackle a training problem, optimization methods such as Adam optimize over all the trainable parameters W , while the BCD optimization scheme (1) minimizes the objective over only the current active block, keeping the others fixed. Intuitively, BCD appears to narrow the optimization landscape of the training problem by freezing most of the parameters in each of its sub-problems, potentially eliminating better search directions that can lead to rapid decrease of the objective function. To establish such an intuition formally, we consider the following simple regression problem modeled by a 3-layer neural network: min</p><formula xml:id="formula_7">W1,W2 W3 H(W 1 , W 2 , W 3 ) := ∥y -ŷ∥ 2 2 ,</formula><p>where</p><formula xml:id="formula_8">z 2 = σ(W 1 x), z 3 = σ(W 2 z 2 ), ŷ = W 3 z 3 .</formula><p>Here, x is a non-zero input vector, y is the true label vector, and σ(z) := max (0, z) is the ReLU activation function. The following proposition states that the optimization landscape of one of the BCD sub-problems is suboptimal in terms of minimizing H. Proposition 1. (suboptimal landscape of BCD's sub-problem) Define</p><formula xml:id="formula_9">H * := min W2 ∥y -ŷ∥ 2 2</formula><p>, and</p><formula xml:id="formula_10">H * := min W1,W2,W3 ∥y -ŷ∥ 2 2 .</formula><p>Here, H * is the optimal value returned BCD that minimizes H only over block W 2 , while fixing W 1 and W 3 . Suppose that the fixed W 3 in BCD has full column rank. If z * 3 := (W ⊤ 3 W 3 ) -1 W ⊤ 3 y has at least one negative entry, then H * &gt; H * .</p><p>The proof of Proposition 1 is presented in Appendix C.2. We note that the full column rank assumption of the fixed weight matrix W 3 is mild. In LLMs, the last matrix is typically the tall LM head matrix, which has more rows (vocabulary size) than columns (embedding dimension). In practice, a tall matrix often has full column rank. In addition, it is always feasible to have negative entries in z * 3 by choosing a specific y. Moreover, although we prove such a result for a simple regression problem modeled by a 3-layer neural network, we expect it to occur more frequently in the training and finetuning of LLMs, as the training objective of LLMs is much more complicated. Finally, the result in Proposition 1 can be readily generalized to any nonnegative or bounded activation functions, e.g., Swish <ref type="bibr" target="#b30">Ramachandran et al. (2017)</ref>, SiLU <ref type="bibr" target="#b7">Elfwing et al. (2018)</ref>, Sigmoid, etc.</p><p>When fixing W 1 and W 3 and training only on the intermediate layer's weight matrix W 2 , the sub-problem of BCD represents a partial landscape of the full optimization problem. Proposition 1 demonstrates that this sub-problem might be incapable of finding the optimal value 0. It is important to note that this result does not necessarily imply that BCD cannot find an optimal solution. Recall that BCD is a full parameter optimization method, and the weight matrices W 1 and W 3 will indeed be updated in subsequent block iterations. Therefore, BCD may eventually converge to an optimal solution that achieves 0 function value. However, our analysis reveals that the sub-problem of BCD potentially excludes parts of the optimization landscape that provide search directions toward the optimal solution. This observation suggests that BCD might slow down the convergence speed compared to Adam.</p><p>Based on these limitations of BCD, we will design a new method to correct the landscape of BCD's sub-problem and simultaneously utilize the computed partial derivatives of the activations properly.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">ACCELERATING BCD VIA LANDSCAPE CORRECTION</head><p>In this section, we propose a new BCD method with landscape correction to solve the two limitations revealed in Section 3 simultaneously.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.1">THE BREAD METHOD</head><p>In Section 3, our analysis indicates that the incomplete landscape of BCD's sub-problem may slow down the convergence speed. To address this issue, one immediate approach is to apply Adam to</p><formula xml:id="formula_11">W 1 3 W 2 3 y y error Range(W3) Learnable space of y (a) W3 is frozen. W 1 3 W 2 3 y (b) W3 is trainable.</formula><p>Figure <ref type="figure">1</ref>: When W 3 is frozen, the projection error ∥y -ŷ∥ 2 2 &gt; 0. When W 3 is trainable, the learnable space rotates to cover the label y, the error ∥y -ŷ∥ 2 2 = 0. other blocks as well. However, this essentially reverts to using Adam and undermines the memory efficient property of the BCD optimization scheme. Fortunately, for the regression problem we analyzed in Section 3, we show in the following proposition that a low-rank landscape correction is sufficient to compensate for the incompleteness of BCD's sub-problem.</p><p>Proposition 2 (rank-1 landscape correction). For any non-zero input x and label y, there exists a rank-1 matrix C such that the following problem has optimal value 0:</p><formula xml:id="formula_12">min W2,C ∥y -ŷ∥ 2 2 ,</formula><p>where</p><formula xml:id="formula_13">z 2 = σ(W 1 z), z 3 = σ(W 2 z 2 ), ŷ = (W 3 + C)z 3 .</formula><p>The proof of Proposition 2 is shown in Appendix C.2. Motivated by this proposition, we propose to introduce additional trainable low-rank correction matrices to the matrices in the frozen inactive blocks {W ℓ ′ } ℓ ′ ̸ =ℓ , where W ℓ is the current active block. For simplicity, let us assume that each block is a matrix, and our design applies to general layer-wise or other types of partitions as well.</p><p>Mathematically, all the inactive block matrices are corrected by low-rank correction matrices as follows:</p><formula xml:id="formula_14">W ℓ ′ + C ℓ ′ with rank(C ℓ ′ ) ≤ r, ∀ℓ ′ ̸ = ℓ.<label>(4)</label></formula><p>To maintain memory efficiency, we use the Burer-Monteiro factorization representation of a lowrank matrix <ref type="bibr" target="#b1">Burer &amp; Monteiro (2003)</ref>:</p><formula xml:id="formula_15">C = U V , U ∈ R m×r , V ∈ R r×n .<label>(5)</label></formula><p>Following the spirit of adapter <ref type="bibr" target="#b11">Houlsby et al. (2019) and</ref><ref type="bibr" target="#b13">LoRA Hu et al. (2021)</ref>, we only store the low dimensional matrices U and V rather than C. This approach allows us to store the gradients and optimizer states for these much smaller sized matrices, resulting in only negligible additional memory consumption. We initialize U to zero and initialize V from uniform distribution; see Appendix A for detailed setup.</p><p>We note that one can add the landscape correction matrix C to each matrix in the inactive blocks or to part of the matrices, leading to two different variants. Additionally, we may also add a full-rank correction matrix C, training it using an on-the-fly SGD method <ref type="bibr" target="#b21">Lv et al. (2023)</ref> to maintain the memory efficient feature of BCD. We refer to Section 4.3 for details.</p><p>Algorithm design. Based on the above developments, we propose accelerating block coordinate descent via landscape correction (BREAD). We present the detailed procedure in Algorithm 1. Suppose we can add a total of P landscape correction matrices. BREAD first splits the model into D blocks, which can be partitioned either in a layer-wise or matrix-wise manner. Then, each block subproblem is approximately solved using K steps of landscape corrected updates. For each landscape corrected update (Algorithm 1, line 9 -16), we sample a batch of data in a random reshuffled manner, and calculate the gradient of both active block and the correction matrices in one backward pass. Then, we update the active block and correction matrices with a single Adam step. Notably, optimizer states of the correction matrices are accumulated throughout the entire algorithm execution, as they occupy only negligible memory space.</p><p>Under review as a conference paper at ICLR 2025  We now carry out a simple experiment to validate the effectiveness of Algorithm 1 and the insights in Proposition 1 and Proposition 2. Specifically, we train a 3-layer neural network with rank-1 BREAD, with 100 Adam optimization steps for each sub-problem. As shown in Figure <ref type="figure" target="#fig_0">2</ref>, rank-1 BREAD (orange) achieves significantly faster convergence than BCD (blue). The loss difference between rank-1 BREAD and BCD is eventually 0.586. This is a significant amount, as the loss is only decreased by 0.06, if we train C only (rank-1 update only, green). These empirical observations verify that the proposed combination of BCD and landscape correction accelerates the convergence of the individual scheme (BCD alone or landscape correction alone).</p><formula xml:id="formula_16">W t,k πi , s t,k πi ← AdamStep(W t,k-1 π i , g t,k π i , s t,k-1 π i ); 16 C t,k J , st,k J ← AdamStep(C t,k-1 π i , gt,k J , st,k-1 J ); 17 end 18 W t+1 πi ← W t,K πi ; C t+1 J ← C t,K J ; st+1 J ← st,K J ; s t,</formula><p>Convergence result. Below, we show that BREAD is a convergent method under some common assumptions; see Appendix C.1 for the detailed assumptions and analysis.</p><p>Theorem 1. (informal) Under certain common assumptions, BREAD with deterministic gradient is a descent method with the following property</p><formula xml:id="formula_17">H(W t+1 ) -H(W t ) ≤ -O(αK)∥∇H(W t )∥ 2 .</formula><p>Consequently, BREAD finds ε-approximate stationary point with O(ε -2 ) iterations.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.2">MEMORY AND COMPUTATIONAL EFFICIENCY OF BREAD</head><p>In this section, we analyze the memory and computational cost of BREAD, showing that BREAD only introduces marginal additional costs compared to vanilla BCD.</p><p>Memory cost analysis. To simplify the analysis, we consider a D-layer neural network where each layer consists of one matrix with dimensions R m×m . The rank r correction matrix introduces additional 2Dmr parameters. Since the correction matrix is primarily used for coarse-grained landscape correction, the rank is set to be small, e.g., r ∈ [1, 8], making the additional memory required almost negligible. In the scenario where r = 4, D = 32, and m = 4096, BREAD only increases memory cost by Dr(m+m) m 2</p><p>≈ 2.6% compared to BCD.</p><p>Computational cost analysis. We now show that the additional backward cost is also cheap, since the intermediate partial derivatives used for computing the active block's gradient can be directly used for computing correction matrices' gradients, as we have identified in (3). Specifically, the gradient of the correction matrix C j can be expressed as</p><formula xml:id="formula_18">∂H ∂C j = ∂H ∂z L+1 ∂z L+1 ∂z L • • • ∂z j+2 ∂z j+1 Computed in (3), ∀j ≥ ℓ ∂z j+1 ∂C j .<label>(6)</label></formula><p>Clearly, when j ≥ ℓ, computing the (stochastic) gradient of C j only requries additional computation of</p><formula xml:id="formula_19">∂(zj+1)</formula><p>∂Cj , which is cheap given the low dimensionality after low-rank factorization representation, i.e., C j = U j V j . We empirically measure the memory and epoch training time in Table <ref type="table" target="#tab_4">1</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.3">PRACTICAL VARIANTS OF BREAD</head><p>A computational efficient variant. For simplicity, we consider an L-layer neural network where each layer consists of one weight matrix, and our block partition is layer-wise. Based on the derivation of (6), evaluating the gradients of the correction matrices is inexpensive for layers ℓ + 1, . . . , L. However, the gradient evaluation for layers 1, . . . , ℓ -1 is more costly, as it requires calculating ∂zj+1 ∂zj for j = 1, . . . , ℓ -1. These intermediate partial derivatives of the activations are not computed during the backpropagation to the active layer ℓ. Therefore, one computationally efficient variant of BREAD is to add correction matrices only for layers ℓ + 1, . . . , L. This leads to two strategies of selecting correction matrices:</p><formula xml:id="formula_20">J = [P ], if use BREAD {j| j ∈ [P ], C j corrects layers ℓ + 1, . . . , L}, if use BREAD-partial<label>(7)</label></formula><p>A full-rank memory efficient variant. The previous implementation uses low-rank matrices for landscape correction. Alternatively, one can apply a potentially full-rank linear transformation to correct features. This can be achieved through a memory efficient on-the-fly SGD update on the inactive blocks. Specifically, due to the compositional structure of neural networks, the gradient of the model is computed from the deep layers to the shallow layers. The strategy is to perform an SGD update on a matrix whenever its (stochastic) gradient is available, and then immediately discard the corresponding gradient after the update. We term this approach BREAD-SGD. It introduces additional memory cost for storing the gradient of the largest matrix, but this overhead is usually negligible. We formally present this variant in Algorithm 2.</p><p>We compare the performance of these two variants of BREAD in Section 5.4.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">NUMERICAL EXPERIMENTS</head><p>We evaluate the proposed BREAD in finetuning Llama 3.1-8B and Llama 3.1-70B model on math finetuning and instruction tuning tasks, comparing its memory cost, time cost and downstream performance with full training algorithm and memory efficient baselines.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.1">SETUP</head><p>We begin by introducing the experimental setup.</p><p>Baselines. We compare BREAD with 1) BAdam  <ref type="formula">2016</ref>). The evaluations are based on 0-shot prompt and 4-shot chain-of-thought prompt, respectively. Due to the limited computational resource, we do not include the Adam's results for 70B model. Since there is no model parallel implementation released for Galore by the finish of the manuscript, we are unable to report its 70B results as well.</p><p>Instruction tuning. We perform supervise finetuning on the Llama 3.1-8B model using Alpaca-GPT4 dataset <ref type="bibr" target="#b26">Peng et al. (2023)</ref>, which contains 52K questions and corresponding GPT-4 generated answers. The model is evaluated on MT-bench <ref type="bibr" target="#b42">Zheng et al. (2023)</ref> for examining the model's instruction-following capability.</p><p>Preference optimization. After the instruction tuning, we further align the tuned model using direct preference optimization (DPO) <ref type="bibr" target="#b29">Rafailov et al. (2024)</ref> on Ultrafeedback dataset <ref type="bibr" target="#b4">Cui et al. (2023)</ref>. To compare with the baseline optimization methods more comprehensively, we report the evaluation results of using Adam instruction tuned model as base model, and using the same optimization method for both phases.</p><p>All the experiments are run for 3 epochs. The reported scores are the best one among checkpoints at epoch 1, 2, 3. The detailed hyper-parameters are presented in Appendix A.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.2">MEMORY AND TIME COST MEASURE</head><p>In Table <ref type="table" target="#tab_4">1</ref>, we empirically measure the peak memory cost and one epoch's time cost of finetuning models on the MathInstruct dataset. The GPU hour is calculated as the training time × GPU number.</p><p>We set the LoRA rank to 64 to keep its number of trainable parameters (0.83 billion) close to a single block of BREAD (0.86 billion). Compared with LoRA, the proposed BREAD consumes slightly lower memory and costs about the same amount of training time. The computational-efficient variant BREAD-partial requires significantly less training time than BREAD, and is comparable to BAdam.</p><p>Remark. The reported memory cost is higher than the theoretical value, especially for the 70B model's experiments which requires distributed training. This additional memory cost arises from storing activation values and computational buffers, e.g. the gradient buffer for performing reduce scatter operation. Furthermore, the training time may have slight fluctuations for different runs.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.3">FINETUNING PERFORMANCE</head><p>Math finetuning. The evaluation results on math benchmarks are shown in Table <ref type="table" target="#tab_5">2</ref>. For the 8B model's finetuning, BREAD beats all the other 3 memory efficient baselines in both 0-shot and 4shot average score. Under the 0-shot setting, BREAD even outperforms Adam baseline by 1.1. For the finetuning of 70B model, BREAD outperforms BAdam in all tasks, demonstrating the effectiveness of landscape correction. Furthermore, BREAD beats LoRA in 8 out of 10 tasks.</p><p>Under review as a conference paper at ICLR 2025   Instruction tuning and DPO. We report the MT-bench score evaluated by both GPT-4 and GPT-4o models in Figure <ref type="figure" target="#fig_1">3</ref>. After SFT, the MT-bench score of all baseline approaches improves over the base model. BREAD achieves the highest scores in both evaluations, which are even higher than Adam, demonstrating the effectiveness of landscape correction. Based on the model finetuned by Adam, we further align the model using direct preference optimization (DPO). Notably, BREAD achieves the highest evaluation score by GPT-4o model.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.4">ABLATION ON VARIANTS OF BREAD</head><p>We present 1-epoch training loss of BREAD and its variants in Figure <ref type="figure" target="#fig_1">3</ref>. For reference, we also display the loss of BAdam. Here, BREAD-partial means that only deeper layers of the active block will be updated; the BREAD-SGD applies on-the-fly SGD update for all the frozen blocks; the BREAD-SGD-partial incorporates the feature of both, updating frozen blocks that are deeper than the active block using SGD. Since SGD usually requires higher learning rate, we scale the SGD's learning rate up by 10 times compared to the update of the active block. As we can see, all the variants converge faster than the baseline method BAdam, justifying the effectiveness of landscape correction. The BREAD outperforms BREAD-partial since it optimizes all the correction matrices in each iteration. The BREAD-SGD variants converge faster than the low-rank ones, which may attribute to the higher learning rate of the correction matrices and the high-rank update. Notably, the BREAD-SGD-partial exhibits similar convergence as BREAD-SGD.</p><p>Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.5">ADDITIONAL EXPERIMENTAL RESULTS</head><p>We conduct additional ablation study on the hyperparameters of BREAD, and display the results in Appendix D. Below, we summarize the experimental results: 1) Effect of K. We observe a consistent improved convergence speed when increasing K, which may due to that Adam can aggregate more historical information with larger K. 2) Effect of r. BREAD with rank-2 correction significantly outperforms BAdam, and can be further accelerated with larger choices of r. 3) Effect of ordering strategies. Different block ordering yields similar convergence behavior. 4) Convergence versus time. In terms of wall-clock time, BREAD-SGD-partial yields the fastest convergence among the BREAD variants.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6">RELATED WORKS</head><p>Block coordinate descent method. Block coordinate descent (BCD) is a classic optimization paradigm that dates back at least to <ref type="bibr" target="#b10">Hildreth (1957)</ref>. It has gained popularity in recent years, due to its scalability and efficiency for many machine learning applications <ref type="bibr" target="#b25">(Nesterov, 2012;</ref><ref type="bibr" target="#b31">Richtárik &amp; Takáč, 2014;</ref><ref type="bibr">Peng &amp; Vidal, 2023;</ref><ref type="bibr" target="#b6">Ding et al.;</ref><ref type="bibr" target="#b28">Peng &amp; Yin, 2024)</ref>. The community seems to converge to a consensus that, in order for BCD to be efficient, the problem it optimizes needs to possess the so-called coordinate-friendly structure <ref type="bibr" target="#b33">(Shi et al., 2016)</ref>. Nevertheless, deep networks are of a compositional nature and not coordinate-friendly, which is perhaps why recent surveys or books have never mentioned training deep networks as an application of BCD <ref type="bibr" target="#b36">(Wright, 2015;</ref><ref type="bibr" target="#b33">Shi et al., 2016;</ref><ref type="bibr" target="#b0">Beck, 2017;</ref><ref type="bibr" target="#b37">Wright &amp; Recht, 2022;</ref><ref type="bibr" target="#b32">Sayed, 2022)</ref>. Recently, BAdam <ref type="bibr" target="#b20">Luo et al. (2024)</ref> was proposed to finetune LLMs based on the BCD framework, where each block sub-problem is approximately solved using several Adam steps. Although BAdam achieved preliminary success, it is based on the vanilla BCD framework and shares the fundamental limitations we revealed in this work. In light of these, we believe identifying the limitations of BCD for LLM fintuning and fixing them entail certain insights, and this is what makes our contributions non-trivial and valuable.</p><p>Memory efficient finetuning.  <ref type="bibr">(2023)</ref>. Galore <ref type="bibr" target="#b41">Zhao et al. (2024)</ref> projects the gradient into low-rank space so that it does not need to store the full gradient and optimizer states in the memory. LOMO updates parameters in real time during the backpropagation process <ref type="bibr" target="#b21">Lv et al. (2023)</ref>, so that one can perform SGD without store stochastic gradients. MeZO offers an alternative by approximating SGD using only forward passes <ref type="bibr" target="#b22">Malladi et al. (2023)</ref>, drawing from zeroth-order optimization that estimates stochastic gradients through the difference in function values. While this paper addresses the same application as these methods, they remain orthogonal to the proposed approaches. They can function as lightweight updates in the frozen layers for landscape correction.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="7">CONCLUSIONS AND DISCUSSIONS</head><p>This paper investigates the application of a classic optimization method, known as BCD, to the finetuning of LLMs. We pinpoint two primary shortcomings of the standard BCD approach when applied to deep neural networks: the unnecessary computational overhead during backpropagation, and the misguiding optimization landscape caused by frozen blocks. To overcome these challenges, we introduce a new method termed BREAD, which unfreezes the inactive blocks and updates them in a lightweight manner. Our experimental results demonstrate that BREAD significantly enhances downstream task performance while maintaining the original BCD algorithm's memory and computational efficiency.</p><p>For future research, it would be intriguing to explore the potential of BCD in the (continual) pretraining phase of LLMs. Moreover, it is not necessary to apply feature correction at each iteration.</p><p>Exploring the frequency of updating correction matrices is another meaningful direction, which can further save the computational cost.</p><p>Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A DETAILED EXPERIMENTAL SETUP</head><p>We introduce the detailed hyperparameters and experimental setup in this section.</p><p>Global setup. For all the experiments in math finetuning, instruction tuning and direct preference optimization, we fix the effective batch size to be 16 and train the model for 3 epochs. We use DeepSpeed ZeRO-3 to implement all the experiments that require distributed training (shown in Table <ref type="table" target="#tab_4">1</ref>). For all the experiments, we apply gradient checkpointing to reduce the memory cost for storing activation values. We use mixed-precision training with BFloat 16 as the low-precision datatype except for Galore, where we follow the setup in its paper, using pure BFloat 16 and 8bit Adam optimizer for reducing the memory cost. Since the downstream tasks' performance of the language model have high variability, we grid search learning rate from {1e-6, 1e-5, 5e-5} with cosine learning rate schedule, and report the best result among the checkpoints at the end of epoch 1, 2, 3. The grid search is not extensive due to our limited computation resources. The implementation of BAdam, Galore, LoRA are based on LLama-Factory <ref type="bibr" target="#b43">Zheng et al. (2024)</ref>.</p><p>Math finetuning. We randomly select 100,000 samples from the MathInstruct dataset and finetune all the models using the same samples. The benchmarks scores are evaluated using the MAm-moTH's repository<ref type="foot" target="#foot_0">1</ref> (without using program-of-thought). The rank of correction matrices U and V for BREAD and BREAD-partial is set to 8. We initialize U as zero, and initialize V from the Kaiming uniform distribution <ref type="bibr" target="#b8">He et al. (2015)</ref>, i.e. -U(</p><formula xml:id="formula_21">√ 6 r ), U( √<label>6</label></formula><p>r ) . The rank of LoRA is set to 80 and 64 for finetuning Llama 3.1-8B and Llama 3.1-70B, respectively, so that the trainable parameter number of LoRA is close to that of one BAdam/BREAD's active block. We follow the conventional setup to set the LoRA scaling factor α = 2× LoRA rank. We set Galore's rank to be 256, with the period of re-calculating the projection matrix being 256. We set K = 100 for BAdam and BREAD.</p><p>Instruction tuning and direct preference optimization. The evaluation of MT-bench score is based on FastChat <ref type="bibr" target="#b42">Zheng et al. (2023)</ref> using both GPT-4 and GPT-4o API. The maximum sequence is set to 1024 and 2048 for the experiments on Alpaca-GPT4 and UltraFeedback, respectively. For BAdam and BREAD, we solve each block sub-problem for 128 steps, i.e. K = 128.</p><p>Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B BREAD-SGD ALGORITHM</head><p>We introduce a variant of the BREAD algorithm, termed BREAD-SGD, which employs Adam for updating the active block and on-the-fly SGD for the inactive block. The detailed procedure is outlined in Algorithm 2. Analogous to BREAD, BREAD-SGD partitions the model into D distinct blocks and combines the gradient computation and update steps into a singular operation. Specifically, gradients are calculated on a layer-by-layer basis; active layers are updated using Adam, while inactive layers undergo a single SGD step. Once an inactive layer is updated, its gradient is discarded to enhance memory efficiency.</p><p>Algorithm 2: BREAD-SGD In this section, we establish a preliminary convergence result for the proposed algorithms. For brevity of expression, we analyze the BREAD-SGD. The analysis of BREAD and BREAD-partial follows the similar strategy. We begin by introducing the assumptions. Assumption 1. The function H(W ) is L-smooth on W and L i -smooth on block W i for blocks i = 1, • • • , D:</p><formula xml:id="formula_22">1 input: model parameters {W 0 ℓ } L ℓ=1 ,</formula><formula xml:id="formula_23">∥∇ W H(W ) -∇ W H( W )∥ ≤ L∥W -W ∥. (<label>8</label></formula><formula xml:id="formula_24">)</formula><formula xml:id="formula_25">∂H ∂W i W 1 i - ∂H ∂W i W 2 i ≤ L i ∥W 1 i -W 2 i ∥, i = 1, • • • , D.<label>(9)</label></formula><p>The block-wise smoothness ( <ref type="formula" target="#formula_25">9</ref>) can be naturally induced by the function smoothness (8). Assumption 2. There block derivatives ∇ Wi H(W ) are uniformly bounded by a constant G:</p><formula xml:id="formula_26">∥∇ Wi H(W )∥ ≤ G, i = 1, • • • , D.</formula><p>Theorem 2 (Descent of BREAD). Under Assumption 1 and Assumption 2, the Algorithm 2 with deterministic gradient achieves the following descent after each block-epoch of updates:</p><formula xml:id="formula_27">H(W t+1 ) -H(W t ) ≤ -O(αK)∥∇H(W t )∥ 2 , (<label>10</label></formula><formula xml:id="formula_28">)</formula><formula xml:id="formula_29">under the step size choice α ≤ min{ λ 2LK 2 , λ 2 24LKG , LG 2 , 108D 16G 2 K 3 }.</formula><p>By telescoping (10) from t = 1, • • • , T , and divide each side by T , we obtain the sample complexity of ∥∇H(W t )∥ 2 = O(K/T ). The proof of Theorem 2 is based on the following Lemma, which establishes the descent property of one block sub-problem. Lemma 1. Under Assumption 1 and Assumption 2, the Algorithm 2 update yields the following approximate descent property:</p><formula xml:id="formula_30">H(W t i ) -H(W t i-1 ) ≤ - αK 4G ∥∇H(W t i-1 )∥ 2 2</formula><p>Proof. The proof of Lemma 1 follows the analysis framework of <ref type="bibr" target="#b20">Luo et al. (2024)</ref>, except that we need to analyze the descent property of the update in correction matrices. We define some notations for the ease of expression. At the beginning of block epoch t, block sub-problem i, let W t j,i be the parameter of block j, W t i be the full parameter. Based on the smoothness property in Assumption 1, we have</p><formula xml:id="formula_31">H(W t i ) -H(W t i-1 ) ≤ ∇H(W t i-1 ), W t i -W t i-1 + L 2 W t i -W t i-1 2 2 = j∈[D]\i ∇ j H(W t i-1 ), W t+1 j,i -W t+1 j,i-1 I1 + j∈[D]\i L j 2 ∥W t+1 j,i -W t+1 j,i-1 ∥ 2 2 I2 + ∇ i H(W t i-1 ), W t+1 i,i -W t+1 i,i-1 + L i 2 ∥W t+1 i,i -W t+1 i,i-1 ∥ 2 2 (11)</formula><p>The analysis of the last two terms directly follows the strategy in BAdam. We now analyze the first two terms. Let β = c β α be the step size for the correction matrices. Define the gradient bias term of the block sub-problem as e t j,i :=</p><formula xml:id="formula_32">1 K K k=1 ∇ j H(W t,k i-1 ) -∇ j H(W t i-1 ), where W t,k i</formula><p>is the parameter at block epoch j, sub-problem i, inner Adam step k, we have</p><formula xml:id="formula_33">I 1 = Kβ j ∇ j H(W t i-1 ), -∇ j H(W t i-1 ) + e t j,i (i) ≤ - j 3 4 Kβ∥∇ j H(W t i-1 )∥ 2 2 + j 4βK∥e t j,i ∥ 2 (ii) ≤ - 3 4 Kβ∥∇ j H(W t i-1 )∥ 2 2 + 4βK j 1 K K k=1 ∇ j H(W t,k i-1 ) -∇ j H(W t i-1 ) 2 2 (iii) ≤ - 3 4 Kβ∥∇ j H(W t i-1 )∥ 2 2 + 4β j K k=1 ∇ j H(W t,k i-1 ) -∇ j H(W t i-1 ) 2 2 (iv) ≤ - 3 4 Kβ∥∇ j H(W t i-1 )∥ 2 2 + 4βK j K k=1 L j W t,k j,i-1 -W t j,i-1 2 2 (v) ≤ - 3 4 Kβ∥∇ j H(W t i-1 )∥ 2 2 + 4β 3 G 2 K 4 3 DL ≤ - 1 2 Kβ∥∇ j H(W t i-1 )∥ 2 2 (12)</formula><p>where (i) uses Young's inequality, (ii) applies the definition of e t j,i , (iii) uses the fact that</p><formula xml:id="formula_34">( K i=1 a i ) 2 ≤ Ka 2 i , (iv) is due to the Assumption 1, (v) is due to K k=1 ∥W t,k j,i-1 -W t j,i-1 ∥ 2 2 ≤ K k=1 k-1 m=1 ∥W t,m+1 j,i-1 -W t,m j,i-1 ∥ 2 ≤ K k=1 ((k -1)βG) 2 = β 2 G 2 (K -1)K(2K -1) 6 ≤ β 2 G 2 K 3 3 ,</formula><p>and the last inequality is due to β ≤ 3D 16K 3 , which is ensured by α ≤ 108D 16G 2 K 3 . Similar to the analysis above, we can bound I 2 based on Assumption 2:</p><formula xml:id="formula_35">I 2 = j L j 2 β 2 K k=1 ∇ j H(W t,k i-1 ) -∇ j H(W t i-1 ) 2 2 (13) ≤ j L j 2 β 2 K4G 2 (14) ≤ 2G 2 KLβ 2 ≤ 1 4 KβG 2 ,<label>(15)</label></formula><p>where the first inequality is due to Assumption 2, the second inequality is based on the fact that L &gt; L j , ∀j ∈ [D], and the last inequality is due to β ≤ L/8. Combine ( <ref type="formula">12</ref>), ( <ref type="formula" target="#formula_35">15</ref>) and ( <ref type="formula">11</ref>), and given that β = α/4G, we have</p><formula xml:id="formula_36">H(W t i ) -H(W t i-1 ) ≤ - 1 4 Kβ∥∇H(W t i-1 )∥ 2 2 + ∇ i H(W t i-1 ), W t+1 i,i -W t+1 i,i-1 + L i 2 ∥W t+1 i,i -W t+1 i,i-1 ∥ 2 2 ≤ - βK 2 ∥∇H(W t i-1 )∥ 2 2 - αK 8G ∥∇ i H(W t i-1 )∥ 2 2 ≤ - αK 8G ∥∇H(W t i-1 )∥ 2 2 (16)</formula><p>where the second inequality follows <ref type="bibr" target="#b20">(Luo et al., 2024</ref>)'s analysis. Specifically, by following exact the same argument in <ref type="bibr" target="#b20">(Luo et al., 2024)</ref> Lemma D.6 and Lemma D.7, the last two terms can be decomposed into a descent term -O(α∥∇H(W t i )∥) plus an error term O(α∥ẽ t i ∥ 2 ) that represents the gradient bias, where the error ∥ẽ t i ∥ can be shown to be in the order of O(α∥∇ i H(W t i )∥), which can be eliminated by controlling the step size α.</p><p>Proof of Theorem 2. Since (16) establishs exact the same descent property as in <ref type="bibr" target="#b20">Luo et al. (2024)</ref> Corollary D.8, one can follow the same argument as in BAdam's analysis to prove the Theorem 2.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>D ADDITIONAL EXPERIMENTS D.1 MORE ABLATION STUDY RESULTS</head><p>We present additional ablation studies on the hyperparameters of BREAD, including the block switch frequency K, the rank of correction matrices r, and the block ordering strategies.  Effect of K. We present the effect of sub-problem update steps K in Fig. <ref type="figure" target="#fig_4">4a</ref>, which is by default 128 in our paper's experiments. The convergence of BAdam is provided for reference. Evidently, increasing K consistently accelerates the convergence of BREAD for the examined range, where BREAD with K = 512 takes only half of the iterations to reach the final training loss of BREAD with K = 32. One possible explanation for the phenomenon is that when using larger K, the Adam update will aggregate more historical information in its momentum and second moment term, and thereby finds better search direction and scaling. We leave the scientific study of K as a future direction. Notably, BREAD outperforms BAdam under all choices of K.</p><p>Effect of r. The effect of correction matrices' rank r is shown in Fig. <ref type="figure" target="#fig_4">4b</ref>, which is set to 8 in our paper. We note that by adding rank-2 correction matrices, BREAD converges significantly faster than BAdam, which corroborates our observation in Proposition 2. BREAD exhibits faster convergence as the rank increases, since larger rank offers higher freedom of search directions.</p><p>Effect of ordering strategies. We test the ordering strategies of ascending (from input layer to output layer), descending (from output layer to input layer), and random (select the layer in random reshuffling manner). As shown in Fig. <ref type="figure" target="#fig_4">4c</ref>, different ordering strategy does not result in evident difference of convergence speed.   </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>D.5 ADDITIONAL EVALUATION ON MATH BENCHMARKS</head><p>In this section, we provide the math benchmark scores of BREAD variants in Table <ref type="table" target="#tab_6">3</ref>, as well as the averaged scores of finetuned Llama 3.2-1B models in Table <ref type="table" target="#tab_9">4</ref>. All the evaluation protocol follows the released code of MathInstruct.</p><p>As shown in Table <ref type="table" target="#tab_6">3</ref>, the variants with partial update have slight performance degrade compared with their full counterparts. Notably, All the BREAD variants outperform BAdam in 0-shot setting, and outperform other memory efficient baselines more significantly. The variants with partial update have slight performance degrade compared with their full counterparts.</p><p>Llama 3.2-1B experiments. We finetune Llama 3.2-1B on MathInstruct dataset for 3 independent trials, and report the averaged scores with standard deviation in Table <ref type="table" target="#tab_9">4</ref>. In both the 0-shot and 4-shot settings, BREAD outperforms BAdam across all tasks, supporting the effectiveness of the landscape correction.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 2 :</head><label>2</label><figDesc>Figure 2: With rank-1 landscape correction, BREAD converges significantly faster than BCD.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: Convergence of BAdam, BREAD and its variants on MathInstruct dataset.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head></head><label></label><figDesc>To address memory issue, multiple variants have been proposed. Parameter efficient finetuning (PEFT) methods achieve memory efficiency by only training small portion of (possibly extra) parameters while freezing most of the others, such as Adapter tuning Houlsby et al. (2019), prompt tuning, and prefix tuning Lester et al. (2021); Li &amp; Liang (2021). Low-rank adaptation (LoRA) is perhaps the most popular technique that approximates model updates using two smaller, trainable low-rank matrices Hu et al. (2021). LoRA' variants have been proposed to address its rank constraints and further reducing the memory cost Lialin et al. (2024); Xia et al. (2024); Dettmers et al.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Figure 4 :</head><label>4</label><figDesc>Figure 4: Ablation study on the effect of Adam inner steps K, rank of correction matrices r, and block ordering strategies.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_5"><head>D</head><label></label><figDesc>Training loss in terms of time.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_6"><head>Base</head><label></label><figDesc>Training loss in terms of iteration.We finetune the Llama 3.1-8B model on MathInstruct dataset for 3 epochs, and report training loss convergence versus time/iteration in Appendix D.2. Notably, BREAD-SGD-partial achieves the fastest convergence in terms of time, and BREAD-SGD and BREAD-partial surpasses BAdam at certain points. All the BREAD variants achieve lower training loss than BAdam after 3 epochs.Under review as a conference paper at ICLR 2025 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head></head><label></label><figDesc>• • , n} is a batch of the training dataset. Updating from block ℓ = 1 to block ℓ = D is counted as one block-epoch. Since it is intractable to solve (1) exactly, one can instead approximate the solution by implementing K Adam steps, as utilized in BAdam Luo et al. (2024).</figDesc><table /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_2"><head></head><label></label><figDesc>Algorithm 1: BREAD: Block coordinate descent with landscape correction. 1 input: model parameters {W 0 ℓ } L ℓ=1 , number of blocks D, iterations per block K, training dataset: D = {(x j , y j )} n j=1 , batch size B. 2 initialization: block-epoch index t ← 0, the correction matrices C 0 j ← 0, ∀j ∈ [P ], and the corresponding optimizer states s0 j ← 0, ∀j ∈ [P ]. 3 while stopping criterion not meet do 4 generate a block partition π = {π 1 , . . . , π D } ;</figDesc><table><row><cell>5</cell><cell>repeat for one block-epoch i ← 1, . . . , D</cell></row><row><cell>6</cell><cell>select correction matrices' indices J ⊂ [P ] as in (7);</cell></row><row><cell>7</cell><cell>s t,0 πi ← 0 ; // Re-initialize optimizer states for the active block</cell></row><row><cell>8</cell><cell>W t,0 πi ← W t πi ; st,0 J ← st J ;</cell></row><row><cell>9</cell><cell>repeat for landscape corrected block updates k ← 1, . . . , K</cell></row><row><cell>10</cell><cell>sample a data batch in random reshuffled manner D B = {(x j , y j )} B j=1 ∼ D;</cell></row><row><cell>11</cell><cell>within one backward pass on the data batch D B</cell></row><row><cell>12 13</cell><cell>calculate the active block's grad. g t,k i and correction matrices' grad. gt,k J ; end</cell></row><row><cell>14</cell><cell></cell></row><row><cell></cell><cell>// Update the active block and correction matrices</cell></row><row><cell>15</cell><cell></cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_4"><head>Table 1 :</head><label>1</label><figDesc>Memory footprint and time cost for finetuning models on MathInstruct.</figDesc><table><row><cell>Model</cell><cell>Method</cell><cell cols="2">Peak Memory Cost Epoch GPU Hour</cell><cell>GPU #</cell></row><row><cell></cell><cell>Adam (estimated)</cell><cell>1260 GB+</cell><cell>-</cell><cell>16+ A100-80G</cell></row><row><cell></cell><cell>LoRA</cell><cell>296.8 GB</cell><cell>213.1</cell><cell>8 A100-40G</cell></row><row><cell>Llama 3.1-70B</cell><cell>BAdam</cell><cell>276.2 GB</cell><cell>119.0</cell><cell>8 A100-40G</cell></row><row><cell></cell><cell>BREAD</cell><cell>288.6 GB</cell><cell>212.4</cell><cell>8 A100-40G</cell></row><row><cell></cell><cell>BREAD-partial</cell><cell>288.6 GB</cell><cell>152.7</cell><cell>8 A100-40G</cell></row><row><cell></cell><cell>Adam</cell><cell>208.2 GB</cell><cell>37.3</cell><cell>8 A100-40G</cell></row><row><cell></cell><cell>Galore</cell><cell>40.5 GB</cell><cell>10.3</cell><cell>1 A100-80G</cell></row><row><cell>Llama 3.1-8B</cell><cell>LoRA BAdam</cell><cell>25.0 GB 21.8 GB</cell><cell>6.0 3.3</cell><cell>1 A100-40G 1 A100-40G</cell></row><row><cell></cell><cell>BREAD</cell><cell>23.2 GB</cell><cell>5.8</cell><cell>1 A100-40G</cell></row><row><cell></cell><cell>BREAD-partial</cell><cell>23.2 GB</cell><cell>4.0</cell><cell>1 A100-40G</cell></row></table><note><p><p><p><p><p><p><p><p><ref type="bibr" target="#b20">Luo et al. (2024)</ref></p>, which applies vanilla BCD algorithm with Adam as the inner solver; 2) LoRA Hu et al.</p>(2021)</p>, which freezes the pre-trained weight and only updates the injected low-rank adapters; 3) Galore</p><ref type="bibr" target="#b41">Zhao et al. (2024)</ref></p>, which projects the gradient into low-rank spaces for reducing the memory cost; 4) Adam Kingma (</p>2014</p>), which serves as the full parameter training baseline. Math finetuning. We finetune the Llama 3.1-70B and Llama 3.1-8B models on MathInstruct dataset Yue et al. (2023) for 3 epochs, which contains 260K questions that covers wide range of fields Under review as a conference paper at ICLR 2025 in mathematics. The finetuned models are evaluated on 4 in-domain mathematical benchmarks, i.e., GSM8K, MATH, NumGLUE, and AQuA Cobbe et al. (2021); Hendrycks et al. (2021); Mishra et al. (2022); Ling et al. (2017), and 1 out-of-domain mathematical benchmarks, i.e., SimulEq Koncel-Kedziorski et al. (</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_5"><head>Table 2 :</head><label>2</label><figDesc>Math evaluation results for models finetuned on MathInstruct dataset.</figDesc><table><row><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="4">Base model: Llama 3.1-8B</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Method</cell><cell cols="2">GSM8K</cell><cell cols="2">MATH</cell><cell cols="2">NumGLUE</cell><cell cols="2">SimulEq</cell><cell cols="2">AQuA</cell><cell cols="2">Avg.</cell></row><row><cell></cell><cell cols="12">0-shot 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot</cell></row><row><cell cols="2">Base model 17.8</cell><cell>52.5</cell><cell>8.6</cell><cell>23.2</cell><cell>25.7</cell><cell>40.6</cell><cell>12.2</cell><cell>28.8</cell><cell>19.3</cell><cell>43.7</cell><cell>16.7</cell><cell>37.8</cell></row><row><cell>Adam</cell><cell>62.3</cell><cell>64.9</cell><cell>17.4</cell><cell>22.9</cell><cell>56.4</cell><cell>56.8</cell><cell>28.6</cell><cell>33.5</cell><cell>44.9</cell><cell>52.8</cell><cell>41.9</cell><cell>46.2</cell></row><row><cell>Galore</cell><cell>46.7</cell><cell>57.2</cell><cell>16.2</cell><cell>22.9</cell><cell>42.8</cell><cell>45.0</cell><cell>28.7</cell><cell>32.3</cell><cell>47.8</cell><cell>48.4</cell><cell>36.4</cell><cell>41.2</cell></row><row><cell>LoRA</cell><cell>48.7</cell><cell>58.1</cell><cell>13.7</cell><cell>23.0</cell><cell>34.6</cell><cell>54.4</cell><cell>29.6</cell><cell>29.0</cell><cell>47.3</cell><cell>50.3</cell><cell>34.8</cell><cell>43.0</cell></row><row><cell>BAdam</cell><cell>53.9</cell><cell>58.3</cell><cell>17.2</cell><cell>23.6</cell><cell>53.7</cell><cell>57.2</cell><cell>32.5</cell><cell>32.8</cell><cell>50.4</cell><cell>49.6</cell><cell>41.5</cell><cell>44.3</cell></row><row><cell>BREAD</cell><cell>57.0</cell><cell>57.6</cell><cell>20.0</cell><cell>23.7</cell><cell>55.9</cell><cell>58.2</cell><cell>32.5</cell><cell>32.8</cell><cell>49.6</cell><cell>50.0</cell><cell>43.0</cell><cell>44.5</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="4">Base model: Llama 3.1-70B</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Method</cell><cell cols="2">GSM8K</cell><cell cols="2">MATH</cell><cell cols="2">NumGLUE</cell><cell cols="2">SimulEq</cell><cell cols="2">AQuA</cell><cell cols="2">Avg.</cell></row><row><cell></cell><cell cols="12">0-shot 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot 0-shot 4-shot</cell></row><row><cell cols="2">Base model 58.8</cell><cell>79.4</cell><cell>24.9</cell><cell>41.4</cell><cell>43.7</cell><cell>55.8</cell><cell>26.3</cell><cell>38.1</cell><cell>52.0</cell><cell>64.2</cell><cell>41.1</cell><cell>51.2</cell></row><row><cell>LoRA</cell><cell>83.8</cell><cell>82.0</cell><cell>41.7</cell><cell>44.2</cell><cell>70.4</cell><cell>69.0</cell><cell>40.3</cell><cell>48.8</cell><cell>61.4</cell><cell>65.8</cell><cell>59.5</cell><cell>62.0</cell></row><row><cell>BAdam</cell><cell>81.4</cell><cell>82.9</cell><cell>40.3</cell><cell>43.8</cell><cell>68.1</cell><cell>69.7</cell><cell>50.0</cell><cell>52.7</cell><cell>65.3</cell><cell>70.1</cell><cell>61.0</cell><cell>63.8</cell></row><row><cell>BREAD</cell><cell>83.4</cell><cell>84.2</cell><cell>41.4</cell><cell>44.7</cell><cell>73.1</cell><cell>74.4</cell><cell>51.3</cell><cell>56.8</cell><cell>68.3</cell><cell>70.5</cell><cell>63.5</cell><cell>66.1</cell></row><row><cell>Method</cell><cell></cell><cell>SFT</cell><cell></cell><cell cols="2">DPO</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell cols="5">GPT-4 GPT-4o GPT-4 GPT-4o</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell cols="2">Base model 6.07</cell><cell>5.18</cell><cell></cell><cell>6.63</cell><cell>5.66</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Adam</cell><cell>6.63</cell><cell>5.66</cell><cell></cell><cell>7.83</cell><cell>6.18</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>LoRA</cell><cell>6.52</cell><cell>5.60</cell><cell></cell><cell>7.48</cell><cell>5.95</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Galore</cell><cell>6.33</cell><cell>5.48</cell><cell></cell><cell>6.99</cell><cell>5.93</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>BAdam</cell><cell>6.53</cell><cell>5.57</cell><cell></cell><cell>7.63</cell><cell>6.14</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>BREAD</cell><cell>6.77</cell><cell>5.82</cell><cell></cell><cell>7.68</cell><cell>6.31</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_6"><head>Table 3</head><label>3</label><figDesc></figDesc><table><row><cell>0.60 0.65</cell><cell></cell><cell>Training loss BAdam BREAD BREAD-partial BREAD-SGD BREAD-SGD-partial</cell></row><row><cell>0.55</cell><cell></cell><cell></cell></row><row><cell>0.50</cell><cell></cell><cell></cell></row><row><cell>0.45</cell><cell>0</cell><cell>Number of iterations 1000 2000 3000 4000 5000 6000</cell></row><row><cell>: MT-bench scores of different methods</cell><cell></cell><cell></cell></row><row><cell>finetuning Llama 3.1-8B.</cell><cell></cell><cell></cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_7"><head></head><label></label><figDesc>number of blocks D, iterations per block K, step size of inactive blocks β. 2 initialization: block-epoch index t ← 0, and the corresponding optimizer states s0 j ← 0, ∀j ∈ [P ]. 3 while stopping criterion not meet do 4 generate a block partition π = {π 1 , . . . , π D } ;</figDesc><table><row><cell cols="6">Under review as a conference paper at ICLR 2025</cell></row><row><cell cols="6">C CONVERGENCE RESULT AND ADDITIONAL PROOFS</cell></row><row><cell cols="6">C.1 CONVERGENCE OF BREAD</cell></row><row><cell>5</cell><cell cols="5">repeat for one block-epoch i ← 1, . . . , D</cell></row><row><cell>6</cell><cell cols="5">select correction matrices' indices J ⊂ [P ];</cell></row><row><cell>7</cell><cell cols="2">s t,0 πi ← 0 ;</cell><cell></cell><cell></cell><cell>// Re-initialize Adam optimizer states</cell></row><row><cell>8</cell><cell cols="2">W t,0 πi ← W t πi ;</cell><cell></cell><cell></cell></row><row><cell>9</cell><cell cols="5">repeat for landscape corrected block updates k ← 1, . . . , K</cell></row><row><cell>10</cell><cell cols="5">sample a data batch in random reshuffled manner D B = {(x j , y j )} B j=1 ∼ D;</cell></row><row><cell>11</cell><cell cols="5">within one backward pass on the data batch D B</cell></row><row><cell></cell><cell></cell><cell cols="4">// Update the active block</cell></row><row><cell>12</cell><cell></cell><cell cols="3">g t,k πi ← ∂H ∂Wπ i</cell><cell>;</cell></row><row><cell>13</cell><cell></cell><cell cols="4">W t,k πi , s t,k πi ← AdamStep(W t,k-1 π i</cell><cell>, g t,k π i , s t,k-1 π i</cell><cell>);</cell></row><row><cell>14</cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell cols="4">// Correct inactive blocks</cell></row><row><cell>15</cell><cell></cell><cell cols="3">for ℓ ∈ J do</cell></row><row><cell>16</cell><cell></cell><cell cols="2">g t,k-1 ℓ</cell><cell cols="2">← ∂H ∂W ℓ ;</cell></row><row><cell>17</cell><cell></cell><cell>W t,k ℓ</cell><cell cols="3">← W t,k-1 ℓ</cell><cell>-βg t,k-1 ℓ</cell><cell>;</cell></row><row><cell>18</cell><cell></cell><cell cols="2">g t,k-1 ℓ</cell><cell cols="2">← None;</cell></row><row><cell>19</cell><cell></cell><cell>end</cell><cell></cell><cell></cell></row><row><cell>20</cell><cell cols="2">end</cell><cell></cell><cell></cell></row><row><cell>21</cell><cell>end</cell><cell></cell><cell></cell><cell></cell></row><row><cell>22</cell><cell>W t+1 πi</cell><cell cols="4">← W t,K πi ; s t,K πi ← None;</cell></row><row><cell>23</cell><cell>end</cell><cell></cell><cell></cell><cell></cell></row><row><cell>24</cell><cell>t ← t + 1;</cell><cell></cell><cell></cell><cell></cell></row><row><cell cols="2">25 end</cell><cell></cell><cell></cell><cell></cell></row><row><cell cols="6">26 return parameters {W t ℓ } L ℓ=1 .</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_8"><head>Table 3 :</head><label>3</label><figDesc>Math evaluation results for models finetuned on MathInstruct dataset. BAdam 10.9 ± 1.27 4.6 ± 0.56 24.4 ± 3.00 5.9 ± 0.56 28.3 ± 1.50 14.8 BREAD 14.0 ± 1.19 5.2 ± 0.31 28.1 ± 1.31 6.8 ± 1.35 28.1 ± 2.46 16.4 BAdam 14.8 ± 2.28 5.9 ± 0.39 24.4 ± 3.07 5.9 ± 1.19 29.5 ± 2.05 16.1 BREAD 17.2 ± 1.40 6.0 ± 0.29 27.3 ± 1.53 5.9 ± 1.18 29.9 ± 3.22 17.3</figDesc><table><row><cell>Base model</cell><cell>17.8</cell><cell>52.5</cell><cell>8.6</cell><cell>23.2</cell><cell>25.7</cell><cell>40.6</cell><cell>12.2</cell><cell>28.8</cell><cell>19.3</cell><cell>43.7</cell><cell>16.7</cell><cell>37.8</cell></row><row><cell>Adam</cell><cell>62.3</cell><cell>64.9</cell><cell>17.4</cell><cell>22.9</cell><cell>56.4</cell><cell>56.8</cell><cell>28.6</cell><cell>33.5</cell><cell>44.9</cell><cell>52.8</cell><cell>41.9</cell><cell>46.2</cell></row><row><cell>Galore</cell><cell>46.7</cell><cell>57.2</cell><cell>16.2</cell><cell>22.9</cell><cell>42.8</cell><cell>45.0</cell><cell>28.7</cell><cell>32.3</cell><cell>47.8</cell><cell>48.4</cell><cell>36.4</cell><cell>41.2</cell></row><row><cell>LOMO</cell><cell>31.9</cell><cell>53.9</cell><cell>15.6</cell><cell>22.7</cell><cell>39.5</cell><cell>39.8</cell><cell>22.6</cell><cell>28.2</cell><cell>36.2</cell><cell>44.9</cell><cell>29.2</cell><cell>37.9</cell></row><row><cell>LoRA</cell><cell>48.7</cell><cell>58.1</cell><cell>13.7</cell><cell>23.0</cell><cell>34.6</cell><cell>54.4</cell><cell>29.6</cell><cell>29.0</cell><cell>47.3</cell><cell>50.3</cell><cell>34.8</cell><cell>43.0</cell></row><row><cell>BAdam</cell><cell>53.9</cell><cell>58.3</cell><cell>17.2</cell><cell>23.6</cell><cell>53.7</cell><cell>57.2</cell><cell>32.5</cell><cell>32.8</cell><cell>50.4</cell><cell>49.6</cell><cell>41.5</cell><cell>44.3</cell></row><row><cell>BREAD</cell><cell>57.0</cell><cell>57.6</cell><cell>20.0</cell><cell>23.7</cell><cell>55.9</cell><cell>58.2</cell><cell>32.5</cell><cell>32.8</cell><cell>49.6</cell><cell>50.0</cell><cell>43.0</cell><cell>44.5</cell></row><row><cell>BREAD-partial</cell><cell>56.1</cell><cell>62.4</cell><cell>18.5</cell><cell>22.3</cell><cell>53.5</cell><cell>53.5</cell><cell>32.2</cell><cell>32.9</cell><cell>48.9</cell><cell>49.6</cell><cell>41.8</cell><cell>44.1</cell></row><row><cell>BREAD-SGD</cell><cell>56.9</cell><cell>60.6</cell><cell>19.6</cell><cell>21.4</cell><cell>54.1</cell><cell>58.2</cell><cell>31.5</cell><cell>31.8</cell><cell>48.0</cell><cell>50.8</cell><cell>42.0</cell><cell>44.6</cell></row><row><cell cols="2">BREAD-SGD-partial 58.0</cell><cell>60.1</cell><cell>17.8</cell><cell>20.8</cell><cell>53.9</cell><cell>54.3</cell><cell>32.5</cell><cell>31.5</cell><cell>47.3</cell><cell>47.0</cell><cell>41.9</cell><cell>42.7</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="3">0-shot results</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Method</cell><cell>GSM8K</cell><cell></cell><cell cols="2">MATH</cell><cell cols="2">NumGLUE</cell><cell cols="2">SimulEq</cell><cell></cell><cell>AQuA</cell><cell></cell><cell>Avg.</cell></row><row><cell>Base model</cell><cell>4.2</cell><cell></cell><cell>3.9</cell><cell></cell><cell></cell><cell>18.9</cell><cell></cell><cell>3.5</cell><cell></cell><cell>25.2</cell><cell></cell><cell>11.1</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="3">4-shot results</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Method</cell><cell>GSM8K</cell><cell></cell><cell cols="2">MATH</cell><cell cols="2">NumGLUE</cell><cell cols="2">SimulEq</cell><cell></cell><cell>AQuA</cell><cell></cell><cell>Avg.</cell></row><row><cell>Base model</cell><cell>6.2</cell><cell></cell><cell>6.3</cell><cell></cell><cell></cell><cell>20.2</cell><cell></cell><cell>5.6</cell><cell></cell><cell>28.3</cell><cell></cell><cell>13.3</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_9"><head>Table 4 :</head><label>4</label><figDesc>Math benchmark scores for Llama 3.2-1B finetuned on MathInstruct dataset. Results are averaged over 3 independent trials.</figDesc><table /></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="1" xml:id="foot_0"><p>https://github.com/TIGER-AI-Lab/MAmmoTH</p></note>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Under review as a conference paper at ICLR 2025 C.2 PROOF OF PROPOSITIONS Proof of Proposition 1. We first show that H * = 0. One can construct z 3 = [1, 0, • • • , 0] ⊤ and W 3 = [y, 0, • • • , 0]. Note that such a choice of z 3 is always achievable by choosing a specific W 2 . Hence, 0 function value can be attained by the constructed feasible point. This yields H * = 0 after realizing that the objective function must be nonnegative. We illustrate this issue in Figure <ref type="figure">1</ref>.</p><p>In BCD, W 1 and W 3 are fixed. We further assume that the fixed W 3 has full column rank. We split our discussion into two cases. Case I: y / ∈ range(W 3 ). We trivially have H * &gt; 0 = H * . Case II: y ∈ range(W 3 ). In this case, z * 3 := (W ⊤ 3 W 3 ) -1 W ⊤ 3 y is the unique point that can achieve 0 function value. However, since z * 3 has at least one negative entry and z 3 ≥ 0 (due to the ReLU activation), we have ∥z 3 -z * 3 ∥ 2 2 &gt; 0. Therefore, we have ∥y -ŷ∥ 2 2 = ∥W 3 (z * 3 -z 3 )∥ 2 2 &gt; 0 = H * , where the last inequality follows from the full column rankness of W 3 .</p><p>Proof of Proposition 2. We construct</p><p>is the first column of W 3 . Then, we have</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C.3 ANALYSIS OF MULTI-LAYER MODEL AND CROSS ENTROPY LOSS</head><p>In this section, we generalize the Proposition 1 to L-layer neural network model and cross entropy loss. The corresponding numerical verification are presented in Appendix D.4. Let us consider an L-layer model:</p><p>where σ(x) = max(0, x) is the ReLU activation function and</p><p>Let us first consider the general regression loss ∥ ŷ -y∥ 2 2 , where y is the target we aim to fit. Effect of freezing W L . When W L is full column rank, the optimal z L-1 we seek to fit is the least square solution z</p><p>When z * L-1 contains negative entries, it cannot be fit due to the non-negativity of the ReLU function, which induces the suboptimality: min</p><p>Effect of freezing intermediate layers. Each intermediate layer performs the transformation z i = σ(W i z i-1 ) := M i . When W i is trainable, we have range(M i ) = R di+ when z i-1 ̸ = 0. However, when W i is frozen, range(M i ) is limited to the projected "restricted" column space of W i , where "restricted" means that the column combination should be positive, due to the positivity of z i-1 .</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C.3.2 SUBOPTIMALITY ANALYSIS FOR CROSS ENTROPY LOSS</head><p>Without loss of generality, let us assume that the ground truth label is the first class. The cross entropy loss is given by -log (exp ŷ1 /( m i=1 exp ŷi )), where m is the number of classes. Consider the case where the weight of the last layer W L has a row with the same weight as the first row, i.e. ∃ j such that W (j)</p><p>L z L-1 = ŷ1 . In this case, we will never be able to drive the loss down to -log 1 2 :</p><p>-log exp ŷ1 (</p><p>While it is not common for W L to have exactly two same rows, one can expect large error when there are rows that form small angle, i.e.</p><p>Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>D.3 MAGNITUDE OF THE LEARNED PERTURBATION</head><p>Under the task of finetuning Llama 3.1-8B on MathInstruct, we plot the norm of the learned perturbation by BAdam and BREAD, where the magnitude is defined as the difference between the finetuned model and the pre-trained model: ∆W := W T -W 0 . The results is shown in Fig. <ref type="figure">6</ref>. Under the same step size choice, BREAD learns perturbation that has higher norm. This partially verifies that BREAD can expand the search space more efficiently than BAdam. As shown in Fig. <ref type="figure">7a</ref>, BREAD with rank-1 landscape correction converges dramatically faster than BAdam. In particular, BAdam only begins to converge rapidly after the 300 steps, when the final layer has been trained. This phenomenon supports our discussion in Appendix C.3.2, where we noted that a poorly trained final layer may hinder convergence. In Fig. <ref type="figure">7b</ref>, we show that BREAD boosts the convergence for 8-layer neural network as well, which corroborates our L-layer analysis in Appendix C.3.1.   </p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<analytic>
+		<title level="a" type="main">First-Order Methods in Optimization</title>
+		<author>
+			<persName><forename type="first">Amir</forename><surname>Beck</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Society for Industrial and Applied Mathematics</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<analytic>
+		<title level="a" type="main">A nonlinear programming algorithm for solving semidefinite programs via low-rank factorization</title>
+		<author>
+			<persName><forename type="first">Samuel</forename><surname>Burer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Renato</forename><forename type="middle">Dc</forename><surname>Monteiro</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Mathematical programming</title>
+		<imprint>
+			<biblScope unit="volume">95</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<biblScope unit="page" from="329" to="357" />
+			<date type="published" when="2003">2003</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Selective block minimization for faster convergence of limited memory large-scale linear models</title>
+		<author>
+			<persName><forename type="first">Kai-Wei</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Roth</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 17th ACM SIGKDD international conference on Knowledge discovery and data mining</title>
+		<meeting>the 17th ACM SIGKDD international conference on Knowledge discovery and data mining</meeting>
+		<imprint>
+			<date type="published" when="2011">2011</date>
+			<biblScope unit="page" from="699" to="707" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<monogr>
+		<title level="m" type="main">Training verifiers to solve math word problems</title>
+		<author>
+			<persName><forename type="first">Karl</forename><surname>Cobbe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vineet</forename><surname>Kosaraju</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mohammad</forename><surname>Bavarian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heewoo</forename><surname>Jun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukasz</forename><surname>Kaiser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthias</forename><surname>Plappert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jerry</forename><surname>Tworek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Hilton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Reiichiro</forename><surname>Nakano</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2110.14168</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<monogr>
+		<author>
+			<persName><forename type="first">Ganqu</forename><surname>Cui</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lifan</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ning</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guanming</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuan</forename><surname>Ni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guotong</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyuan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maosong</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Ultrafeedback</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.01377</idno>
+		<title level="m">Boosting language models with high-quality feedback</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title level="a" type="main">QLoRA: Efficient finetuning of quantized LLMs</title>
+		<author>
+			<persName><forename type="first">Tim</forename><surname>Dettmers</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Artidoro</forename><surname>Pagnoni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ari</forename><surname>Holtzman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Zettlemoyer</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Efficient algorithms for sum-ofminimum optimization</title>
+		<author>
+			<persName><forename type="first">Lisang</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ziang</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinshang</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wotao</forename><surname>Yin</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Forty-first International Conference on Machine Learning</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Sigmoid-weighted linear units for neural network function approximation in reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Stefan</forename><surname>Elfwing</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eiji</forename><surname>Uchibe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kenji</forename><surname>Doya</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Neural networks</title>
+		<imprint>
+			<biblScope unit="volume">107</biblScope>
+			<biblScope unit="page" from="3" to="11" />
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">Delving deep into rectifiers: Surpassing human-level performance on imagenet classification</title>
+		<author>
+			<persName><forename type="first">Kaiming</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiangyu</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shaoqing</forename><surname>Ren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian</forename><surname>Sun</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the IEEE international conference on computer vision</title>
+		<meeting>the IEEE international conference on computer vision</meeting>
+		<imprint>
+			<date type="published" when="2015">2015</date>
+			<biblScope unit="page" from="1026" to="1034" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<monogr>
+		<title level="m" type="main">Measuring mathematical problem solving with the math dataset</title>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Hendrycks</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Collin</forename><surname>Burns</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saurav</forename><surname>Kadavath</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Akul</forename><surname>Arora</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Basart</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dawn</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Steinhardt</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2103.03874</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<analytic>
+		<title level="a" type="main">A quadratic programming procedure</title>
+		<author>
+			<persName><forename type="first">Clifford</forename><surname>Hildreth</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Naval Research Logistics Quarterly</title>
+		<imprint>
+			<biblScope unit="volume">4</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="79" to="85" />
+			<date type="published" when="1957">1957</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">Parameter-efficient transfer learning for NLP</title>
+		<author>
+			<persName><forename type="first">Neil</forename><surname>Houlsby</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrei</forename><surname>Giurgiu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stanislaw</forename><surname>Jastrzebski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bruna</forename><surname>Morrone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quentin</forename><surname>De Laroussilhe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrea</forename><surname>Gesmundo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mona</forename><surname>Attariyan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sylvain</forename><surname>Gelly</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<publisher>PMLR</publisher>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="page" from="2790" to="2799" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">A dual coordinate descent method for large-scale linear svm</title>
+		<author>
+			<persName><forename type="first">Cho-Jui</forename><surname>Hsieh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kai-Wei</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chih-Jen</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Sathiya Keerthi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sellamanickam</forename><surname>Sundararajan</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 25th international conference on Machine learning</title>
+		<meeting>the 25th international conference on Machine learning</meeting>
+		<imprint>
+			<date type="published" when="2008">2008</date>
+			<biblScope unit="page" from="408" to="415" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<author>
+			<persName><forename type="first">J</forename><surname>Edward</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yelong</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Phillip</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeyuan</forename><surname>Wallis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Allen-Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shean</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Lora</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2106.09685</idno>
+		<title level="m">Low-rank adaptation of large language models</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<monogr>
+		<author>
+			<persName><forename type="first">P</forename><surname>Diederik</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Kingma</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1412.6980</idno>
+		<title level="m">Adam: A method for stochastic optimization</title>
+		<imprint>
+			<date type="published" when="2014">2014</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Mawps: A math word problem repository</title>
+		<author>
+			<persName><forename type="first">Rik</forename><surname>Koncel-Kedziorski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Subhro</forename><surname>Roy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aida</forename><surname>Amini</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nate</forename><surname>Kushman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hannaneh</forename><surname>Hajishirzi</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 2016 conference of the north american chapter of the association for computational linguistics: human language technologies</title>
+		<meeting>the 2016 conference of the north american chapter of the association for computational linguistics: human language technologies</meeting>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+			<biblScope unit="page" from="1152" to="1157" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">The power of scale for parameter-efficient prompt tuning</title>
+		<author>
+			<persName><forename type="first">Brian</forename><surname>Lester</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rami</forename><surname>Al-Rfou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noah</forename><surname>Constant</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing</title>
+		<meeting>the 2021 Conference on Empirical Methods in Natural Language Processing</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="3045" to="3059" />
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">Prefix-tuning: Optimizing continuous prompts for generation</title>
+		<author>
+			<persName><forename type="first">Lisa</forename><surname>Xiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Percy</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Liang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing</title>
+		<meeting>the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing</meeting>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="4582" to="4597" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">ReLoRA: Highrank training through low-rank updates</title>
+		<author>
+			<persName><forename type="first">Sherin</forename><surname>Vladislav Lialin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Namrata</forename><surname>Muckatira</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anna</forename><surname>Shivagunde</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Rumshisky</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<monogr>
+		<title level="m" type="main">Program induction by rationale generation: Learning to solve and explain algebraic word problems</title>
+		<author>
+			<persName><forename type="first">Wang</forename><surname>Ling</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dani</forename><surname>Yogatama</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><surname>Dyer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Phil</forename><surname>Blunsom</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1705.04146</idno>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<monogr>
+		<title level="m" type="main">Badam: A memory efficient full parameter training method for large language models</title>
+		<author>
+			<persName><forename type="first">Qijun</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hengxu</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Li</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.02827</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<title level="m" type="main">Full parameter fine-tuning for large language models with limited resources</title>
+		<author>
+			<persName><forename type="first">Kai</forename><surname>Lv</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuqing</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tengxiao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qinghui</forename><surname>Gao</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2306.09782</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+	<note>Qipeng Guo, and Xipeng Qiu</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Fine-tuning language models with just forward passes</title>
+		<author>
+			<persName><forename type="first">Sadhika</forename><surname>Malladi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianyu</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eshaan</forename><surname>Nichani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Damian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><forename type="middle">D</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Danqi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanjeev</forename><surname>Arora</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<monogr>
+		<author>
+			<persName><forename type="first">Paulius</forename><surname>Micikevicius</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sharan</forename><surname>Narang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonah</forename><surname>Alben</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gregory</forename><surname>Diamos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Erich</forename><surname>Elsen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Garcia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Boris</forename><surname>Ginsburg</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Houston</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oleksii</forename><surname>Kuchaiev</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1710.03740</idno>
+		<title level="m">Ganesh Venkatesh, et al. Mixed precision training</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<monogr>
+		<title level="m" type="main">Numglue: A suite of fundamental yet challenging mathematical reasoning tasks</title>
+		<author>
+			<persName><forename type="first">Swaroop</forename><surname>Mishra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arindam</forename><surname>Mitra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Neeraj</forename><surname>Varshney</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bhavdeep</forename><surname>Sachdeva</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chitta</forename><surname>Baral</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashwin</forename><surname>Kalyan</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2204.05660</idno>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<analytic>
+		<title level="a" type="main">Efficiency of coordinate descent methods on huge-scale optimization problems</title>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Nesterov</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">SIAM Journal on Optimization</title>
+		<imprint>
+			<biblScope unit="volume">22</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<biblScope unit="page" from="341" to="362" />
+			<date type="published" when="2012">2012</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<monogr>
+		<author>
+			<persName><forename type="first">Baolin</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chunyuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pengcheng</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michel</forename><surname>Galley</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianfeng</forename><surname>Gao</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2304.03277</idno>
+		<title level="m">Instruction tuning with gpt-4</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<monogr>
+		<title level="m" type="main">Block coordinate descent on smooth manifolds: Convergence theory and twenty-one examples</title>
+		<author>
+			<persName><forename type="first">Liangzu</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">René</forename><surname>Vidal</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.14744v3</idno>
+		<imprint>
+			<biblScope unit="page">2023</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">Technical report</note>
+	<note>math.OC</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<monogr>
+		<title level="m" type="main">Block acceleration without momentum: On optimal stepsizes of block gradient descent for least-squares</title>
+		<author>
+			<persName><forename type="first">Liangzu</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wotao</forename><surname>Yin</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2405.16020</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Direct preference optimization: Your language model is secretly a reward model</title>
+		<author>
+			<persName><forename type="first">Rafael</forename><surname>Rafailov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Archit</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Mitchell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><forename type="middle">D</forename><surname>Manning</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefano</forename><surname>Ermon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chelsea</forename><surname>Finn</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<author>
+			<persName><forename type="first">Prajit</forename><surname>Ramachandran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Barret</forename><surname>Zoph</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quoc V</forename><surname>Le</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1710.05941</idno>
+		<title level="m">Searching for activation functions</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Iteration complexity of randomized block-coordinate descent methods for minimizing a composite function</title>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Richtárik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Martin</forename><surname>Takáč</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Mathematical Programming</title>
+		<imprint>
+			<biblScope unit="volume">144</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="1" to="38" />
+			<date type="published" when="2014">2014</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<monogr>
+		<title level="m" type="main">Inference and Learning from Data: Foundations</title>
+		<author>
+			<persName><forename type="first">H</forename><surname>Ali</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Sayed</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<publisher>Cambridge University Press</publisher>
+			<biblScope unit="volume">1</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<monogr>
+		<title level="m" type="main">A primer on coordinate descent algorithms</title>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Hao-Jun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shenyinying</forename><surname>Shi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yangyang</forename><surname>Tu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wotao</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Yin</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1610.00040v2</idno>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">Technical report</note>
+	<note>math.OC</note>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">A block-coordinate descent approach for large-scale sparse inverse covariance estimation</title>
+		<author>
+			<persName><forename type="first">Eran</forename><surname>Treister</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Javier</forename><forename type="middle">S</forename><surname>Turek</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="volume">27</biblScope>
+			<date type="published" when="2014">2014</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Attention is all you need</title>
+		<author>
+			<persName><forename type="first">Ashish</forename><surname>Vaswani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Niki</forename><surname>Parmar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakob</forename><surname>Uszkoreit</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Llion</forename><surname>Jones</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aidan</forename><forename type="middle">N</forename><surname>Gomez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukasz</forename><surname>Kaiser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Illia</forename><surname>Polosukhin</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">Coordinate descent algorithms</title>
+		<author>
+			<persName><forename type="first">Wright</forename><surname>Stephen</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Mathematical Programming</title>
+		<imprint>
+			<biblScope unit="volume">151</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="3" to="34" />
+			<date type="published" when="2015">2015</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<monogr>
+		<title level="m" type="main">Optimization for data analysis</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Stephen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Wright</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Recht</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<publisher>Cambridge University Press</publisher>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<monogr>
+		<title level="m" type="main">Chain of LoRA: Efficient fine-tuning of language models via residual learning</title>
+		<author>
+			<persName><forename type="first">Wenhan</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chengwei</forename><surname>Qin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Elad</forename><surname>Hazan</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.04151</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<analytic>
+		<title level="a" type="main">Large linear classification when data cannot fit in memory</title>
+		<author>
+			<persName><forename type="first">Hsiang-Fu</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cho-Jui</forename><surname>Hsieh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kai-Wei</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chih-Jen</forename><surname>Lin</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">ACM Transactions on Knowledge Discovery from Data (TKDD)</title>
+		<imprint>
+			<biblScope unit="volume">5</biblScope>
+			<biblScope unit="issue">4</biblScope>
+			<biblScope unit="page" from="1" to="23" />
+			<date type="published" when="2012">2012</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<monogr>
+		<author>
+			<persName><forename type="first">Xiang</forename><surname>Yue</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xingwei</forename><surname>Qu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ge</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yao</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenhao</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huan</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenhu</forename><surname>Chen</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2309.05653</idno>
+		<title level="m">Mammoth: Building math generalist models through hybrid instruction tuning</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<monogr>
+		<title level="m" type="main">Galore: Memory-efficient llm training by gradient low-rank projection</title>
+		<author>
+			<persName><forename type="first">Jiawei</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhenyu</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Beidi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhangyang</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anima</forename><surname>Anandkumar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuandong</forename><surname>Tian</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2403.03507</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<analytic>
+		<title level="a" type="main">Judging llm-as-a-judge with mt-bench and chatbot arena</title>
+		<author>
+			<persName><forename type="first">Lianmin</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei-Lin</forename><surname>Chiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><surname>Sheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Siyuan</forename><surname>Zhuang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhanghao</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yonghao</forename><surname>Zhuang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zi</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhuohan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dacheng</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Xing</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page" from="46595" to="46623" />
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yaowei</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Richong</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junhao</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanhan</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zheyan</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yongqiang</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Llamafactory</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2403.13372</idno>
+		<ptr target="http://arxiv.org/abs/2403.13372" />
+		<title level="m">Unified efficient fine-tuning of 100+ language models</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

@@ -1,0 +1,1898 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 GRAPHIC: A GRAPH-BASED IN-CONTEXT EXAMPLE RETRIEVAL MODEL FOR MULTI-STEP REASONING</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 GRAPHIC: A GRAPH-BASED IN-CONTEXT EXAMPLE RETRIEVAL MODEL FOR MULTI-STEP REASONING</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">8DF2F8288BECFAC73C4503B96753DC3E</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:08+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>In-context learning (ICL) enables large language models (LLMs) to generalize to new tasks by incorporating a few in-context examples (ICEs) directly in the input, without updating parameters. However, the effectiveness of ICL heavily relies on the selection of ICEs, and conventional text-based embedding methods are often inadequate for tasks that require multi-step reasoning, such as mathematical and logical problem solving. This is due to the bias introduced by shallow semantic similarities that fail to capture the deeper reasoning structures required for these tasks. We present GraphIC, a novel approach that leverages graph-based representations of reasoning processes, coupled with Bayesian Networks (BNs) to select ICEs. Graph structures inherently filter out shallow semantics while preserving the core reasoning structure. Importantly, BNs capture the dependency of a node's attributes on its parent nodes, closely mirroring the hierarchical nature of human cognition-where each thought is shaped by preceding ones. This makes BNs particularly well-suited for multi-step reasoning tasks, aligning the process more closely with human-like reasoning. Extensive experiments across three types of reasoning tasks (mathematical reasoning, code generation, and logical reasoning) demonstrate that GraphIC outperforms both training-free and training-based models in selecting ICEs, excelling in terms of both effectiveness and efficiency. We show that GraphIC enhances ICL's performance and interpretability, significantly advancing ICE selection for multi-step reasoning tasks.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>In-context learning (ICL) <ref type="bibr" target="#b4">(Brown et al., 2020)</ref> represents a paradigm in how large language models (LLMs) perform inference by using a small number of in-context examples (ICEs) within the input prompt. This technique enables LLMs to generalize to new tasks or enhance their performance on existing tasks without updating parameters. However, previous studies have highlighted the sensitivity of ICL performance to the specific ICEs selected <ref type="bibr" target="#b54">(Zhao et al., 2021;</ref><ref type="bibr" target="#b27">Liu et al., 2022)</ref>, underscoring the importance of strategic ICE selection. Consequently, numerous methods have been proposed to optimize the selection of ICEs, focusing on improving task performance and ensuring greater robustness <ref type="bibr" target="#b27">(Liu et al., 2022;</ref><ref type="bibr" target="#b39">Rubin et al., 2022;</ref><ref type="bibr" target="#b50">Ye et al., 2023;</ref><ref type="bibr" target="#b16">Gupta et al., 2024)</ref>. These methods frequently rely on text-based embeddings, where both the query and candidate ICEs are embedded using a language encoder, with similarity scores guiding the selection process.</p><p>Current text-based embedding selection methods primarily focus on capturing semantic-level similarity, demonstrating their utility in tasks such as semantic analysis <ref type="bibr" target="#b27">(Liu et al., 2022)</ref> and machine translation <ref type="bibr" target="#b0">(Agrawal et al., 2023)</ref>. However, these approaches encounter significant limitations in multi-step mathematical and logical reasoning tasks, such as GSM8K <ref type="bibr" target="#b7">(Cobbe et al., 2021)</ref> and ProofWriter <ref type="bibr" target="#b40">(Tafjord et al., 2021)</ref>. The core issue lies in the fact that textual data often encodes a substantial amount of shallow semantic information, which is largely irrelevant to the underlying reasoning processes required for math and logic tasks. This extraneous information introduces bias in the selection of ICEs <ref type="bibr">(An et al., 2023)</ref>, and can even lead the LLM to adopt misleading reasoning strategies, thereby degrading task performance. For example, in a problem involving speed calculation (i.e., determining the rate of change of distance over time), text-based embeddings may prioritize examples that focus on solving for time or distance due to their closer semantic similarity, as shown in <ref type="bibr">Figure 1 (left)</ref>. This misalignment steers the LLM away from the correct problem-Under review as a conference paper at ICLR 2025 Q: Jeannie hikes the 12 miles to Mount Overlook at a pace of 4 miles per hour, and then returns at a pace of 6 miles per hour. How long did her hike take, in hours?   <ref type="bibr" target="#b8">(Devlin et al., 2019)</ref>, while the right panel displays examples retrieved via GraphIC. Semantically related terms are highlighted in blue , and quantities or variables needing resolution are highlighted in green . solving approach. Therefore, a novel representation is needed to enhance example retrieval for tasks involving multi-step mathematical and logical reasoning.</p><p>Extensive research indicates that graph-based representations, in contrast to text, align more closely with human cognitive processes and are better equipped to model multi-step reasoning <ref type="bibr" target="#b11">(Friston, 2008;</ref><ref type="bibr" target="#b3">Besta et al., 2024;</ref><ref type="bibr" target="#b49">Yao et al., 2023)</ref>. Graphs enable the filtering of irrelevant shallow semantic content while preserving the core reasoning structure, thus facilitating the development of an unbiased example retrieval mechanism. More critically, this representation offers a novel and interpretable approach for constructing example retrievers. When solving multi-step reasoning problems, the ideal examples are those whose reasoning processes can be directly applied to the query. In other words, after extracting the thought pattern from these examples, the same logic can be reused to solve the query question and arrive at the correct answer. Graph structures provide an explicit means to model these reasoning processes, enabling us to extract implicit thought patterns and assess their transferability to new problems.</p><p>More formally, a reasoning process can be modeled as a graph G with attributes (x 1 , . . . , x n ), where each x i represents the attribute of vertex v i , corresponding to the thought at v i . We further assume that the probability density function governing the sequence of thoughts throughout the reasoning process is given by p(x 1 , . . . , x n ; G, W ), where W denotes the parameters of the underlying thought pattern. Given a query question q and its associated reasoning graph G q , our goal is to retrieve ICEs with parameterized thought patterns W i that maximize the probability density p(x q 1 , . . . , x q n ; G q , W i ), i.e., maximizing the likelihood of solving q correctly. To achieve this, we employ a Bayesian Network (BN) <ref type="bibr" target="#b36">(Pearl, 2014)</ref>, a type of probabilistic graphical model, to represent the multi-step reasoning process and to parameterize the thought patterns. The motivation for using BN lies in their inherent similarity to human cognition; they assume that the value of each node (thought) is influenced by the values of preceding nodes, mirroring the way new ideas are constructed based on prior knowledge. This structure makes BNs particularly well-suited for capturing the dependencies and progression of reasoning steps.</p><p>In this paper, we introduce GraphIC, a Graph-based In-Context Example Retrieval Model. The key idea is to leverage graph representations of reasoning processes to enhance the retrieval of ICEs. Specifically, we first prompt the LLM to generate "thought graphs" for both the candidate examples and the query question, where each graph encodes the reasoning steps involved. We then employ a BN to model each thought graph of candidate examples and estimate the associated parameters through maximum likelihood estimation, which we reformulate as a bilinear form maximization problem with a closed-form solution. To better simulate human-like reasoning, we incorporate a personalized PageRank (PPR) mechanism <ref type="bibr" target="#b31">(Page, 1999)</ref>, reflecting the cognitive tendency to revisit starting point during reasoning, a characteristic well-aligned with the assumptions behind PPR. Once the thought graphs and their parameters are computed, we select examples whose parameters maximize the probability density of thoughts on the query question's thought graph. Note that we leverage a graph model to aid ICE retrieval, not for direct problem-solving. The solution is driven by the LLM's reasoning capabilities. This approach ensures that the retrieved examples, though not necessarily semantically similar to the query, align with the underlying reasoning process. As shown in Figure <ref type="figure" target="#fig_1">1</ref>(right), GraphIC retrieves examples that, while not focusing on semantically similar tasks, share a common reasoning structure-for instance, solving for rates such as how the number of envelopes changes over time or how costs vary with the number of toys. This guides the LLM towards the correct solution.</p><p>We evaluate GraphIC against 10 baseline models on three multi-step reasoning tasks: mathematical reasoning, code generation, and logical reasoning. Results show GraphIC excels in selecting relevant ICEs, surpassing existing methods in effectiveness and efficiency. Additionally, GraphIC shows faster performance improvements with more ICEs and exhibits asymmetry, mirroring realworld reasoning. Key contributions are summarized as follows: 1) We introduce a novel graph-based representation, the "thought graph", to model multi-step reasoning processes. This approach effectively filters out irrelevant shallow semantic information while preserving the essential reasoning steps. 2) By leveraging BNs, we design a retrieval mechanism that maximizes the probability density of solving the query problem, providing a more objective-driven and interpretable retrieval process.</p><p>3) Our experimental results indicate that GraphIC, despite being a training-free model, outperforms both training-free and training-based models across various multi-step reasoning tasks.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">RELATED WORK</head><p>Existing ICE selection techniques can be classified as either training-free or training-based, depending on whether a retriever needs to be trained.</p><p>Training-free approaches are generally divided into two types: (i) those that use heuristic criteria such as similarity <ref type="bibr" target="#b27">(Liu et al., 2022;</ref><ref type="bibr" target="#b19">Hu et al., 2022)</ref>, diversity <ref type="bibr" target="#b6">(Cho et al., 2023;</ref><ref type="bibr">Zhang et al., 2022b;</ref><ref type="bibr" target="#b23">Levy et al., 2023;</ref><ref type="bibr" target="#b18">Hongjin et al., 2022;</ref><ref type="bibr" target="#b51">Zhang et al., 2023)</ref>, complexity <ref type="bibr" target="#b12">(Fu et al., 2022)</ref>, or combinations of these <ref type="bibr" target="#b0">(Agrawal et al., 2023;</ref><ref type="bibr" target="#b42">Tonglet et al., 2023;</ref><ref type="bibr" target="#b15">Gupta et al., 2023)</ref> to select in-context examples (ICEs); (ii) those that leverage feedback from LLMs, such as probability distributions <ref type="bibr" target="#b45">(Wu et al., 2023;</ref><ref type="bibr" target="#b29">Nguyen &amp; Wong, 2023;</ref><ref type="bibr" target="#b24">Li &amp; Qiu, 2023;</ref><ref type="bibr" target="#b48">Yang et al., 2023</ref><ref type="bibr">), perplexity (Gonen et al., 2023)</ref>, or the model's generated output <ref type="bibr">(An et al., 2023)</ref> to guide the selection process. While training-free approaches avoid the computational and time overhead associated with model training, their relatively simplistic architecture often results in sub-optimal performance compared to training-based methods.</p><p>Training-based methods are typically divided into two main categories. The first learns to select individual examples and then extends this to k-shot scenarios <ref type="bibr" target="#b39">(Rubin et al., 2022;</ref><ref type="bibr" target="#b46">Xiong et al., 2024;</ref><ref type="bibr" target="#b16">Gupta et al., 2024)</ref>. The second models the selection of a group of examples as a whole <ref type="bibr" target="#b50">(Ye et al., 2023;</ref><ref type="bibr" target="#b44">Wang et al., 2023;</ref><ref type="bibr">Zhang et al., 2022a;</ref><ref type="bibr">Scarlatos &amp; Lan, 2023;</ref><ref type="bibr" target="#b28">Lu et al., 2022;</ref><ref type="bibr" target="#b37">Peng et al., 2023;</ref><ref type="bibr" target="#b47">Xu et al., 2024)</ref>. While training-based approaches usually achieve superior performance, their reliance on repeated LLM queries and model training makes them both computationally intensive and time-consuming.</p><p>Our proposed GraphIC method is not only training-free and inherently efficient but also incorporates an advanced graph-based example retriever specifically designed for multi-step reasoning tasks. This sophisticated design enables GraphIC to achieve a significant performance advantage, even surpassing training-based methods.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">PRELIMINARIES: BAYESIAN NETWORK</head><p>A Bayesian Network (BN) <ref type="bibr" target="#b34">(Pearl, 1982;</ref><ref type="bibr" target="#b35">1986;</ref><ref type="bibr" target="#b33">PEARL, 1988;</ref><ref type="bibr" target="#b17">Heckerman et al., 1995;</ref><ref type="bibr" target="#b10">Friedman et al., 1997)</ref> is a probabilistic graphical model that represents conditional dependencies among random variables via a directed acyclic graph (DAG). In a DAG G = (V, E), V = {v 1 , . the vertices corresponding to random variables, and E denotes the conditional dependencies. Each vertex v i is associated with a random variable X i , and the joint probability distribution is factorized as:</p><formula xml:id="formula_0">p(x 1 , x 2 , . . . , x n ) = n i=1 p(x i |pa(v i )),<label>(1)</label></formula><p>where x i ∈ R n f denotes the value of the random variable X i , pa(v i ) refers to the set of parent variables for v i , and p(x i |pa(v i )) is typically modeled as:</p><formula xml:id="formula_1">p(x i |pa(v i )) = g(dist(x i , xi )),<label>(2)</label></formula><p>with xi = W z i and z i = f (pa(v i )). Here, xi represents the predicted value of x i based on z i , where z i aggregates information from the parent nodes pa(v i ). The weight matrix W is used to predict xi , f (•) denotes the aggregation function, dist(•, •) is a distance metric between x i and xi , and g(•) is a function that satisfies: 1). monotonicity: g ′ (u) ≤ 0 for u ≥ 0; and 2) normalization:</p><formula xml:id="formula_2">x g(dist(x, xi ))dx = 1.</formula><p>Given the aggregated features Z = (z 1 , . . . , z n ) ⊤ where ⊤ denotes the transpose operation, organizing the individual feature vectors z i into a matrix where each row corresponds to a feature vector, along with the distance function dist(•, •) and function g(•), the joint probability density of the dataset X = (x 1 , x 2 , . . . , x n ) ⊤ can be computed.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">THE PROPOSED GRAPHIC</head><p>In this work, we propose a novel approach called GraphIC for representing the problem-solving process through a graph-based model, intending to select examples that maximize the probability density of capturing the correct reasoning process. First, we introduce "thought graphs", a formal structure designed to represent the reasoning process underlying each example (Section 4.1). Building on this, we develop a probabilistic framework for modeling the thought graph, enabling us to compute the probability density associated with a given thought graph (Section 4.2). This probabilistic model serves as the foundation for our example selection strategy, which prioritizes examples Under review as a conference paper at ICLR 2025 that maximize the probability density of thoughts on the thought graph of query question (Section 4.3). The overall framework is illustrated in Figure <ref type="figure">2</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.1">THOUGHT GRAPH AND ITS CONSTRUCTION</head><p>We begin by introducing the concept of a thought graph and its construction, inspired by the hierarchical structure of human cognition in problem-solving. The human thought process, especially when addressing complex problems, can be naturally modeled as a graph-like structure <ref type="bibr" target="#b11">(Friston, 2008;</ref><ref type="bibr" target="#b3">Besta et al., 2024;</ref><ref type="bibr" target="#b49">Yao et al., 2023)</ref>. In this work, we present the "thought graph" as a structure for modeling the cognitive process of LLMs during multi-step reasoning tasks. Formally, a thought graph G is represented as a vertex-attributed graph, where each vertex is associated with a natural language text, corresponding to the description of the operation performed or the intermediate conclusion reached at that step. To facilitate computation, we further represent the vertex attributes as the BERT embedding <ref type="bibr" target="#b8">(Devlin et al., 2019)</ref> of corresponding text, denoted as x i .</p><p>Since LLMs are not natively equipped to output graph structures, we propose a methodology to generate these graphs from LLM outputs. As illustrated in Figure <ref type="figure">2</ref>, we prompt the LLM to generate a "formalized reasoning representation" (FRR), which is subsequently parsed to construct the thought graph. The detailed prompt and parser pseudo-code are provided in Appendix D.</p><p>After constructing the thought graph, a straightforward way to select in-context examples (ICEs) is to compare the similarities between graph embeddings. To compute these embeddings, we employ a widely adopted method where each graph embedding is generated through iterative aggregation of node information, as outlined by <ref type="bibr" target="#b41">Togninalli et al. (2019)</ref>. Specifically, this process is formalized as:</p><formula xml:id="formula_3">X h+1 = ÃX h , X 0 = X = (x 1 , x 2 , . . . , x n ) ⊤ ,<label>(3)</label></formula><p>where</p><formula xml:id="formula_4">Ã = D-1 2 A (A + I) D-1 2 A , DA = 1 + j A ij .</formula><p>A represents the adjacency matrix of the thought graph, where A ij = 1 indicates a directed edge from node v i to node v j , and A ij = 0 otherwise. While this approach effectively captures the structural properties of human thought as represented in the graph, it is constrained by its focus on graph similarity alone. Importantly, selecting an example based solely on the similarity does not necessarily optimize the possibility of an LLM generating a correct reasoning trajectory. To overcome this, we further propose a novel example retrieval model that prioritizes the optimization of the probability density of producing a correct reasoning process detailed in the next subsection, moving beyond a mere reliance on graph similarity.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.2">PROBABILISTIC MODEL ON THOUGHT GRAPH</head><p>Building on the method for constructing thought graphs, we now turn to developing a probabilistic model for this structure. BNs model the dependencies of a node's attributes on its parent nodes, which closely mirror the way human cognition functions-where new thoughts are informed by prior ones <ref type="bibr" target="#b30">(Oaksford &amp; Chater, 2007;</ref><ref type="bibr" target="#b20">Jacobs &amp; Kruschke, 2011)</ref>. This makes them a well-suited framework for modeling the thought graphs. In this section, we outline the construction of BNs for thought graphs. As described in Section 3, calculating the joint probability density on the thought graph requires the aggregate feature Z, the distance metric dist(•, •), and the function g(•). We now provide a detailed discussion of how each of these components is constructed.</p><p>Computing the Aggregated Feature Z. Traditional BNs, which rely on the Markov assumption that a node's feature distribution depends solely on its parent nodes, are insufficient for modeling a thought graph where reasoning often requires referencing multiple prior steps. For example, problem solvers may need to iteratively review information from earlier steps or return to the beginning to re-examine the entire reasoning process. To address this limitation, we first employ an iterative aggregation mechanism that better captures the human reasoning processes. This iterative approach is formalized in Equation ( <ref type="formula" target="#formula_3">3</ref>). Next, inspired by the Personalized PageRank (PPR) algorithm <ref type="bibr" target="#b31">(Page, 1999;</ref><ref type="bibr" target="#b13">Gasteiger et al., 2018)</ref>, we refine this method to more accurately simulate the flow of information during problem-solving. The PPR framework models a random walk where a user transitions between web pages with some probability of returning to the start. This closely parallels the cognitive process in complex problem-solving, where solvers often revisit initial hypotheses to reassess their reasoning. Therefore, the iterative feature aggregation is defined as follows:</p><formula xml:id="formula_5">X (h+1) = (1 -λ) Ã + λ B X (h) , X (0) = (x 1 , x 2 , . . . , x n ) ⊤ ,<label>(4)</label></formula><p>where λ ∈ (0, 1), B = D-</p><formula xml:id="formula_6">1 2 B (B + I) D-1 2</formula><p>B , and DB = 1 + j B ij . The matrix B models the retracing aspect of the thought process, where</p><formula xml:id="formula_7">B ij = 1 if deg(v j ) = 0 and deg(v i ) &gt; 0, otherwise B ij = 0, with deg(v j ) representing the in-degree of node v j .</formula><p>After H iterations, the aggregated feature matrix Z is given by:</p><formula xml:id="formula_8">Z = (1 -λ) Ã + λ B H X.</formula><p>(</p><formula xml:id="formula_9">)<label>5</label></formula><p>Distance Metric dist(•) and Function g(•). In prior works <ref type="bibr" target="#b39">(Rubin et al., 2022;</ref><ref type="bibr" target="#b50">Ye et al., 2023;</ref><ref type="bibr" target="#b46">Xiong et al., 2024)</ref>, the inner product has been a standard approach for quantifying vector similarity. Building on this, we define the distance function dist(•) (see equation <ref type="formula" target="#formula_0">1</ref>) in terms of the inner production as follows:</p><formula xml:id="formula_10">dist(x 1 , x 2 ) = l -x ⊤ 1 x 2 , (<label>6</label></formula><formula xml:id="formula_11">)</formula><p>where l is a sufficiently large constant chosen to ensure that dist(x 1 , x 2 ) remains positive. A suitable choice for l is the square of the maximum norm of the embeddings produced by the model:</p><formula xml:id="formula_12">l = max t Emb(t) ⊤ Emb(t) , t ∈ N L,<label>(7)</label></formula><p>with Emb(•) denoting a text embedding model and N L denoting the set of all natural languages. Additionally, we define g i (u) = 1 Ci exp(-u) (see equation <ref type="formula" target="#formula_0">1</ref>), allowing us to represent:</p><formula xml:id="formula_13">p(x i ; G, X) = g i (dist(x i , xi )) = 1 C i exp -(l -x⊤ i x i ) = 1 C i exp -(l -z ⊤ i W ⊤ x i ) ,<label>(8)</label></formula><p>where C i is a normalization constant.</p><p>Note that this formulation establishes a probabilistic model for the thought graph. Given the parameters W , we can compute the probability density of each vertex attribute, which in turn allows us to determine the probability density of the entire graph. In essence, the matrix W governs the generation of new attributes and is meant to capture or represent the underlying structure of reasoning or connections between different concepts or ideas in the thought graph.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.3">PROBABILISTIC EXAMPLE RETRIEVAL</head><p>As outlined in Section 4.2, the parameter W is meant to capture and represent the underlying structure of reasoning or connections between different concepts or ideas within the thought graph. The task of computing the probability density of generating a particular thought graph given W can be interpreted as evaluating the likelihood of producing the associated reasoning process based on the thought pattern encoded within W . Building on this idea, we design an example retrieval mechanism that estimates the model parameters for each candidate example and prioritizes those that maximize the probability density of the thought graph corresponding to the query. These selected examples serve as ICEs, offering the highest potential for accurately solving the problem at hand.</p><p>Estimation of Model Parameters. We estimate the parameter matrix W by maximizing the likelihood function L W of the thought graph features, which is computed as</p><formula xml:id="formula_14">L W = n i=1 p(x i |G), log L W = n i=1 log p(x i |G).<label>(9)</label></formula><p>To simplify the computation, this reduces to the following:</p><formula xml:id="formula_15">log L W = - n i=1 log C i + n i=1 -(l -z ⊤ i W ⊤ x i ) = - n i=1 log C i -nl + tr(ZW ⊤ X ⊤ ). (<label>10</label></formula><formula xml:id="formula_16">)</formula><p>Hence, maximizing L W is equivalent to maximizing tr(ZW ⊤ X ⊤ ), formally expressed as:</p><formula xml:id="formula_17">max W tr(ZW ⊤ X ⊤ ), W ∈ R n f ×n f , s.t. ||W || F = ( m i=1 n j=1 w 2 ij ) 1 2 = 1.<label>(11)</label></formula><p>This constraint ensures that the magnitude of W does not influence the optimization.</p><p>Typically, the number of vertices n in the thought graph is much smaller than the embedding dimensionality n f (i.e., n ≪ n f ). For instance, in the GSM8K dataset, thought graphs often contain fewer than 20 vertices, while the embeddings n f can be as high as 768 if BERT is used. This dimensional disparity makes the solution for W non-unique. Moreover, storing and computing a matrix of size n f × n f is computationally burdensome. To address both uniqueness and computational efficiency, we constrain W to to be of rank 1, reducing it to the form:</p><formula xml:id="formula_18">W = αβ ⊤ , ||α|| 2 = ||β|| 2 = 1, α, β ∈ R n f . (12) This simplifies the optimization to: tr(ZW ⊤ X ⊤ ) = tr(Zβα ⊤ X ⊤ ) = tr(α ⊤ X ⊤ Zβ) = α ⊤ X ⊤ Zβ.</formula><p>(13) Thus, we reformulated the problem as a bilinear form maximization problem:</p><formula xml:id="formula_19">max α,β α ⊤ X ⊤ Zβ, s.t. ||α|| 2 = ||β|| 2 = 1.<label>(14)</label></formula><p>The closed-form solution to this problem (Leon, 1994) can be obtaind as:</p><formula xml:id="formula_20">α = U [0, :], β = V [0, :], where U, Σ, V = SVD(X ⊤ Z).<label>(15)</label></formula><p>Selection of Examples. We extract parameters (α, β) from the thought graph of each candidate example, denoted as {(α 1 , β 1 )} N i=1 , where N represents the size of the candidate set. For a given query q, we construct its thought graph G q and derive Z q , then we select the top k candidate examples that maximize the probability density p i (X q ) of generating the correct reasoning process: </p><formula xml:id="formula_21">p i (X q ) = (α i ) ⊤ (X q ) ⊤ Z q β i . (<label>16</label></formula></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">EXPERIMENTS</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.1">DATASETS AND IMPLEMENTATION DETAILS</head><p>We conduct a comprehensive evaluation of GraphIC model across four multi-step reasoning benchmarks: two for mathematical reasoning (GSM8K <ref type="bibr" target="#b7">(Cobbe et al., 2021)</ref> and AQUA <ref type="bibr" target="#b26">(Ling et al., 2017)</ref>), one for code generation (MBPP <ref type="bibr" target="#b2">(Austin et al., 2021</ref>)), and one for logical reasoning (ProofWriter <ref type="bibr" target="#b40">(Tafjord et al., 2021)</ref>). For both GSM8K and MBPP, we utilize the original datasets without further preprocessing. For AQUA and ProofWriter, we refine the original dataset to improve the experimental setup, as detailed in Appendix A.</p><p>For GSM8K, AQUA, and ProofWriter, model performance is evaluated based on the accuracy of the LLMs' final answers. For MBPP, we adopt the pass@1 metric <ref type="bibr" target="#b5">(Chen et al., 2021)</ref> to assess the quality of code generation.</p><p>We employ GPT-4o-mini and Llama-3.1-8B-Instruct as LLMs. Unless explicitly mentioned otherwise, all evaluations are conducted under an 8-shot paradigm. We set the temperature to 1e-5. We set iterations H in Equation 5 to 3, with λ values from {0, 0.1, 0.2, 0.3}, based on the LLM and dataset (see Appendix D for details). For GSM8K, AQUA, and ProofWriter, we prompt the LLM to create a formalized reasoning representation (FRR) for thought graph construction, using vertex features from a BERT model. For MBPP, we use the staticfg module to parse Python code and generate the control flow graph, embedding each vertex's features with CodeBERT <ref type="bibr" target="#b9">(Feng et al., 2020)</ref>. Variable names in the code are anonymized with arbitrary symbols like 'a', 'b', and 'c'.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.2">BASELINES</head><p>Our model, GraphIC, is designed as a training-free retriever for ICE selection. We compare GraphIC against six training-free retrieval methods spanning random, similarity-based, diversity-based, and complexity-based approaches, including: 1) Random randomly selects k unique ICEs from the candidate set; 2) BM25 <ref type="bibr" target="#b38">(Robertson et al., 2009)</ref> selects the top k examples based on BM25 scoring; 3) BERT <ref type="bibr" target="#b8">(Devlin et al., 2019</ref>) is a dense retriever using cosine similarity with BERT-base-uncased embeddings; 4) Complex-CoT <ref type="bibr" target="#b12">(Fu et al., 2022)</ref> selects k examples based on complexity, quantified by newline characters; 5) Auto-CoT <ref type="bibr">(Zhang et al., 2022b)</ref> clusters candidates and selects the closests to each cluster center; and 6) Skill-kNN <ref type="bibr">(An et al., 2023)</ref> prompts LLM to generate task-relevant skills for query and candidates, followed by dense retrieval. Since Skill-kNN does not natively support datasets like GSM8K, we manually craft the instructions and examples, detailed in Appendix C.</p><p>We also compare with four training-based retrievers, which encompass both single-example and combination-example retrieval strategies, including: 1) EPR <ref type="bibr" target="#b39">(Rubin et al., 2022)</ref> is trained to retrieve the single most relevant ICE, with top k examples being selected during inference; 2) CEIL <ref type="bibr" target="#b50">(Ye et al., 2023)</ref> uses determinantal point processes to select ICEs balancing similarity and diversity, where three CEIL models per dataset with scaling factors of 0.01, 0.05, and 0.1 are trained and the best results are reported; 3) DQ-LoRe <ref type="bibr" target="#b46">(Xiong et al., 2024)</ref> uses dual queries and Under review as a conference paper at ICLR 2025 low-rank approximation re-ranking to identify ICEs; and 4) GistScore <ref type="bibr" target="#b16">(Gupta et al., 2024</ref>) encodes task-specific information into gist tokens for selecting ICEs. Following Skill-kNN, We use GPT-J-6B <ref type="bibr" target="#b43">(Wang &amp; Komatsuzaki, 2021)</ref> as the scoring LLM for EPR, CEIL, and DR-LoRe.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.3">MAIN RESULTS</head><p>Figure <ref type="figure">3</ref> illustrates the thought graphs corresponding to each dataset. Table <ref type="table" target="#tab_1">1</ref> evaluates our GraphIC model against 10 baselines across two LLMs and four datasets. As a training-free method, GraphIC consistently outperforms both training-free and training-based baselines in most settings. With the GPT-4o-mini model, GraphIC achieves the highest performance, averaging 2.57% above the leading training-free model and 1.18% above the best training-based model. For the Llama-3.1-8B-Instruct model, GraphIC ranks first in three out of four datasets, with an average gain of 4.29% over the top training-free competitor and 2.5% over the strongest training-based method. Our analysis shows that the GraphIC model significantly enhances performance in mathematical and logical reasoning tasks versus code generation, especially for complex problems. For instance, in the GSM8K dataset, GraphIC outperforms all baselines by an average of 0.65% and 3.57% with two LLMs. In the more challenging AQUA dataset, improvements rise to 3.47% and 7.64%. Additionally, we observe that the GPT-4o-mini model's performance on the GSM8K dataset is relatively invariant to the selection of ICEs. So, we further perform an additional experiment on the Under review as a conference paper at ICLR 2025 GSM8K dataset using the GPT-3.5-Turbo model. As presented in Table <ref type="table" target="#tab_2">2</ref>, GraphIC model achieves superior performance across all metrics.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.4">ABLATION STUDY</head><p>We perform a series of ablation studies to systematically evaluate the contribution of each component within the GraphIC framework, which is built upon three key pillars: the incorporation of thought graphs, PPR for aggregating features, and BN-based retrieval.</p><p>To this end, we develop several variants of the GraphIC model: 1) Text relies solely on text embeddings, the same as the BERT approach; 2) FRR retrieves examples using BERT embeddings derived from FRRs (or CodeBERT embeddings for the MBPP dataset); 3) Graph utilizes the formula (3) to generate graph embeddings, which are employed for dense retrieval; 4) Graph+PPR uses the formula ( <ref type="formula" target="#formula_9">5</ref>) to obtain graph embeddings for dense retrieval; 5) Graph+BN excludes the backtracking (or PPR) mechanism from the full GraphIC model during computing Z; and 6) Graph+PPR+BN represents the full GraphIC model, integrating all components.</p><p>We conduct experiments leveraging the Llama-3.1-8B-Instruct model across four datasets, with the outcomes detailed in Table <ref type="table" target="#tab_3">3</ref>. The findings underscore that each component of GraphIC plays a pivotal role in boosting model performance, with the most significant improvements observed when all three components are utilized in conjunction.  Assumption of Symmetry. Our findings show that the GraphIC model uses an "asymmetric" approach, unlike the common symmetry assumption in most baseline models. To assess the validity of this assumption, we conduct an experiment examining whether symmetry, in the context of retrieval models, holds. Here, a retrieval model is considered symmetric if score(i, j) = score(j, i), where score(i, j) represents the model's assessment of example i as an ICE for example j. For example, the Skill-kNN is symmetric as it uses inner product embeddings for score(j, i), while the Complex-CoT model is asymmetric, calculating score(j, i) based on the complexity of example i.</p><p>We randomly select 10 examples from the GSM8K candidate set and use the top-7 performing models to compute the score matrix S (S ij = score(i, j)), which we then compare against the ground truth matrix S gt . Here, S gt ij captures the probability that Llama-3.1-8B-Instruct provides the correct answer when example i is used as an ICE for example j.</p><p>The experimental results show that the ground truth matrix (Figure <ref type="figure" target="#fig_3">5 (a)</ref>) is asymmetric, undermining the symmetry assumption. Using symmetric models for inherently asymmetric data introduces significant errors. For instance, the EPR model, trained on correct answer probabilities, struggles with accuracy due to its symmetry reliance (Figure <ref type="figure" target="#fig_3">5</ref> (f)). In contrast, simple asymmetric methods like Complex-CoT (Figure <ref type="figure" target="#fig_3">5 (b)</ref>) and BM25 (Figure <ref type="figure" target="#fig_3">5 (d)</ref>) perform well, ranking second and fourth as Table <ref type="table" target="#tab_1">1</ref> shows, and surpassing many symmetric models. However, their simplistic assumptions limit their ability to capture ground truth nuances. In contrast, GraphIC (Figure <ref type="figure" target="#fig_3">5</ref> (h)), a sophisticated asymmetric model, aligns closely with the ground truth, resulting in superior performance.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6">CONCLUSION</head><p>We introduce GraphIC, a graph-based method for in-context example (ICE) retrieval aimed at enhancing LLM performance on multi-step reasoning tasks. By modeling reasoning as "thought graphs" and utilizing Bayesian Networks and personalized PageRank, GraphIC selects ICEs that align with the task's cognitive structure, overcoming the limitations of text-based embedding methods. Extensive experiments on four benchmarks show that GraphIC consistently outperforms both training-free and training-based baselines, especially in mathematical and logical reasoning. Our analysis of symmetry assumptions highlights the advantage of asymmetric retrieval models. A limitation of the GraphIC model is that, as a training-free framework, it may face difficulties in capturing more intricate thought patterns. Beyond this, GraphIC not only introduces a powerful ICEs retrieval method, but more crucially, it provides a way to represent and understand the reasoning process. This capability can be applied to various domains related to LLM reasoning, such as developing novel graph-based reasoning methods, selecting high-quality and diverse training datasets, and more.</p><p>Under review as a conference paper at ICLR 2025 Proof:</p><p>C SKILL-KNN Since Skill-kNN does not offer prompts for skill generation in these three tasks, we referred to the prompt designed for the semantic parsing task in the original paper to write prompts for the four datasets we used. First, we applied the Complex-CoT method to select 8 examples, then employed the GPT-4o model to generate skills in a zero-shot setting. Finally, we integrated these results to construct the final prompt.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>GSM8K:</head><p>Generate the skills needed to solve the following math problems. Q: You can buy 4 apples or 1 watermelon for the same price. You bought 36 fruits evenly split between oranges, apples and watermelons, and the price of 1 orange is $0.50. AQUA:</p><p>Generate the skills needed to solve the following math problems.</p><p>Q: In a group of 6 boys and 4 girls, four children are to be selected. In how many different ways can they be selected such that at least one boy should be there? Options </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>MBPP:</head><p>Generate the skills needed to solve the following coding problems.</p><p>Text: Write a function to generate a square matrix filled with elements from 1 to n raised to the power of 2 in spiral order.</p><p>Test Cases: assert generate_matrix(3)==[ <ref type="bibr">[1,</ref><ref type="bibr">2,</ref><ref type="bibr">3]</ref>, <ref type="bibr" target="#b57">[8,</ref><ref type="bibr" target="#b58">9,</ref><ref type="bibr" target="#b62">4]</ref>, <ref type="bibr">[7,</ref><ref type="bibr">6,</ref><ref type="bibr" target="#b63">5]</ref>] assert generate_matrix(2)==[ <ref type="bibr">[1,</ref><ref type="bibr">2]</ref>, <ref type="bibr" target="#b62">[4,</ref><ref type="bibr">3]</ref>] assert generate_matrix <ref type="bibr">(7)</ref>==[ <ref type="bibr">[1,</ref><ref type="bibr">2,</ref><ref type="bibr">3,</ref><ref type="bibr" target="#b62">4,</ref><ref type="bibr" target="#b63">5,</ref><ref type="bibr">6,</ref><ref type="bibr">7]</ref>, <ref type="bibr">[24,</ref><ref type="bibr">25,</ref><ref type="bibr">26,</ref><ref type="bibr">27,</ref><ref type="bibr">28,</ref><ref type="bibr">29,</ref><ref type="bibr" target="#b57">8]</ref>, <ref type="bibr">[23,</ref><ref type="bibr">40,</ref><ref type="bibr">41,</ref><ref type="bibr">42,</ref><ref type="bibr">43,</ref><ref type="bibr">30,</ref><ref type="bibr" target="#b58">9]</ref>, <ref type="bibr">[22,</ref><ref type="bibr">39,</ref><ref type="bibr">48,</ref><ref type="bibr">49,</ref><ref type="bibr">44,</ref><ref type="bibr">31,</ref><ref type="bibr" target="#b59">10]</ref>, <ref type="bibr">[21,</ref><ref type="bibr">38,</ref><ref type="bibr">47,</ref><ref type="bibr">46,</ref><ref type="bibr">45,</ref><ref type="bibr">32,</ref><ref type="bibr">11]</ref>, <ref type="bibr">[20,</ref><ref type="bibr">37,</ref><ref type="bibr">36,</ref><ref type="bibr">35,</ref><ref type="bibr">34,</ref><ref type="bibr">33,</ref><ref type="bibr">12]</ref>, <ref type="bibr">[19,</ref><ref type="bibr">18,</ref><ref type="bibr">17,</ref><ref type="bibr">16,</ref><ref type="bibr">15,</ref><ref type="bibr">14,</ref><ref type="bibr">13]</ref> </p><formula xml:id="formula_22">D GRAPHIC D.1 FORMALIZED REASONING REPRESENTATION</formula><p>The prompt examples below are used to generate formalized reasoning representations for the four datasets being considered. For the test question, since no answer is provided, we will remove the section of the prompt highlighted in blue. This will allow the LLM to generate both the answer and the formalized reasoning representation simultaneously, from which we can then extract the formalized reasoning representation.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>GSM8K:</head><p>Translate the given calculations into code form. Each line of code MUST follow the format specified below: output_variable = [description of operation](input_variable_1, ..., input_variable_n) Q: You can buy 4 apples or 1 watermelon for the same price. You bought 36 fruits evenly split between oranges, apples and watermelons, and the price of 1 orange is $0.50. How much does 1 apple cost if your total bill was $66?</p><p>A: If 36 fruits were evenly split between 3 types of fruits, then I bought 36/3 = &lt;&lt;36/3=12&gt;&gt;12 units of each fruit If 1 orange costs $0.50 then 12 oranges will cost $0.50 * 12 = $&lt;&lt;0.5 * 12=6&gt;&gt;6 If my total bill was $66 and I spent $6 on oranges then I spent $66 -$6 = $&lt;&lt;66-6=60&gt;&gt;60 on the other 2 fruit types. Assuming the price of watermelon is W, and knowing that you can buy 4 apples for the same price and that the price of one apple is A, then 1W=4A If we know we bought 12 watermelons and 12 apples for $60, then we know that $60 = 12W + 12A Knowing that 1W=4A, then we can convert the above to $60 = 12(4A) + 12A $60 = 48A + 12A $60 = &lt;&lt;60=60&gt;&gt;60A Then we know the price of one apple (A) is $60/60= $&lt;&lt;60/60=1&gt;&gt;1 #### 1 Next, we calculate the number of ways to select 4 children with no boys, i.e., all girls.</p><p>Since there are only 4 girls, and we need to select all 4 of them:</p><formula xml:id="formula_23">\[ \binom{4}{4} = 1 \]</formula><p>Now, subtract the number of ways to select all girls from the total number of ways to select 4 children to find the number of ways that include at least one boy:</p><formula xml:id="formula_24">\[ \binom{10}{4} -\binom{4}{4} = 210 -1 = 209 \]</formula><p>Thus, the number of ways to select 4 children with at least one boy is:  As shown in Figure <ref type="figure" target="#fig_6">8</ref>, matrix A represents the adjacency matrix of a thought graph, corresponding to the black edges in the graph. In this graph, vertices 1 and 2 have an in-degree of 0, indicating the starting points of reasoning, while vertices 3 and 4 have non-zero in-degrees, representing intermediate steps or results of reasoning. Matrix B indicates the edges from vertices with non-zero in-degrees to those with in-degree 0, corresponding to the edges from vertices 3 and 4 to vertices 1 and 2 in the graph (marked in green). Since vertices 3 and 4 are intermediate steps or results of reasoning, and vertices 1 and 2 represent the starting points, these edges represent the retracing process. First, we provide the optimal value and the optimal solution of the optimization problem defined by Equation <ref type="formula" target="#formula_17">11</ref>, under the assumption that no constraints are imposed on W .</p><formula xml:id="formula_25">\[ \boxed{209} \] #### A Code: total_children = 10</formula><p>Theorem F.1. Consider the following optimization problem:</p><formula xml:id="formula_26">max W tr(ZW ⊤ X ⊤ ), W ∈ R n f ×n f , s.t. ||W || F = 1.<label>(17)</label></formula><p>The optimal value of this problem is </p><formula xml:id="formula_27">n f i=1 σ 2 i 1/2 ,</formula><formula xml:id="formula_28">n f ) with y ii = σi ( n f j=1 σ 2 j ) 1/2 .</formula><p>Proof. We begin by rewriting the objective function using the cyclic property of the trace: tr(ZW ⊤ X ⊤ ) = tr(W ⊤ X ⊤ Z).</p><p>Next, perform the Singular Value Decomposition (SVD) of X ⊤ Z: X ⊤ Z = U ΣV ⊤ , where U and V are orthogonal matrices, and Σ = diag(σ 1 , σ 2 , . . . , σ n f ) is the diagonal matrix of singular values.</p><p>Substituting this decomposition into the trace expression, we obtain: tr(ZW ⊤ X ⊤ ) = tr(W ⊤ U ΣV ⊤ ). Using the cyclic property of the trace again, we get: tr(ZW ⊤ X ⊤ ) = tr (V ⊤ W ⊤ U )Σ . Define Y = V ⊤ W ⊤ U . Then the objective becomes: tr(ZW ⊤ X ⊤ ) = tr(Y Σ).</p><p>Since U and V are orthogonal, they preserve the Frobenius norm, i.e., ||Y || F = ||W || F = 1. Thus, we are now tasked with maximizing tr(Y Σ) subject to ||Y || F = 1.</p><p>We know that the trace tr(Y Σ) is maximized when Y is diagonal, i.e., when Y = diag(y 11 , y 22 , . . . , y n f n f ). This follows because the off-diagonal elements of Y do not contribute to tr(Y Σ), but they affect the Frobenius norm of Y . By setting these off-diagonal elements to zero and redistributing the weight to the diagonal elements, we achieve a higher value of tr(Y Σ).</p><p>Thus, the optimization problem reduces to:</p><formula xml:id="formula_29">tr(ZW ⊤ X ⊤ ) = n f i=1 σ i y ii , subject to n f i=1 y 2 ii = 1.</formula><p>To find the optimal y ii , we apply Cauchy-Schwarz inequality:</p><formula xml:id="formula_30">n f i=1 σ i y ii ≤ n f i=1 σ 2 i 1/2 n f i=1 y 2 ii 1/2</formula><p>.</p><p>Since n f i=1 y 2 ii = 1, this simplifies to:</p><formula xml:id="formula_31">n f i=1 σ i y ii ≤ n f i=1 σ 2 i 1/2</formula><p>.</p><p>The maximum value of n f i=1 σ i y ii is achieved when</p><formula xml:id="formula_32">y ii = σi ( n f j=1 σ 2 j )</formula><p>1/2 . Thus, the optimal value of the objective is</p><formula xml:id="formula_33">n f i=1 σ 2 i 1/2</formula><p>, and the corresponding optimal solution is W * = V Y U ⊤ , where</p><formula xml:id="formula_34">Y = diag σ1 ( n f i=1 σ 2 i )</formula><p>1/2 , . . . ,</p><formula xml:id="formula_35">σn f ( n f i=1 σ 2 i ) 1/2 .</formula><p>Based on the proof above, we know that without any constraints on W , the optimal value of the optimization problem defined by Equation <ref type="formula" target="#formula_17">11</ref>is</p><formula xml:id="formula_36">n f i=1 σ 2 i 1/2</formula><p>. When a rank-1 constraint is added to W , the optimal value of the problem becomes σ 1 . Therefore, we are interested in quantifying the loss introduced by the "rank-1 assumption," which can be assessed by the ratio of their optimal values, r = σ 1 / n f i=1 σ 2 i 1/2 . We computed the value of r on four datasets, and the results are shown in Table <ref type="table" target="#tab_9">10</ref>. The table demonstrates that the loss caused by the "rank-1 assumption" is less than 0.1%, implying that it does not result in a significant loss of precision. To make the problem much simpler while staying in the constraints of the problem, position point $C$ halfway between $A$ and $B$. Then, call $\overline{AC} = \overline{BC}=r$ . The area of the shaded region is then\[\frac{ \pi rˆ2 -\pi (r/2)ˆ2 -\pi (r/2)ˆ2}{2}=\frac {\pi rˆ2}{4}\]Because $\overline{CD}=r$ the area of the circle with $\overline{CD}$ as radius is $\pi rˆ2$. Our ratio is then\[\frac{\pi rˆ2}{4} : \pi rˆ2 = \boxed{1:4}\] Candidate Example 2: The tail of a 1-mile long train exits a tunnel exactly 3 minutes after the front of the train entered the tunnel. If the train is moving 60 miles per hour, how many miles long is the tunnel?</p><p>Answer: Because the train is moving 60 miles per hour, the front of the train moves 1 mile every minute. Therefore, in the three minutes since the front of the train entered the tunnel, the front of the train has moved three miles. At the end of these three minutes, we know the front of the train is 1 mile beyond the end of the tunnel,because the train is one mile long and its tail is just leaving the tunnel. So, the front of the train has moved 3 miles from the beginning of the tunnel and is now 1 mile beyond the end of the tunnel. This tells us that the tunnel is $3-1 = \boxed{2\text{ miles}}$ long.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Candidate Example 3:</head><p>Under review as a conference paper at ICLR 2025  </p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>A</head><label></label><figDesc>, Ariana and Sarah are running a relay race. Each part of the race is a different length and covers different terrain. It takes Sadie 2 hours to run through the forest at an average speed of 3 miles per hour. Ariana sprints across the open field on her section at 6 miles per hour for half an hour. If Sarah runs along the beach at four miles per hour and their total time for the race is four and half hours, what is the total distance of the race?</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 1 :</head><label>1</label><figDesc>Figure 1: ICL with different ICE retrieval mechanisms. The left panel shows examples retrieved via BERT embedding (Devlin et al., 2019), while the right panel displays examples retrieved via GraphIC. Semantically related terms are highlighted in blue , and quantities or variables needing resolution are highlighted in green .</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head></head><label></label><figDesc>)These selected examples are taken as ICEs in ICL, where the detailed templates used in ICL are given in Appendix B.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Figure 5 :</head><label>5</label><figDesc>Figure 5: Ground truth matrix and score matrices of various models. The matrix values have been linearly scaled to the range [0,1], and the diagonal elements have been set to 1.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_5"><head></head><label></label><figDesc>divide](total_fruits, types_of_fruits) cost_of_oranges = [multiply](total_oranges, price_per_orange) remaining_budget = [minus](total_bill, cost_of_oranges) price_per_apple = [construct and solve an equation](total_apples_and_watermelons, equivalent_apples_for_watermelon, remaining_budget) Translate the given calculations into code form. Each line of code MUST follow the format specified below: output_variable = [description of operation](input_variable_1, ..., input_variable_n) Q: In a group of 6 boys and 4 girls, four children are to be selected. In how many different ways can they be selected such that at least one boy should be there? Options: A)209, B)210, C)211, D)213, E)215A: To determine the number of ways to select 4 children from a group of 6 boys and 4 girls such that at least one boy is included, we will use the method of complement counting.First, let's calculate the total number of ways to select 4 children from 10 children (</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_6"><head>Figure 8 :</head><label>8</label><figDesc>Figure 8: The definition of matrix B and its corresponding edges in a graph.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_7"><head>Figure 10 :</head><label>10</label><figDesc>Figure 10: Thought graph of candidate example 2</figDesc><graphic coords="27,166.16,255.88,277.22,207.91" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_8"><head>Figure 12 :</head><label>12</label><figDesc>Figure 12: Thought graph of query 1</figDesc><graphic coords="29,166.16,81.86,277.22,207.91" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_9"><head>Figure 13 :</head><label>13</label><figDesc>Figure 13: Thought graph of query 2</figDesc><graphic coords="29,166.16,494.34,277.22,207.91" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0"><head></head><label></label><figDesc></figDesc><graphic coords="26,166.16,401.05,277.22,207.91" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0"><head></head><label></label><figDesc></figDesc><graphic coords="28,166.16,81.86,277.22,207.91" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0"><head></head><label></label><figDesc></figDesc><graphic coords="30,166.16,233.33,277.22,207.91" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head></head><label></label><figDesc>. . , v n } denotes The overall pipeline of GraphIC. First, the question and candidate examples are processed through the thought graph generation module, where the LLM generates formalized reasoning representations, which are then parsed into thought graphs. For the question's thought graph, we extract X (cognitive process per vertex) and compute aggregated feature Z. For candidates, parameters α i and β i are estimated to capture relevant thought patterns. We then evaluate the applicability of these patterns on the query's thought graph, enabling ICE selection.</figDesc><table><row><cell></cell><cell></cell><cell>original</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell>self-loop</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell>PPR</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Augment Augment</cell><cell>Update Update</cell><cell>Collect</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell>features features</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell>Collect</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell>Feature</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell cols="2">extraction</cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>In-context In-context In-context</cell></row><row><cell>Question Question</cell><cell></cell><cell></cell><cell cols="2">Feature of Question</cell><cell></cell><cell></cell><cell></cell><cell>example 1 example 1 example 1</cell></row><row><cell></cell><cell cols="2">Thought Graph of Question</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell>Thought Graph Generating Thought Graph Generating</cell><cell></cell><cell cols="2">Parameter estimate</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>In-context In-context In-context example k example k example k</cell></row><row><cell>Candidate Set Candidate Set</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell cols="3">Thought Graph of Candidate Examples</cell><cell cols="3">Parameter of Candidate Examples</cell><cell></cell><cell></cell></row><row><cell>Input Question:</cell><cell></cell><cell cols="2">Formalized Reasoning Representation:</cell><cell cols="3">Thought Graph:</cell><cell></cell></row><row><cell>Question: Every day, Wendi feeds each of her chickens three cups of mixed chicken feed, containing seeds, mealworms and vegetables to help keep them healthy. She gives the chickens their feed in three separate meals. In the morning, she gives her flock of chickens 15 cups of feed. In the afternoon, she gives her chickens another 25 cups of feed. chickens in the final meal of the day if the size of Wendi's flock is 20 chickens? How many cups of feed does she need to give her</cell><cell>generating generating Prompt based Prompt based</cell><cell cols="2">feed_per_chicken = 3 number_of_chickens = 20 morning_feed = 15 afternoon_feed = 25 total_feed_given) final_meal_feed = [minus](total_feed_required, total_feed_required = [multiply](feed_per_chicken, number_of_chickens) afternoon_feed) total_feed_given = [add](morning_feed,</cell><cell>parsing Predefined rule-based</cell><cell>3 3 minus minus multiply multiply</cell><cell>20 20</cell><cell>15 15 add add</cell><cell>25 25</cell></row><row><cell>Figure 2:</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 1 :</head><label>1</label><figDesc>Main results on two LLMs and four datasets. For random retrieval, we present the mean and standard deviation derived from five independent experiments. Bold numbers indicate the best results, while underlined numbers represent the second-best results.</figDesc><table><row><cell>GSM8K</cell><cell></cell><cell></cell><cell cols="2">AQUA</cell><cell></cell><cell cols="2">MBPP</cell><cell></cell><cell>ProofWriter</cell></row><row><cell>20</cell><cell>0.3</cell><cell>0.4</cell><cell></cell><cell cols="2">9824.119</cell><cell></cell><cell></cell><cell cols="2">seen = set()</cell><cell>"Anne is furry." "Anne is furry."</cell><cell>"Anne is nice." "Anne is nice."</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="2">for char in s:</cell><cell>set</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>"Anne is quiet." "Anne is quiet."</cell><cell>"Anne is kind." "Anne is kind."</cell></row><row><cell></cell><cell></cell><cell></cell><cell>round to</cell><cell>round to</cell><cell>round to</cell><cell>round to</cell><cell></cell><cell></cell></row><row><cell>divide</cell><cell>add</cell><cell>1</cell><cell>the nearest</cell><cell>the nearest</cell><cell>the nearest</cell><cell>the nearest</cell><cell cols="2">if char in seen:</cell><cell>return 'None'</cell></row><row><cell></cell><cell></cell><cell></cell><cell>thousand</cell><cell>hundred</cell><cell>ten</cell><cell>one</cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>"Anne is young." "Anne is young."</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="2">seen.add(char)</cell><cell>return char</cell></row><row><cell>multiply</cell><cell>minus</cell><cell></cell><cell></cell><cell cols="2">check order</cell><cell></cell><cell></cell><cell cols="2">seen.add</cell><cell>"Anne is green." "Anne is green."</cell></row><row><cell>LLM</cell><cell></cell><cell>Model</cell><cell></cell><cell cols="2">GSM8K</cell><cell>AQUA</cell><cell></cell><cell></cell><cell>MBPP</cell><cell>ProofWriter</cell><cell>Avg.</cell></row><row><cell></cell><cell></cell><cell cols="2">Random</cell><cell cols="2">92.90 (0.31)</cell><cell cols="2">71.58 (0.72)</cell><cell cols="2">72.76 (0.74)</cell><cell>64.90 (0.93)</cell><cell>75.54 (0.36)</cell></row><row><cell></cell><cell></cell><cell>BM25</cell><cell></cell><cell cols="2">92.64</cell><cell>70.47</cell><cell></cell><cell></cell><cell>73.4</cell><cell>66.25</cell><cell>75.69</cell></row><row><cell></cell><cell></cell><cell>BERT</cell><cell></cell><cell cols="2">93.02</cell><cell>66.93</cell><cell></cell><cell></cell><cell>74.2</cell><cell>65.25</cell><cell>74.85</cell></row><row><cell></cell><cell></cell><cell cols="2">Complex-CoT</cell><cell cols="2">92.49</cell><cell>67.32</cell><cell></cell><cell></cell><cell>74.2</cell><cell>64.25</cell><cell>74.57</cell></row><row><cell></cell><cell></cell><cell cols="2">Auto-CoT</cell><cell cols="2">92.72</cell><cell>69.69</cell><cell></cell><cell></cell><cell>73.8</cell><cell>62.25</cell><cell>74.62</cell></row><row><cell cols="2">GPT-4o-mini</cell><cell cols="2">Skill-kNN</cell><cell cols="2">92.34</cell><cell>71.65</cell><cell></cell><cell></cell><cell>72.0</cell><cell>66.00</cell><cell>75.50</cell></row><row><cell></cell><cell></cell><cell>EPR</cell><cell></cell><cell cols="2">93.02</cell><cell>72.04</cell><cell></cell><cell></cell><cell>73.8</cell><cell>68.50</cell><cell>76.84</cell></row><row><cell></cell><cell></cell><cell>CEIL</cell><cell></cell><cell cols="2">92.57</cell><cell>72.44</cell><cell></cell><cell></cell><cell>73.8</cell><cell>69.50</cell><cell>77.08</cell></row><row><cell></cell><cell></cell><cell cols="2">DQ-LoRe</cell><cell cols="2">93.32</cell><cell>69.69</cell><cell></cell><cell></cell><cell>74.6</cell><cell>66.50</cell><cell>76.03</cell></row><row><cell></cell><cell></cell><cell cols="2">GistScore</cell><cell cols="2">93.25</cell><cell>69.69</cell><cell></cell><cell></cell><cell>72.8</cell><cell>67.00</cell><cell>75.69</cell></row><row><cell></cell><cell></cell><cell cols="2">GraphIC</cell><cell cols="2">93.48</cell><cell>73.62</cell><cell></cell><cell></cell><cell>75.2</cell><cell>70.75</cell><cell>78.26</cell></row><row><cell></cell><cell></cell><cell cols="2">w/o ICL</cell><cell cols="2">46.47</cell><cell>35.43</cell><cell></cell><cell></cell><cell>43.4</cell><cell>40.75</cell><cell>41.51</cell></row><row><cell></cell><cell></cell><cell cols="2">Random</cell><cell cols="2">78.86 (0.87)</cell><cell cols="2">53.15 (1.85)</cell><cell cols="2">57.72 (1.06)</cell><cell>76.10 (2.45)</cell><cell>66.46 (0.84)</cell></row><row><cell></cell><cell></cell><cell>BM25</cell><cell></cell><cell cols="2">77.71</cell><cell>46.85</cell><cell></cell><cell></cell><cell>62.0</cell><cell>77.75</cell><cell>66.08</cell></row><row><cell></cell><cell></cell><cell>BERT</cell><cell></cell><cell cols="2">74.15</cell><cell>50.39</cell><cell></cell><cell></cell><cell>60.8</cell><cell>73.75</cell><cell>64.77</cell></row><row><cell></cell><cell></cell><cell cols="2">Complex-CoT</cell><cell cols="2">79.30</cell><cell>50.00</cell><cell></cell><cell></cell><cell>58.6</cell><cell>78.25</cell><cell>66.54</cell></row><row><cell cols="2">Llama-3.1 -8B-Instruct</cell><cell cols="2">Auto-CoT Skill-kNN</cell><cell cols="2">72.78 77.56</cell><cell>42.91 50.39</cell><cell></cell><cell></cell><cell>58.4 60.8</cell><cell>78.00 74.00</cell><cell>63.02 65.69</cell></row><row><cell></cell><cell></cell><cell>EPR</cell><cell></cell><cell cols="2">75.66</cell><cell>53.94</cell><cell></cell><cell></cell><cell>62.0</cell><cell>79.25</cell><cell>67.71</cell></row><row><cell></cell><cell></cell><cell>CEIL</cell><cell></cell><cell cols="2">75.51</cell><cell>51.97</cell><cell></cell><cell></cell><cell>62.4</cell><cell>81.00</cell><cell>67.72</cell></row><row><cell></cell><cell></cell><cell cols="2">DQ-LoRe</cell><cell cols="2">77.93</cell><cell>54.33</cell><cell></cell><cell></cell><cell>59.8</cell><cell>81.25</cell><cell>68.33</cell></row><row><cell></cell><cell></cell><cell cols="2">GistScore</cell><cell cols="2">74.60</cell><cell>44.49</cell><cell></cell><cell></cell><cell>60.4</cell><cell>79.50</cell><cell>64.75</cell></row><row><cell></cell><cell></cell><cell cols="2">GraphIC</cell><cell cols="2">79.98</cell><cell>57.48</cell><cell></cell><cell></cell><cell>61.6</cell><cell>84.25</cell><cell>70.83</cell></row></table><note><p>Figure 3: Examples of thought graphs. For GSM8K and AQUA, Vertices indicated by dashed lines represent the numbers entered during calculations, which will be removed in subsequent steps. The purple vertice indicates the final step in the reasoning process.</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_2"><head>Table 2 :</head><label>2</label><figDesc>Results obtained using GPT-3.5-Turbo as the LLM on the GSM8K dataset.</figDesc><table><row><cell cols="7">Random BM25 BERT Complex-CoT Auto-CoT Skill-kNN EPR CEIL DQ-LoRe GistScore GraphIC</cell></row><row><cell>80.76(0.55) 82.10 80.89</cell><cell>81.65</cell><cell>82.03</cell><cell>81.50</cell><cell>81.65 81.72 82.10</cell><cell>81.72</cell><cell>82.79</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_3"><head>Table 3 :</head><label>3</label><figDesc>Ablation Study. Comparison of different numbers of ICEs on various datasets. The blue, red, and purple lines indicate top 1, top 2, and top 3 performing baseline as shown inTable1, respectively.Impact of ICE Examples on Model Performance. We conduct an in-depth investigation into the influence of the number of ICEs on the performance of our proposed GraphIC model and several competitive baselines across four datasets. For each dataset, we select the top three baselines and varied the number of examples in the set {1, 2, 4, 8}. Llama-3.1-8B-Instruct is employed as the underlying LLM. Results in Figure4indicate a general trend of improved model performance with an increase in the number of examples. Notably, The performance of GraphIC steadily improves as the number of ICEs increases, unlike some baseline methods, which may experience performance degradation when the number of ICEs increases. Furthermore, while GraphIC initially lags behind the baselines in the low-shot settings, its performance exhibits a more pronounced improvement as the number of examples grew. One can observe that GraphIC surpasses the baselines, demonstrating superior performance and underscoring its robustness as the number of examples increases.</figDesc><table><row><cell>Model</cell><cell cols="2">GSM8K AQUA MBPP ProofWriter</cell></row><row><cell>Text</cell><cell>74.15 50.39 60.8</cell><cell>73.75</cell></row><row><cell>FRR</cell><cell>78.31 50.78 60.4</cell><cell>82.50</cell></row><row><cell>Graph</cell><cell>78.46 54.72 60.4</cell><cell>83.50</cell></row><row><cell>+PPR</cell><cell>78.92 56.30 61.0</cell><cell>83.75</cell></row><row><cell>+BN</cell><cell>79.07 49.21 60.4</cell><cell>84.25</cell></row><row><cell cols="2">+PPR+BN 79.98 57.48 61.6</cell><cell>84.25</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_5"><head></head><label></label><figDesc>If Erin is cold then Erin is rough. 2. If something is rough then it is nice. 3. All green, big things are kind. 4. If Dave is kind then Dave is cold. 5. If something is green and not rough then it is big. 6. All nice, rough things are big. 7. If Dave is cold and Dave is nice then Dave is red. Based on the above information, is the following statement true or false? Dave is red.</figDesc><table><row><cell>...</cell></row><row><cell>Text: {{question}}</cell></row><row><cell>Test Cases: {{test_cases}}</cell></row><row><cell>Skills:</cell></row><row><cell>ProofWriter:</cell></row><row><cell>Generate the skills needed to solve the following logical reasoning problems.</cell></row><row><cell>Q: Triples:</cell></row><row><cell>1. Anne is not big.</cell></row><row><cell>2. Anne is cold.</cell></row><row><cell>3. Anne is red.</cell></row><row><cell>4. Dave is green.</cell></row><row><cell>5. Dave is rough.</cell></row><row><cell>6. Erin is green.</cell></row><row><cell>7. Erin is kind.</cell></row><row><cell>8. Erin is rough.</cell></row><row><cell>9. Fiona is green.</cell></row><row><cell>10. Fiona is not nice.</cell></row><row><cell>Rules:</cell></row><row><cell>1. A) True B) False</cell></row><row><cell>Skills:</cell></row><row><cell>1. Comprehension</cell></row><row><cell>2. Logical Deduction</cell></row><row><cell>3. Conditional Reasoning</cell></row><row><cell>4. Contrapositive Reasoning</cell></row><row><cell>5. Transitive Reasoning</cell></row><row><cell>6. Identify Necessary Conditions</cell></row><row><cell>7. Eliminate Contradictions</cell></row><row><cell>8. Pattern Recognition</cell></row><row><cell>9. Attention to Detail</cell></row><row><cell>10. Inference Making</cell></row><row><cell>...</cell></row><row><cell>Q: {{question}}</cell></row><row><cell>Skills:</cell></row><row><cell>]</cell></row><row><cell>Skills:</cell></row><row><cell>1. Matrix Manipulation</cell></row><row><cell>2. Spiral Algorithm Design</cell></row><row><cell>3. Loop Control Flow</cell></row><row><cell>4. Boundary Handling</cell></row><row><cell>5. Efficient Implementation</cell></row><row><cell>6. Testing &amp; Debugging</cell></row><row><cell>7. Sequence-to-Matrix Mapping</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_6"><head></head><label></label><figDesc>Under review as a conference paper at ICLR 2025 E.7 THE PERFORMANCE ON MBPP WITH 16-SHOT SETTING In order to analyze whether GraphIC can benefit from more than even more examples, we tested the performance of GraphIC and other top-3 baselines in the 16-shot setting on MBPP dataset. The experimental results are shown in the table below. The results indicate that while the performance of other baselines declines at 16 shots, GraphIC maintains an improvement. This makes GraphIC superior to the other baselines in the 16-shot scenario.</figDesc><table /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_7"><head>Table 9 :</head><label>9</label><figDesc>The Performance of GraphIC and other top-3 baselines on MBPP with 16-shot Setting</figDesc><table><row><cell cols="4">Model BM25 EPR CEIL GraphIC</cell></row><row><cell>MBPP</cell><cell>60</cell><cell>60.6 60.6</cell><cell>62.6</cell></row><row><cell cols="2">F SUPPLEMENTARY EXPLANATION</cell><cell></cell><cell></cell></row></table><note><p>F.1 THE MATRIX B</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_9"><head>Table 10 :</head><label>10</label><figDesc>The r value on four datasets.</figDesc><table><row><cell cols="2">Dataset GSM8K AQUA</cell><cell cols="2">MBPP ProofWriter</cell></row><row><cell>r</cell><cell cols="2">0.99978 0.99991 0.99963</cell><cell>0.99921</cell></row></table><note><p>Answer:</p></note></figure>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A PROCESSING OF AQUA AND PROOFWRITER</head><p>Given the substantial size of the AQUA dataset, which incurs significant retrieval overhead during testing, we followed the methodology outlined in DQ-LoRe <ref type="bibr" target="#b46">(Xiong et al., 2024)</ref>, using a 1,000sample subset for efficient evaluation.</p><p>For the ProofWriter dataset, we refined the subset selected by Logic-LM <ref type="bibr" target="#b32">(Pan et al., 2023)</ref>, excluding instances labeled as "Unknown," as these samples lacked explicit reasoning chains. Furthermore, because the original training set did not provide reasoning in natural language, we leveraged the GPT-4o-mini model to generate reasoning sequences for the training set, discarding any generated outputs deemed incorrect. We evaluate the correctness of the reasoning process by the correctness of the final result, which is a commonly used approach <ref type="bibr" target="#b25">(Lightman et al., 2024;</ref><ref type="bibr" target="#b46">Xiong et al., 2024;</ref><ref type="bibr" target="#b21">Khattab et al., 2022)</ref>. This process resulted in a refined training set of 1,358 examples with their Chains of Thought and 400 test samples from the original ProofWriter dataset.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B PROMPT TEMPLATES</head><p>For the four datasets under consideration, we design the following prompt templates to format the ICEs and the question into a prompt, which is then fed into an LLM to generate answers. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>GSM8K &amp; AQUA:</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>MBPP:</head><p>Text: Write a function to generate a square matrix filled with elements from 1 to n raised to the power of 2 in spiral order.</p><p>Test Cases: assert generate_matrix( <ref type="formula">3</ref>)==[ <ref type="bibr">[1,</ref><ref type="bibr">2,</ref><ref type="bibr">3]</ref>, <ref type="bibr" target="#b57">[8,</ref><ref type="bibr" target="#b58">9,</ref><ref type="bibr" target="#b62">4]</ref>, <ref type="bibr">[7,</ref><ref type="bibr">6,</ref><ref type="bibr" target="#b63">5]</ref>] assert generate_matrix( <ref type="formula">2</ref>)==[ <ref type="bibr">[1,</ref><ref type="bibr">2]</ref>, <ref type="bibr" target="#b62">[4,</ref><ref type="bibr">3]</ref>] assert generate_matrix( <ref type="formula">7</ref>)==[ <ref type="bibr">[1,</ref><ref type="bibr">2,</ref><ref type="bibr">3,</ref><ref type="bibr" target="#b62">4,</ref><ref type="bibr" target="#b63">5,</ref><ref type="bibr">6,</ref><ref type="bibr">7]</ref>, <ref type="bibr">[24,</ref><ref type="bibr">25,</ref><ref type="bibr">26,</ref><ref type="bibr">27,</ref><ref type="bibr">28,</ref><ref type="bibr">29,</ref><ref type="bibr" target="#b57">8]</ref>, <ref type="bibr">[23,</ref><ref type="bibr">40,</ref><ref type="bibr">41,</ref><ref type="bibr">42,</ref><ref type="bibr">43,</ref><ref type="bibr">30,</ref><ref type="bibr" target="#b58">9]</ref>, <ref type="bibr">[22,</ref><ref type="bibr">39,</ref><ref type="bibr">48,</ref><ref type="bibr">49,</ref><ref type="bibr">44,</ref><ref type="bibr">31,</ref><ref type="bibr" target="#b59">10]</ref>, <ref type="bibr">[21,</ref><ref type="bibr">38,</ref><ref type="bibr">47,</ref><ref type="bibr">46,</ref><ref type="bibr">45,</ref><ref type="bibr">32,</ref><ref type="bibr">11]</ref>, <ref type="bibr">[20,</ref><ref type="bibr">37,</ref><ref type="bibr">36,</ref><ref type="bibr">35,</ref><ref type="bibr">34,</ref><ref type="bibr">33,</ref><ref type="bibr">12]</ref>, <ref type="bibr">[19,</ref><ref type="bibr">18,</ref><ref type="bibr">17,</ref><ref type="bibr">16,</ref><ref type="bibr">15,</ref><ref type="bibr">14,</ref><ref type="bibr">13]</ref>]  To analyze the consistency between LLM-generated answers and real solutions, we tested the accuracy of these answers used to generate the thought graphs. The results are shown in the Table <ref type="table">5</ref>.</p><p>From Table <ref type="table">5</ref>, it can be seen that these answers used to generate the thought graph already have relatively high accuracy, which ensures their consistency with the real solution. Furthermore, the table demonstrates that using the thought graph to retrieve examples can further improve accuracy, especially in mathematical reasoning and logical reasoning tasks. We use Llama-3.1-8B-Instruct for testing. To further investigate whether incorrect thought graphs could mislead the retrieval process, we selected a subset from each dataset, containing all queries associated with incorrect thought graphs. We evaluated GraphIC on these four subsets and compared its performance with that of top-performing baselines, both training-based (DQ-LoRe) and training-free (Complex-CoT). The results, shown in Table <ref type="table">6</ref>, reveal that even when GraphIC uses incorrect thought graphs to retrieve in-context examples, it still achieves a significant performance advantage. Note that the performance in the Table <ref type="table">6</ref> is substantially lower than those in Table <ref type="table">1</ref>. This is because the queries that lead to incorrect thought graphs are typically the most difficult ones. Our method belongs to the category of methods that use the generated output of LLMs to select incontext examples, which also includes methods such as Skill-kNN and DQ-LoRe. These approaches involve using the LLM during the retrieval phase, resulting in longer retrieval times compared to other baselines. However, by leveraging the power of LLMs, they are suitable for complex tasks.</p><p>The computation times for the three models are presented in the Table <ref type="table">7</ref>. Specifically, the retrieval time for the GraphIC model is similar to that of DQ-LoRe, and slightly higher than Skill-kNN. Despite this, GraphIC significantly outperforms Skill-kNN in terms of performance. Moreover, compared to DQ-LoRe, which has the same retrieval time, GraphIC not only delivers superior performance but also greatly reduces both the prepare time and training time required by DQ-LoRe.</p><p>Here, "prepare time" refers to the time spent generating the necessary outputs for retrieval, such as generating the required skills for all candidate examples in Skill-kNN. For our evaluation, we used the GSM8K dataset with the LLM configured as Llama-3.1-8B-Instruct. We find a difference in training-free methods compared to their training-based counterparts. Methods such as DQ-LoRe, which are training-based, directly optimize the probability of large language models (LLMs) producing correct answers in 1-shot scenarios. As a result, they tend to achieve superior performance in low-shot settings, particularly in 1-shot cases. However, as the number of shots increases, the performance gains of these methods may decelerate or even decline.</p><p>To We analyzed the effect of λ values ranging from [0.0, 0.9] on the results across the four datasets utilized in our study. The corresponding results are presented in Figure <ref type="figure">7</ref>, confirming the robustness of our method to the choice of lambda.</p><p>$FFXUDF\ *60. $48$ 0%33 3URRI:ULWHU  <ref type="table">8</ref>: the GraphIC model has consistently achieved optimal performance. Due to computational resource limitations, we randomly selected 500 samples from the training and testing data categorized as "level 5" difficulty in MATH, which were used as the candidate set and test set. Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>F.3 THE ASYMMETRY</head><p>We provide an example to illustrate the asymmetry. As shown in the example below, solving Question B includes solving Question A, which involves further calculations to determine how long it will take to reach the minimum age required by the company for employment. Therefore, in this case, referencing B can help resolve A, but referencing A does not necessarily resolve B.</p><p>Question A: In 3 years, Jayden will be half of Ernesto's age. If Ernesto is 11 years old, how many years old is Jayden now?</p><p>Answer A: Ernesto = 11 + 3 = 14 Jayden = 14/2 = 7 in 3 years Now = 7 -3 = 4 Jayden is 4 years old.</p><p>Question B:</p><p>The minimum age required to be employed at a company is 25 years. Dara aspires to work for the company and will be half the age of Jane in six years. If Jane is currently working for the company and is 28 years old, how long is it before Dara reaches the minimum age required by the company to be employed? Answer B: In six years, Jane will be 28+6 = 34 years old. Dara will be half the age of Jane in six years, meaning she will be 34/2 = 17 years old in six years. Currently, Dara is 17-6 = 11 years old. Dara has to wait for 25-11 = 14 more years to reach the company's minimum age of employment.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>F.4 EXAMPLES OF THOUGHT GRAPHS ON MATH</head><p>Candidate Example 1: Answer:</p><p>We count the number of ways to choose the vowels and the consonants separately. There are four vowels, of which two are As. If there are no As, then we must choose both the remaining vowels, so there is $1$ choice; if there is one A, then we can choose the remaining vowel in $2$ ways; and if there are two As, then there are no vowels left to choose, so there is $1$ choice. This makes $1 + 2 + 1 = 4$ distinct pairs of vowels.</p><p>There are seven consonants, of which two are Ts and of which two are Ms. Since we must choose four consonants, we must use at least one of the Ts and Ms.</p><p>If we use one T and no Ms, we have only $1$ choice (use the three remaining consonants); the same is true if we use one M and no Ts. If we use both Ts and no Ms, there are $\tbinom{3}{2} = 3$ choices for the two remaining consonants; the same is true if we use both Ms and no Ts, or if we use one T and one M. If we use both Ts and one M, there are $\tbinom{3}{1} = 3$ choices for the single remaining consonant; the same is true if we use both Ms and one T. Finally, if we use both Ts and both Ms, there are no more letters left to choose, so we get $1$ more choice.</p><p>In total, we have $2(1) + 5(3) + 1 = 18$ distinct collections of consonants.</p><p>Therefore, the number of distinct collections of letters is $4 \cdot 18 = \boxed{72}.$</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Query 1:</head><p>Question: How many integers between 100 and 500 have at least two 3s as digits?</p><p>Answer: First consider the two $3$s to appear in the units and tens places. Between $100$ and $500$, there are four such numbers: $133$, $233$, $333$, and $433$. Now consider the two $3$s to appear in the units and hundreds places. The numbers will be in the $300$s, so we don't need to worry about if they are between $100$ and $500$. There are $10$ choices for the tens digit, but we have already counted $333$, so such a scenario will add nine numbers. Finally, consider the two $3$s to appear in the tens and hundreds places. Again, these numbers are automatically between $100$ and $500$. There are $10$ choices for the units digit, but we again discard $333$ for a final count of nine such numbers. Thus, our answer is $4+9+9 = \boxed{22}$.  Question: Given that $m$ and $n$ are positive integers such that $m\equiv 6\pmod 9$ and $n\equiv 0\pmod 9$, what is the largest integer that $mn$ is necessarily divisible by?</p><p>Answer: If $m\equiv 6\pmod 9$, then we can write $m$ as $9a+6$ for some integer $a$. This is equal to $3(3a+2)$, so $m$ is certainly divisible by $3$. If $n\equiv 0\pmod 9$, then $n$ is divisible by $9$. Therefore, $mn$ must be divisible by $3\cdot 9 = 27$.</p><p>Note that $m$ can be 6 and $n$ can be 9, which gives us $mn = 54$. Also, $m$ can be 15 and $n$ can be 9, which gives us $mn = 135$. The gcd of 54 and 135 is 27.</p><p>Therefore, the largest integer that $mn$ must be divisible by is $\boxed{27}$.</p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<analytic>
+		<title level="a" type="main">In-context examples selection for machine translation</title>
+		<author>
+			<persName><forename type="first">Sweta</forename><surname>Agrawal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chunting</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mike</forename><surname>Lewis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Zettlemoyer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marjan</forename><surname>Ghazvininejad</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Findings of the Association for Computational Linguistics: ACL 2023</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="8857" to="8873" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<analytic>
+		<title level="a" type="main">Skill-based few-shot selection for in-context learning</title>
+		<author>
+			<persName><forename type="first">Shengnan</forename><surname>An</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeqi</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiang</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nanning</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian-Guang</forename><surname>Lou</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2023 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<monogr>
+		<title level="m" type="main">Program synthesis with large language models</title>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Austin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Augustus</forename><surname>Odena</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maxwell</forename><surname>Nye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maarten</forename><surname>Bosma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Henryk</forename><surname>Michalewski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Dohan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ellen</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carrie</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Terry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quoc</forename><surname>Le</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2108.07732</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Graph of thoughts: Solving elaborate problems with large language models</title>
+		<author>
+			<persName><forename type="first">Maciej</forename><surname>Besta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nils</forename><surname>Blach</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ales</forename><surname>Kubicek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Robert</forename><surname>Gerstenberger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michal</forename><surname>Podstawski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukas</forename><surname>Gianinazzi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joanna</forename><surname>Gajda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomasz</forename><surname>Lehmann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hubert</forename><surname>Niewiadomski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piotr</forename><surname>Nyczyk</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the AAAI Conference on Artificial Intelligence</title>
+		<meeting>the AAAI Conference on Artificial Intelligence</meeting>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="page" from="17682" to="17690" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<analytic>
+		<title level="a" type="main">Language models are few-shot learners</title>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Mann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nick</forename><surname>Ryder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Melanie</forename><surname>Subbiah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><forename type="middle">D</forename><surname>Kaplan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arvind</forename><surname>Neelakantan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pranav</forename><surname>Shyam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Girish</forename><surname>Sastry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Askell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ariel</forename><surname>Herbert-Voss</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gretchen</forename><surname>Krueger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Henighan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rewon</forename><surname>Child</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aditya</forename><surname>Ramesh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Ziegler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clemens</forename><surname>Winter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><surname>Hesse</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Sigler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mateusz</forename><surname>Litwin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Scott</forename><surname>Gray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Chess</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jack</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Berner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Mccandlish</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Sutskever</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dario</forename><surname>Amodei</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="page" from="1877" to="1901" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<monogr>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jerry</forename><surname>Tworek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heewoo</forename><surname>Jun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiming</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Henrique</forename><surname>Ponde De Oliveira Pinto</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><surname>Kaplan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Harri</forename><surname>Edwards</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuri</forename><surname>Burda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicholas</forename><surname>Joseph</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Greg</forename><surname>Brockman</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2107.03374</idno>
+		<title level="m">Evaluating large language models trained on code</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Prompt-augmented linear probing: Scaling beyond the limit of few-shot in-context learners</title>
+		<author>
+			<persName><forename type="first">Hyunsoo</forename><surname>Cho</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joon</forename><surname>Hyuhng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junyeob</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sang-Woo</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sang-Goo</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kang</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Min</forename><surname>Yoo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Taeuk</forename><surname>Kim</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the AAAI Conference on Artificial Intelligence</title>
+		<meeting>the AAAI Conference on Artificial Intelligence</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="12709" to="12718" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<monogr>
+		<title level="m" type="main">Training verifiers to solve math word problems</title>
+		<author>
+			<persName><forename type="first">Karl</forename><surname>Cobbe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vineet</forename><surname>Kosaraju</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mohammad</forename><surname>Bavarian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heewoo</forename><surname>Jun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukasz</forename><surname>Kaiser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthias</forename><surname>Plappert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jerry</forename><surname>Tworek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Hilton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Reiichiro</forename><surname>Nakano</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2110.14168</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">BERT: Pre-training of deep bidirectional transformers for language understanding</title>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Devlin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ming-Wei</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kenton</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kristina</forename><surname>Toutanova</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 2019 Conference of the North American Chapter</title>
+		<editor>
+			<persName><forename type="first">Jill</forename><surname>Burstein</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Christy</forename><surname>Doran</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Thamar</forename><surname>Solorio</surname></persName>
+		</editor>
+		<meeting>the 2019 Conference of the North American Chapter</meeting>
+		<imprint>
+			<publisher>Human Language Technologies</publisher>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="page" from="4171" to="4186" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">CodeBERT: A pre-trained model for programming and natural languages</title>
+		<author>
+			<persName><forename type="first">Zhangyin</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daya</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Duyu</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nan</forename><surname>Duan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaocheng</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ming</forename><surname>Gong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Linjun</forename><surname>Shou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bing</forename><surname>Qin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ting</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daxin</forename><surname>Jiang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2020 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="1536" to="1547" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<analytic>
+		<title level="a" type="main">Bayesian network classifiers</title>
+		<author>
+			<persName><forename type="first">Nir</forename><surname>Friedman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Geiger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Moises</forename><surname>Goldszmidt</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Machine learning</title>
+		<imprint>
+			<biblScope unit="volume">29</biblScope>
+			<biblScope unit="page" from="131" to="163" />
+			<date type="published" when="1997">1997</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">Hierarchical models in the brain</title>
+		<author>
+			<persName><forename type="first">Karl</forename><surname>Friston</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Plos Computational Biology</title>
+		<imprint>
+			<biblScope unit="volume">4</biblScope>
+			<biblScope unit="issue">11</biblScope>
+			<biblScope unit="page">1000211</biblScope>
+			<date type="published" when="2008">2008</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">Complexity-based prompting for multi-step reasoning</title>
+		<author>
+			<persName><forename type="first">Yao</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashish</forename><surname>Sabharwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tushar</forename><surname>Khot</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<analytic>
+		<title level="a" type="main">Predict then propagate: Graph neural networks meet personalized pagerank</title>
+		<author>
+			<persName><forename type="first">Johannes</forename><surname>Gasteiger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aleksandar</forename><surname>Bojchevski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephan</forename><surname>Günnemann</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Eighth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Demystifying prompts in language models via perplexity estimation</title>
+		<author>
+			<persName><forename type="first">Srini</forename><surname>Hila Gonen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Terra</forename><surname>Iyer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noah</forename><forename type="middle">A</forename><surname>Blevins</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Smith</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zettlemoyer</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2023 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Coverage-based example selection for incontext learning</title>
+		<author>
+			<persName><forename type="first">Shivanshu</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matt</forename><surname>Gardner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sameer</forename><surname>Singh</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2023 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">Learning better representations for in-context example selection with gist bottlenecks</title>
+		<author>
+			<persName><forename type="first">Shivanshu</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clemens</forename><surname>Rosenbaum</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ethan</forename><forename type="middle">R</forename><surname>Elenberg</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Gistscore</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Forty-First International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">Learning bayesian networks: The combination of knowledge and statistical data</title>
+		<author>
+			<persName><forename type="first">David</forename><surname>Heckerman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Geiger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><forename type="middle">M</forename><surname>Chickering</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Machine learning</title>
+		<imprint>
+			<biblScope unit="volume">20</biblScope>
+			<biblScope unit="page" from="197" to="243" />
+			<date type="published" when="1995">1995</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">Selective annotation makes language models better few-shot learners</title>
+		<author>
+			<persName><forename type="first">Jungo</forename><surname>Su Hongjin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chen</forename><forename type="middle">Henry</forename><surname>Kasai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weijia</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianlu</forename><surname>Shi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiayi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Xin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mari</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Ostendorf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noah</forename><forename type="middle">A</forename><surname>Zettlemoyer</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Smith</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">In-context learning for few-shot dialogue state tracking</title>
+		<author>
+			<persName><forename type="first">Yushi</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chia-Hsuan</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianbao</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noah</forename><forename type="middle">A</forename><surname>Smith</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mari</forename><surname>Ostendorf</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2022 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="2627" to="2643" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">Bayesian learning theory applied to human cognition</title>
+		<author>
+			<persName><forename type="first">A</forename><surname>Robert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><forename type="middle">K</forename><surname>Jacobs</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Kruschke</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Wiley Interdisciplinary Reviews: Cognitive Science</title>
+		<imprint>
+			<biblScope unit="volume">2</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="8" to="21" />
+			<date type="published" when="2011">2011</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<title level="m" type="main">Demonstrate-search-predict: Composing retrieval and language models for knowledge-intensive NLP</title>
+		<author>
+			<persName><forename type="first">Omar</forename><surname>Khattab</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Keshav</forename><surname>Santhanam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lisa</forename><surname>Xiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Percy</forename><surname>Hall</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matei</forename><surname>Potts</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zaharia</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2212.14024</idno>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Maximizing bilinear forms subject to linear constraints</title>
+		<author>
+			<persName><forename type="first">Leon</forename><surname>Steven</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Linear Algebra and its Applications</title>
+		<imprint>
+			<biblScope unit="volume">210</biblScope>
+			<biblScope unit="page" from="49" to="58" />
+			<date type="published" when="1994">1994</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">Diverse demonstrations improve in-context compositional generalization</title>
+		<author>
+			<persName><forename type="first">Itay</forename><surname>Levy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ben</forename><surname>Bogin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Berant</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Findings of the Association for Computational Linguistics: ACL 2023</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="1401" to="1422" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Finding support examples for in-context learning</title>
+		<author>
+			<persName><forename type="first">Xiaonan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xipeng</forename><surname>Qiu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2023 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="6219" to="6235" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<analytic>
+		<title level="a" type="main">Let&apos;s verify step by step</title>
+		<author>
+			<persName><forename type="first">Vineet</forename><surname>Hunter Lightman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuri</forename><surname>Kosaraju</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Harrison</forename><surname>Burda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bowen</forename><surname>Edwards</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Teddy</forename><surname>Baker</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jan</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><surname>Leike</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Schulman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karl</forename><surname>Sutskever</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Cobbe</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title level="a" type="main">Program induction by rationale generation: Learning to solve and explain algebraic word problems</title>
+		<author>
+			<persName><forename type="first">Wang</forename><surname>Ling</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dani</forename><surname>Yogatama</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><surname>Dyer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Phil</forename><surname>Blunsom</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Findings of the Association for Computational Linguistics: ACL 2017</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+			<biblScope unit="page" from="158" to="167" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<analytic>
+		<title level="a" type="main">The 3rd Workshop on Knowledge Extraction and Integration for Deep Learning Architectures</title>
+		<author>
+			<persName><forename type="first">Jiachang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dinghan</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yizhe</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><forename type="middle">B</forename><surname>Dolan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lawrence</forename><surname>Carin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Chen</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of Deep Learning Inside Out</title>
+		<meeting>Deep Learning Inside Out</meeting>
+		<imprint>
+			<date type="published" when="2022">DeeLIO 2022. 2022</date>
+			<biblScope unit="page" from="100" to="114" />
+		</imprint>
+	</monogr>
+	<note>What makes good in-context examples for GPT-3?</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<analytic>
+		<title level="a" type="main">Dynamic prompt learning via policy gradient for semi-structured mathematical reasoning</title>
+		<author>
+			<persName><forename type="first">Pan</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liang</forename><surname>Qiu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kai-Wei</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><forename type="middle">Nian</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Song-Chun</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tanmay</forename><surname>Rajpurohit</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashwin</forename><surname>Kalyan</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<monogr>
+		<author>
+			<persName><forename type="first">Tai</forename><surname>Nguyen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Wong</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2302.11042</idno>
+		<title level="m">-context example selection with influences</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<title level="m" type="main">Bayesian rationality: The probabilistic approach to human reasoning</title>
+		<author>
+			<persName><forename type="first">Mike</forename><surname>Oaksford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nick</forename><surname>Chater</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2007">2007</date>
+			<publisher>Oxford University Press</publisher>
+			<pubPlace>USA</pubPlace>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<monogr>
+		<title level="m" type="main">The PageRank citation ranking: Bringing order to the Web</title>
+		<author>
+			<persName><surname>Page</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="1999">1999</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">Technical Report</note>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<analytic>
+		<title level="a" type="main">Logic-LM: empowering large language models with symbolic solvers for faithful logical reasoning</title>
+		<author>
+			<persName><forename type="first">Liangming</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alon</forename><surname>Albalak</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinyi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wang</forename></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2023 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2023-12">Dec 2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<monogr>
+		<title level="m" type="main">Probabilistic reasoning in intelligent systems; network of plausible inference</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Pearl</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="1988">1988. 1988</date>
+			<publisher>Morgan Kaufmann</publisher>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">Reverend bayes on inference engines: A distributed hierarchical approach</title>
+		<author>
+			<persName><forename type="first">Judea</forename><surname>Pearl</surname></persName>
+		</author>
+		<ptr target="https://api.semanticscholar.org/CorpusID" />
+	</analytic>
+	<monogr>
+		<title level="m">Probabilistic and Causal Inference</title>
+		<imprint>
+			<date type="published" when="1982">1982</date>
+			<biblScope unit="page">14936636</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Fusion, propagation, and structuring in belief networks</title>
+		<author>
+			<persName><forename type="first">Judea</forename><surname>Pearl</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Artificial Intelligence</title>
+		<imprint>
+			<biblScope unit="volume">29</biblScope>
+			<biblScope unit="issue">3</biblScope>
+			<biblScope unit="page" from="241" to="288" />
+			<date type="published" when="1986">1986</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<monogr>
+		<author>
+			<persName><forename type="first">Judea</forename><surname>Pearl</surname></persName>
+		</author>
+		<title level="m">Probabilistic reasoning in intelligent systems: networks of plausible inference</title>
+		<imprint>
+			<publisher>Elsevier</publisher>
+			<date type="published" when="2014">2014</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<monogr>
+		<title level="m" type="main">ICD-LM: Configuring vision-language in-context demonstrations by language modeling</title>
+		<author>
+			<persName><forename type="first">Yingzhe</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xu</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haoxuan</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuo</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yucheng</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hanwang</forename><surname>Zhang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2312.10104</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<analytic>
+		<title level="a" type="main">The probabilistic relevance framework: BM25 and beyond</title>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Robertson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Zaragoza</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Foundations and Trends® in Information Retrieval</title>
+		<imprint>
+			<biblScope unit="volume">3</biblScope>
+			<biblScope unit="issue">4</biblScope>
+			<biblScope unit="page" from="333" to="389" />
+			<date type="published" when="2009">2009</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<analytic>
+		<title level="a" type="main">Learning to retrieve prompts for in-context learning</title>
+		<author>
+			<persName><forename type="first">Ohad</forename><surname>Rubin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Herzig</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Berant</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.14502</idno>
+	</analytic>
+	<monogr>
+		<title level="m">Alexander Scarlatos and Andrew Lan. RetICL: Sequential retrieval of in-context examples with reinforcement learning</title>
+		<imprint>
+			<publisher>Human Language Technologies</publisher>
+			<date type="published" when="2022">2022. 2023</date>
+			<biblScope unit="page" from="2655" to="2671" />
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+	<note>Proceedings of the 2022 Conference of the North American Chapter</note>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<analytic>
+		<title level="a" type="main">ProofWriter: Generating implications, proofs, and abductive statements over natural language</title>
+		<author>
+			<persName><forename type="first">Oyvind</forename><surname>Tafjord</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bhavana</forename><surname>Dalvi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Clark</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Findings of the Association for Computational Linguistics: ACL-IJCNLP 2021</title>
+		<editor>
+			<persName><forename type="first">Chengqing</forename><surname>Zong</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Fei</forename><surname>Xia</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Wenjie</forename><surname>Li</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Roberto</forename><surname>Navigli</surname></persName>
+		</editor>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="3621" to="3634" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<analytic>
+		<title level="a" type="main">Wasserstein weisfeiler-lehman graph kernels</title>
+		<author>
+			<persName><forename type="first">Matteo</forename><surname>Togninalli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Elisabetta</forename><surname>Ghisu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Felipe</forename><surname>Llinares-López</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bastian</forename><surname>Rieck</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karsten</forename><surname>Borgwardt</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="volume">32</biblScope>
+			<biblScope unit="page" from="6436" to="6446" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<analytic>
+		<title level="a" type="main">SEER: A knapsack approach to exemplar selection for in-context HybridQA</title>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Tonglet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Manon</forename><surname>Reusens</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Philipp</forename><surname>Borchert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bart</forename><surname>Baesens</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2023 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="13569" to="13583" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<monogr>
+		<title level="m" type="main">GPT-J-6B: A 6 billion parameter autoregressive language model</title>
+		<author>
+			<persName><forename type="first">Ben</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aran</forename><surname>Komatsuzaki</surname></persName>
+		</author>
+		<ptr target="https://github.com/kingoflolz/mesh-transformer-jax" />
+		<imprint>
+			<date type="published" when="2021-05">May 2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<analytic>
+		<title level="a" type="main">Large language models are latent variable models: Explaining and finding good demonstrations for incontext learning</title>
+		<author>
+			<persName><forename type="first">Xinyi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wanrong</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Saxon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Steyvers</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wang</forename></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page" from="15614" to="15638" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<analytic>
+		<title level="a" type="main">Self-adaptive in-context learning: An information compression perspective for in-context example selection and ordering</title>
+		<author>
+			<persName><forename type="first">Zhiyong</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yaoxiang</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiacheng</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lingpeng</forename><surname>Kong</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Findings of the Association for Computational Linguistics: ACL 2023</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<analytic>
+		<title level="a" type="main">DQ-LoRe: Dual queries with low rank approximation re-ranking for in-context learning</title>
+		<author>
+			<persName><forename type="first">Jing</forename><surname>Xiong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zixuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chuanyang</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhijiang</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yichun</forename><surname>Yin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Enze</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Zhicheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qingxing</forename><surname>Cao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haiming</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiongwei</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jing</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chengming</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaodan</forename><surname>Liang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b47">
+	<analytic>
+		<title level="a" type="main">Reprompting: Automated chain-of-thought prompt inference through gibbs sampling</title>
+		<author>
+			<persName><forename type="first">Weijia</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrzej</forename><surname>Banburski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nebojsa</forename><surname>Jojic</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Forty-First International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b48">
+	<analytic>
+		<title level="a" type="main">Representative demonstration selection for in-context learning with two-stage determinantal point process</title>
+		<author>
+			<persName><forename type="first">Zhao</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhe</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dianbo</forename><surname>Sui</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kang</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2023 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b49">
+	<analytic>
+		<title level="a" type="main">Tree of thoughts: Deliberate problem solving with large language models</title>
+		<author>
+			<persName><forename type="first">Shunyu</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dian</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Izhak</forename><surname>Shafran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Griffiths</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuan</forename><surname>Cao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karthik</forename><surname>Narasimhan</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page" from="11809" to="11822" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b50">
+	<analytic>
+		<title level="a" type="main">Compositional exemplars for in-context learning</title>
+		<author>
+			<persName><forename type="first">Jiacheng</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyong</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiangtao</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lingpeng</forename><surname>Kong</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Fortieth International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b51">
+	<analytic>
+		<title level="a" type="main">IDEAL: Influence-driven selective annotations empower in-context learners in large language models</title>
+		<author>
+			<persName><forename type="first">Shaokun</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaobo</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhaoqing</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ling-Hao</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiale</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qingyun</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tongliang</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b52">
+	<analytic>
+		<title level="a" type="main">Active example selection for in-context learning</title>
+		<author>
+			<persName><forename type="first">Yiming</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shi</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenhao</forename><surname>Tan</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The 2022 Conference on Empirical Methods in Natural Language Processing</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+			<biblScope unit="page" from="9134" to="9148" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b53">
+	<analytic>
+		<title level="a" type="main">Automatic chain of thought prompting in large language models</title>
+		<author>
+			<persName><forename type="first">Zhuosheng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aston</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Smola</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b54">
+	<analytic>
+		<title level="a" type="main">Calibrate before use: Improving few-shot performance of language models</title>
+		<author>
+			<persName><forename type="first">Zihao</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Wallace</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shi</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Klein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sameer</forename><surname>Singh</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Thirty-Eighth International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="12697" to="12706" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b55">
+	<monogr>
+		<title level="m" type="main">Erin is green</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b56">
+	<monogr>
+		<title level="m">Erin is kind</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b57">
+	<monogr>
+		<title level="m" type="main">Erin is rough</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b58">
+	<monogr>
+		<title level="m">Fiona is green</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b59">
+	<analytic>
+		<title/>
+	</analytic>
+	<monogr>
+		<title level="j">Fiona is not nice. Rules: 1. If Erin is cold then Erin is rough</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b60">
+	<monogr>
+		<title level="m" type="main">If something is rough then it is nice</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b61">
+	<monogr>
+		<title level="m" type="main">All green, big things are kind</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b62">
+	<monogr>
+		<title level="m" type="main">If Dave is kind then Dave is cold</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b63">
+	<monogr>
+		<title level="m" type="main">If something is green and not rough then it is big</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b64">
+	<monogr>
+		<title level="m" type="main">All nice, rough things are big</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b65">
+	<monogr>
+		<title level="m" type="main">If Dave is cold and Dave is nice then Dave is red. Based on the above information, is the following statement true or false? Dave is red. A) True B) False Proof: To determine if the statement &quot;Dave is red&quot; is true or false</title>
+		<imprint/>
+	</monogr>
+	<note>let&apos;s evaluate the given information step by step: From the triples</note>
+</biblStruct>
+
+<biblStruct xml:id="b66">
+	<monogr>
+		<title level="m" type="main">Dave is green</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b67">
+	<monogr>
+		<title level="m" type="main">If something is rough then it is nice</title>
+		<imprint/>
+	</monogr>
+	<note>Dave is rough, so Dave is nice.</note>
+</biblStruct>
+
+<biblStruct xml:id="b68">
+	<monogr>
+		<title level="m" type="main">If Dave is cold and Dave is nice then Dave is red. (However, there&apos;s no information saying Dave is cold, so we can</title>
+		<imprint/>
+	</monogr>
+	<note>t use this rule directly</note>
+</biblStruct>
+
+<biblStruct xml:id="b69">
+	<monogr>
+		<title level="m" type="main">All nice, rough things are big. (Dave is nice and rough</title>
+		<imprint/>
+	</monogr>
+	<note>so Dave is big.</note>
+</biblStruct>
+
+<biblStruct xml:id="b70">
+	<monogr>
+		<title/>
+		<author>
+			<persName><surname>Now</surname></persName>
+		</author>
+		<imprint/>
+	</monogr>
+	<note>we need to verify whether Dave being cold can be derived</note>
+</biblStruct>
+
+<biblStruct xml:id="b71">
+	<monogr>
+		<title level="m" type="main">we need to verify if Dave is kind.) -All green, big things are kind. (Dave is green and big, so Dave is kind.) -Hence, Dave is kind, which according to rule 4, makes Dave cold. Since now we know: -Dave is cold. -Dave is nice. We can use rule 7: -If Dave is cold and Dave is nice then Dave is red. Since both conditions are satisfied, Dave is red. The statement &quot;Dave is red&quot; is ** True (A) ** . Formalized Proof</title>
+		<imprint/>
+	</monogr>
+	<note>If Dave is kind then Dave is cold. (To use this. Dave is nice.&quot; = [rule2](&quot;Dave is rough</note>
+</biblStruct>
+
+<biblStruct xml:id="b72">
+	<analytic>
+		<title level="a" type="main">= [rule6](&quot;Dave is nice</title>
+	</analytic>
+	<monogr>
+		<title level="m">Dave is rough</title>
+		<imprint/>
+	</monogr>
+	<note>Dave is big</note>
+</biblStruct>
+
+<biblStruct xml:id="b73">
+	<analytic>
+		<title level="a" type="main">= [rule3](&quot;Dave is green</title>
+	</analytic>
+	<monogr>
+		<title level="m">Dave is big</title>
+		<imprint/>
+	</monogr>
+	<note>Dave is kind</note>
+</biblStruct>
+
+<biblStruct xml:id="b74">
+	<monogr>
+		<title level="m" type="main">Dave is cold</title>
+		<imprint/>
+	</monogr>
+	<note>rule4](&quot;Dave is kind</note>
+</biblStruct>
+
+<biblStruct xml:id="b75">
+	<monogr>
+		<title level="m" type="main">Dave is red</title>
+		<imprint/>
+	</monogr>
+	<note>rule7](&quot;Dave is cold.&quot;, &quot;Dave is nice</note>
+</biblStruct>
+
+<biblStruct xml:id="b76">
+	<monogr>
+		<title level="m" type="main">Proof: {{answer}} Formalized Proof: The pseudo-code of a parser that transforms formalized reasoning representations into a thought graph is provided in Algorithm 1. Inputs, Output, and OperationName are extracted following the pattern outlined below</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b77">
+	<monogr>
+		<title level="m" type="main">VALUES OF λ We select hyper parameter λ values from {0</title>
+		<author>
+			<persName><forename type="first">D</forename></persName>
+		</author>
+		<imprint/>
+	</monogr>
+	<note>0.1, 0.2, 0.3}, and report the λ values chosen on various datasets and LLMs in Table 4</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

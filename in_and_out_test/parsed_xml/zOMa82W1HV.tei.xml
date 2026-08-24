@@ -1,0 +1,2292 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 SQUBA: SPEECH MAMBA LANGUAGE MODEL WITH QUERYING-ATTENTION FOR EFFICIENT SUMMARIZA-TION</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 SQUBA: SPEECH MAMBA LANGUAGE MODEL WITH QUERYING-ATTENTION FOR EFFICIENT SUMMARIZA-TION</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">A01941ED9E261D9089811A87EA1FF64A</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:10+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Abstractive Speech Summarization (SSum) becomes increasingly difficult as the input speech length grows. To address this, we present SQuBa (Speech Querying Mamba Architecture), an end-to-end model designed explicitly for efficient speech summarization. SQuBa leverages a querying-attention Mamba projector to condense extended acoustic features into compact semantic tokens, which are subsequently summarized by the Mamba Large Language Model (LLM). The architecture's computational complexity scales linearly with input length, enabling efficient handling of longer inputs. A two-stage training framework, complemented by bootstrapped Direct Preference Optimization (DPO) fine-tuning, empowers SQuBa to generate concise and coherent summaries. Experimental results demonstrate that SQuBa delivers competitive performance while significantly improving inference speed, making it ideal for real-world applications such as podcast and meeting transcriptions.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>Abstractive Speech Summarization (SSum) <ref type="bibr" target="#b34">(Murray et al., 2010;</ref><ref type="bibr" target="#b47">Shang et al., 2018)</ref> is a task to generate textual summaries from spoken content. Unlike Abstractive Text Summarization (TSum) <ref type="bibr" target="#b35">(Neto et al., 2002)</ref>, SSum faces the added complexity of dealing with the computational and performance limitations associated with processing long speech prompt. As speech length increases, the key challenge shifts to efficiently extracting and summarizing critical information while remaining within computational constraints.</p><p>Previous models for speech summarization address the task through either a cascaded approach <ref type="bibr" target="#b56">(Zhang et al., 2021;</ref><ref type="bibr">Zhong et al., 2021;</ref><ref type="bibr" target="#b38">Palaskar et al., 2019)</ref> combining ASR and TSum models, or an end-to-end approach <ref type="bibr" target="#b32">(Matsuura et al., 2023;</ref><ref type="bibr" target="#b22">Kang &amp; Roy, 2024;</ref><ref type="bibr" target="#b48">Shang et al., 2024)</ref>, as illustrated in Fig. <ref type="figure" target="#fig_0">1</ref>. With the rise of Multimodal Large Language Models (MLLMs), recent studies have shown that end-to-end models outperform cascaded models by leveraging implicit acoustic features and minimizing error propagation <ref type="bibr" target="#b32">(Matsuura et al., 2023;</ref><ref type="bibr" target="#b48">Shang et al., 2024)</ref>. However, these models still face significant computational challenges, especially when processing long audio inputs.</p><p>These limitations stem from the architecture of the Transformer model <ref type="bibr" target="#b54">(Vaswani et al., 2017)</ref>, which serves as the foundation for many large language models (LLMs). Although the Transformer excels at capturing long-range dependencies and integrating multimodal information, its self-attention mechanism scales quadratically with input sequence length, leading to substantial computational and memory overhead when processing long inputs. While the Transformer's design allows for efficient parallel training and supports large-scale model development, recent efforts to extend its context window have not entirely resolved the computational challenges associated with handling lengthy sequences.</p><p>Recently, Mamba <ref type="bibr" target="#b13">(Gu &amp; Dao, 2023)</ref>, a variant of structured state space model (SSM) <ref type="bibr">(Gu et al., 2022a;</ref><ref type="bibr">b)</ref>, emerged as an alternative to the Transformer architecture to address these bottlenecks. Mamba introduces input-dependent selective scanning, enabling the model to focus on the most relevant parts of a sequence. It also employs a hardware-aware algorithm for efficient parallel computation, enhancing performance and often matching or surpassing that of Transformers. This adaptability has led to applications across various domains, including image processing <ref type="bibr" target="#b61">Zhu et al. (2024)</ref>; The key distinction between these pipelines is whether an intermediate text transcription is generated. Our approach operates end-toend, mitigating error propagation and inference delays while fully utilizing the acoustic information. <ref type="bibr" target="#b30">Liu et al. (2024)</ref>, speech processing (e.g., speech separation) <ref type="bibr" target="#b21">Jiang et al. (2024)</ref>; <ref type="bibr">Li &amp; Guo (2024)</ref>, video analysis <ref type="bibr">Li et al. (2024)</ref>, and multimodal LLMs <ref type="bibr" target="#b42">(Qiao et al., 2024;</ref><ref type="bibr" target="#b57">Zhao et al., 2024)</ref>.</p><p>To this end, we introduce SQuBa, an end-to-end Mamba-based speech summarization model designed to efficiently handle long speech prompt. SQuBa leverages a pre-trained Mamba LLM optimized for extended inputs, making it ideal for long speech prompt summarization tasks. To bridge the modality gap between speech and text, we propose the windowing Q-Mamba, inspired by the Q-Former <ref type="bibr" target="#b25">(Li et al., 2023)</ref> used in recent Speech LLMs <ref type="bibr" target="#b52">(Tang et al., 2024;</ref><ref type="bibr" target="#b48">Shang et al., 2024)</ref>. The windowing Q-Mamba selectively compresses long speech prompt into compact latent semantic tokens via cross-attention and learnable queries, creating a computationally efficient architecture tailored for speech summarization. Through a two-stage training process and bootstrapped Direct Preference Optimization <ref type="bibr" target="#b44">(Rafailov et al., 2023)</ref> fine-tuning, we demonstrate Mamba's ability to handle long speech prompt efficiently without compromising performance.</p><p>Our contributions are threefold:</p><p>• We introduce a query-attention Mamba projector, which compresses acoustic information from long speech prompts into compact semantic tokens, reducing the model's overall computational footprint.</p><p>• We extend the Mamba-based LLM to effectively handle lengthy speech inputs, demonstrating its speech summarization capabilities through our proposed SQuBa. We also present a two-stage training process for SQuBa, including bootstrapped DPO fine-tuning.</p><p>• We provide an empirical evaluation of SQuBa, highlighting its ability to achieve competitive performance with significantly lower computational demands, resulting in much faster inference speeds compared to transformer-based approaches.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">RELATED WORKS</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.1">STATE SPACE MODEL (SSM) AND MAMBA</head><p>Classical state-space models (SSMs) represent 1-dimensional sequences using latent state matrices. The Linear State Space Layer (LSSL) <ref type="bibr" target="#b14">(Gu et al., 2021)</ref>, an early deep SSM, showed potential for modeling long-range dependencies but was limited by high computational costs. To improve efficiency, the Structured State-Space Model (S4) <ref type="bibr">(Gu et al., 2022a)</ref> re-parameterized the latent matrix into low-rank and normal matrix components, leading to variants like DSS <ref type="bibr" target="#b17">(Gupta et al., 2022)</ref> and S4D <ref type="bibr">(Gu et al., 2022b)</ref>, which optimized computation through diagonalization. However, S4 struggled with token retention and comparison, which are crucial for language modeling. Hungry Hungry Hippos (H3) <ref type="bibr" target="#b12">(Fu et al., 2023)</ref> addressed this by incorporating a 1-dimensional convolution for token comparison and recall.</p><p>Mamba <ref type="bibr" target="#b13">(Gu &amp; Dao, 2023;</ref><ref type="bibr" target="#b7">Dao &amp; Gu, 2024)</ref> builds on S4 with selective scanning and inputdependent latent parameters, allowing it to focus on relevant information. It incorporates 1dimensional convolution from H3 and a gating mechanism similar to Long Short-Term Memory <ref type="bibr">(Hochreiter &amp; Schmidhuber, 1997)</ref>, enhancing its handling of long sequences. With parallel scanning and hardware optimization, Mamba achieves efficient training and inference, often rivaling Transformers. It has also been adapted for applications in computer vision <ref type="bibr" target="#b61">(Zhu et al., 2024;</ref><ref type="bibr" target="#b30">Liu et al., 2024;</ref><ref type="bibr" target="#b41">Patro &amp; Agneeswaran, 2024)</ref> and speech <ref type="bibr">(Li &amp; Guo, 2024;</ref><ref type="bibr" target="#b21">Jiang et al., 2024)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.2">MULTIMODAL LARGE LANGUAGE MODELS</head><p>Building on the success of Large Language Models (LLMs) <ref type="bibr" target="#b37">(Ouyang et al., 2022;</ref><ref type="bibr" target="#b53">Touvron et al., 2023;</ref><ref type="bibr" target="#b31">Llama Team, 2024)</ref>, Multimodal Large Language Models (MLLMs) extend LLMs to handle multimodal inputs, integrating various modalities beyond text. Notable models like LLaVA <ref type="bibr" target="#b29">(Liu et al., 2023)</ref>, BLIP <ref type="bibr" target="#b24">(Li et al., 2022;</ref><ref type="bibr">2023)</ref>, and GPT-4 (OpenAI, 2024) use transformer architectures to manage long-range dependencies in multimodal data. In speech LLMs, SALMONN <ref type="bibr" target="#b52">(Tang et al., 2024)</ref> has advanced the integration of auditory inputs-including speech, audio events, and musicvia the windowing Querying Transformer (Q-Former). However, the high computational demands of these models have led to more efficient architectures like Cobra <ref type="bibr" target="#b57">(Zhao et al., 2024)</ref> and VL-Mamba <ref type="bibr" target="#b42">(Qiao et al., 2024)</ref>, which enhance efficiency using the Mamba architecture <ref type="bibr" target="#b13">(Gu &amp; Dao, 2023)</ref> without sacrificing performance.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.3">SPEECH SUMMARIZATION</head><p>Speech summarization models fall into two categories: (1) cascaded models <ref type="bibr" target="#b56">(Zhang et al., 2021;</ref><ref type="bibr">Zhong et al., 2021;</ref><ref type="bibr" target="#b38">Palaskar et al., 2019;</ref><ref type="bibr">2021)</ref> and ( <ref type="formula">2</ref>) end-to-end models <ref type="bibr" target="#b49">(Sharma et al., 2021;</ref><ref type="bibr" target="#b23">Kano et al., 2023;</ref><ref type="bibr" target="#b32">Matsuura et al., 2023;</ref><ref type="bibr" target="#b50">Sharma et al., 2023;</ref><ref type="bibr" target="#b48">Shang et al., 2024)</ref>. Cascaded models first transcribe speech into text using an automatic speech recognition (ASR) system, followed by a text summarization (TSum) model to generate summaries. In contrast, end-to-end models produce summaries directly from speech input, bypassing transcription. Although cascaded models initially benefited from pre-trained ASR and domain-specific TSum models, they suffer from longer inference times, error propagation due to transcription errors, and the inability to fully leverage acoustic information like intonation.</p><p>With advancements in multimodal language models, recent efforts have shifted toward end-to-end models, which have shown superior performance over cascaded approaches. However, due to the longer nature of speech inputs than text, Transformer-based end-to-end models face significant computational challenges as their complexity increases quadratically with input length. To address these issues, existing models employ input truncation <ref type="bibr" target="#b32">(Matsuura et al., 2023)</ref>, feature downsampling <ref type="bibr" target="#b22">(Kang &amp; Roy, 2024)</ref>, or Q-former abstractor <ref type="bibr" target="#b48">Shang et al. (2024)</ref>. Our approach is similar to <ref type="bibr" target="#b48">Shang et al. (2024)</ref> in its use of querying-attention for compact abstraction. Still, it differ by employing a more compact Mamba architecture, resulting in more efficient and faster training and inference.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">PRELIMINARIES</head><p>In this section, we introduce the preliminary concepts underlying our work. We start with an overview of State-Space Models (SSMs) and the Mamba architecture (Sec. 3.1). Next, we provide an overview of Direct Preference Optimization (DPO), which was used to align our model with the desired behavior (Sec. 3.2).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.1">STATE-SPACE MODELS AND MAMBA</head><p>State-Space Models (SSMs) <ref type="bibr" target="#b14">(Gu et al., 2021;</ref><ref type="bibr">2022a)</ref> represent continuous systems that map input sequences x(t) to output responses y(t) via a hidden state h(t). These models are typically characterized by a set of system parameters (A, B, C, D) that control the transformation of inputs into outputs:</p><formula xml:id="formula_0">h ′ (t) = Ah(t) + Bx(t) y(t) = Ch(t) + Dx(t)<label>(1)</label></formula><p>where the variable D is frequently viewed as a skip connection and is removed from the equation for simplicity. h ′ (t) represents the time derivative of h(t), or dh(t)/dt.</p><p>When dealing with discrete-time input sequences, these continuous models are discretized with matrices A and B. A common method for discretization is the Zero-Order Hold (ZOH) technique, which computes these matrices as:</p><formula xml:id="formula_1">A = exp(∆A) B = (∆A) -1 (exp(∆A) -I) ∆B (2)</formula><p>where ∆ represents the step size for discretization, and I is the identity matrix. The discretized state-space equations then become:</p><formula xml:id="formula_2">h t = Ah t-1 + Bx t y t = Ch t<label>(3)</label></formula><p>In Structured State-Space Model (S4) <ref type="bibr">(Gu et al., 2022a)</ref>, the parameters (A, B, C, ∆) remain constant across all time steps, making the system time-invariant. While this simplifies the model, it limits its ability to adapt to varying inputs over time. To improve flexibility, Mamba <ref type="bibr" target="#b13">(Gu &amp; Dao, 2023)</ref> introduces input-dependent parameters for B, C, and ∆, enabling a dynamic gating mechanism that selectively focuses on the most relevant information at each time step.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">DIRECT PREFERENCE OPTIMIZATION</head><p>Direct Preference Optimization (DPO) <ref type="bibr" target="#b44">(Rafailov et al., 2023)</ref> was introduced as a method for aligning LLMs to preference data without requiring additional training or the use of a reward model. Let π θ be the LLM policy to be trained, parameterized with θ, and π ref be the reference model, representing the initial (or supervised fine-tuned) state of the LLM. A preference dataset D pref = {(x, y c , y r )} is given, where x is an input prompt, y c is the preferred (chosen) response, and y r is the rejected response. The preference between y c and y r is relative, as only pairwise rankings of these promptresponse pairs are provided. The DPO loss is defined as:</p><formula xml:id="formula_3">L DPO (θ) = -E (x,yc,yr)∼D log σ β log π θ (y c |x) π ref (y c |x) -β log π θ (y r |x) π ref (y r |x)<label>(4)</label></formula><p>where σ(•) is a sigmoid function and β is the hyperparameter that controls the divergence of the policy model π θ from the reference model π ref <ref type="bibr">(y|x)</ref>. While this objective is derived from KLconstrained reward maximization, it can also be interpreted as maximizing the likelihood of the preferred response while minimizing the likelihood of the less preferred one.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">SQUBA: SPEECH MAMBA LLM WITH QUERYING-ATTENTION</head><p>In this section, we introduce our query-based Mamba projector, explaining its adaptation for efficient speech feature extraction (Sec. 4.1). Then, we present the overall architecture of our speech summarization model, which integrates the speech encoder, query-based Mamba projector, and the Mamba LLM backbone (Sec. 4.2).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.1">QUERYING-ATTENTION MAMBA (Q-MAMBA) PROJECTOR</head><p>We propose a querying-attention Mamba projector that leverages the Mamba layer, learnable queries, and cross-attention for efficient speech processing. The architecture of the projector is depicted on the right side of Figure <ref type="figure" target="#fig_1">2</ref>. The core idea is to use a learnable query-based approach to compress speech features extracted by the Whisper encoder into a more compact sequence of tokens, retaining essential information while minimizing computational overhead. This allows for a much faster processing of long speech prompt prompt with minimal sacrificing of the quality of the extracted features.</p><p>The projector block consists of four key components: learnable queries, a unidirectional Mamba layer, cross-attention, and a feedforward network. Each query, initialized to cover approximately Under review as a conference paper at ICLR 2025 0.33 seconds of speech, forms causal dependencies through the Mamba layer. These queries then interact with the speech output from the pre-trained speech encoder, using cross-attention to selectively extract the most relevant information. The result is a compact, tokenized representation of the speech input, which is then passed to the Mamba-based LLM for further processing.</p><p>This approach allows for more efficient handling of long speech prompt by significantly reducing the length of the speech feature sequence, while dynamically focusing on relevant speech segments without overwhelming the model with extraneous data. Unlike vision-based cross-modal approaches that deal with static 2D image data, our speech projector is specifically designed to handle the temporal, variable-length nature of speech audio by windowing the projector across the speech feature sequence.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.2">SPEECH SUMMARIZATION WITH MAMBA LANGUAGE MODEL</head><p>We present a speech summarization model built on our querying-attention Mamba projector. As shown in Figure <ref type="figure" target="#fig_1">2</ref>, the architecture comprises a pre-trained speech encoder, our cross-modal projector, and a pre-trained Mamba LLM. First, the speech encoder extracts speech features from 30second segments of input speech. These feature chunks are then processed by our projector, which generates queries embedded with projected semantic speech information. The output sequence is then combined with a tokenized text prompt and fed into the Mamba LLM to produce the corresponding text summarization.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">TRAINING METHOD</head><p>In this section, we outline the two-stage training process for our proposed SQuBa model. This process is designed to: 1) effectively align the text and speech modalities, and 2) utilize the aligned speech representations to generate coherent and meaningful summaries. The overall process is depicted in Fig. <ref type="figure" target="#fig_2">3</ref>. In the alignment stage, only the projector is trained using an ASR task. In the fine-tuning stage, both the LLM backbone and the projector are trained on the summarization task. The first alignment step uses short speech inputs, while the second step and the fine-tuning stage process longer inputs that exceed the speech encoder's input length limit, creating chunks of speech tokens. Whisper encoder is frozen for all training stages.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.1">SPEECH ALIGNMENT STAGE</head><p>In the alignment stage, the model is trained on an automatic speech recognition (ASR) task, with the parameters of the speech encoder and Mamba LLM backbone frozen. This allows the multimodal projector to effectively learn the mapping between speech and text modalities.</p><p>It's important to note that speech encoders typically have a maximum input length they can process. For instance, Whisper can only accept inputs in 30-second increments. To address this, speech longer than 30 seconds-referred to as long-form speech-is segmented into 30-second intervals, with each segment encoded separately. The model then concatenates the encoded features from the projector, ensuring the entire long speech prompt is processed coherently.</p><p>We employ a two-step approach to train the multimodal projector. First, the projector is trained on an easier dataset with shorter samples, enabling the model to focus on capturing core speech features and their corresponding textual representations without the complexity of long context dependencies. This initial step helps the model establish strong, localized alignments between speech and text before progressing to more complex, longer datasets.</p><p>In the second step, the model is trained on longer, more complex data that provides richer contextual information and a wider variety of speech patterns. Since the speech input exceeds the 30-second limit of the speech encoder, it is divided into feature chunks. By gradually increasing data complexity, the model becomes better equipped to handle extended speech sequences and align text and speech representations more effectively.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.2">SUMMARIZATION FINE-TUNING STAGE</head><p>In this stage, the model is fine-tuned using supervised instruction-tuning to generate summaries from speech inputs of varying lengths. Speech sequences of different durations are provided, constrained only by the maximum capacity of the available GPU resources. This variation in input length helps the model generalize more effectively across a wide range of speech durations.</p><p>Similar to the second alignment stage, we process chunks of speech segments individually through the projector and then concatenate the features before passing them through the LLM. However, in this phase, we also unfreeze the pre-trained Mamba LLM and train it jointly with the projector, allowing for a more integrated optimization of the model.</p><p>Bootstrapped DPO Fine-tuning While the fine-tuned model generates text responses that are coherent with the speech content, we observed that the outputs often resembled transcriptions rather than summaries, resulting in undesirably long responses. To address this, we additionally apply Di-rect Preference Optimization (DPO) <ref type="bibr" target="#b44">(Rafailov et al., 2023)</ref> fine-tuning, a method that aligns LLMs with offline preference data without requiring an additional reward model.</p><p>To apply DPO to our model, we need a preference dataset D pref = {(x, y c , y r )} where x is the input (the speech and summarization prompt), y c is the preferred response, and y r is the rejected response. Since we only have the supervised fine-tuning dataset D sup = {(x, y)}, with y as a ground-truth summarization, we use the outputs from the fine-tuned model as y r and the groundtruth as y c . The initial state of the fine-tuned model serves as the reference model π ref .</p><p>To reduce training time, instead of generating summaries for each sample during training, we pre-generate them at the outset and use them as an off-policy dataset. We refer to this approach as bootstrapped DPO, as we bootstrap the process using our model's own responses.</p><p>Note that the Whisper encoder remains frozen for all training stages to leverage its pre-trained capabilities from large-scale multilingual audio data. This design choice reflects that the core challenge lies in cross-modal alignment between speech features and LLM embedding space, which is handled by the projector component. Training the projector alone maintains efficiency while avoiding encoder fine-tuning overhead, following established practices in multimodal LLM training <ref type="bibr" target="#b29">(Liu et al., 2023;</ref><ref type="bibr" target="#b59">Zhou et al., 2024;</ref><ref type="bibr" target="#b25">Li et al., 2023;</ref><ref type="bibr" target="#b5">Chu et al., 2024)</ref> where pre-trained vision encoders remain frozen during cross-modal adaptation.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6">EXPERIMENTAL SETUP</head><p>Models For the pre-trained speech encoder, we use the encoder from Whisper Large v2 <ref type="bibr" target="#b43">(Radford et al., 2023)</ref> <ref type="foot" target="#foot_0">1</ref> . For the pre-trained LLM backbone, we utilize the Mamba LLM <ref type="bibr" target="#b13">(Gu &amp; Dao, 2023)</ref>, specifically Mamba-2.8B-zephyr<ref type="foot" target="#foot_1">2</ref> , with 2.8 billion parameters, fine-tuned on UltraChat <ref type="bibr" target="#b9">(Ding et al., 2023)</ref> and UltraFeedback <ref type="bibr" target="#b6">(Cui et al., 2023)</ref>. Detailed descriptions of each model can be found in Appendix A.1.</p><p>We use a query length of 2 for the querying-attention Mamba projector, which corresponds to approximately 0.33 seconds of speech. This compresses 0.33 seconds-into two queries, allowing the projector to capture semantic information as word-like speech tokens from the input. We justify this choice of query length in our ablation studies.</p><p>Dataset For the first step of the alignment stage, we use the Librispeech dataset <ref type="bibr" target="#b40">(Panayotov et al., 2015)</ref>, which contains 960 hours of English speech, with each sample under 30 seconds. In the second step, we utilize the XL subset of the Gigaspeech corpus <ref type="bibr" target="#b3">(Chen et al., 2021)</ref>, which includes 10,000 hours of English speech from diverse audio sources such as audiobooks and podcasts. For the main evaluation of the alignment stage, we use the test subset of Gigaspeech, while the test subset of Librispeech is used for ablation studies.</p><p>For the fine-tuning stage, we use a custom synthesized dataset based on the Mediasum dataset <ref type="bibr" target="#b60">(Zhu et al., 2021)</ref>, with synthetic speech generated via ChatTTS<ref type="foot" target="#foot_2">3</ref> . We limited the generated speech to 1500 tokens, which is about 6 minutes in length. See Appendix C.2 for more details. We additionally found that the ground-truth summaries from the original Mediasum dataset were found to be not ideal for training general-purpose LLMs. These summaries were often structured as news headlines or introductory sentences rather than complete summaries, making them inconsistent with how an LLM would naturally summarize content. This observation aligns with prior findings <ref type="bibr" target="#b22">(Kang &amp; Roy, 2024)</ref>, which also noted that headline-based summaries are inadequate for training effective summarization models. To address this, we generated new ground-truth summaries using the pretrained LLaMA 3 model (Llama Team, 2024)<ref type="foot" target="#foot_3">4</ref> , with 8 billion parameters, to better align with the structure and format typically expected in LLM-based summarization.</p><p>Metrics To evaluate the performance of our speech summarization model, we use two widely recognized metrics for text summarization evaluation: ROUGE <ref type="bibr" target="#b28">(Lin, 2004)</ref> and METEOR <ref type="bibr" target="#b2">(Banerjee &amp; Lavie, 2005)</ref>. These metrics provide quantitative assessments of how closely the generated summaries align with reference summaries, considering factors such as content overlap and fluency.</p><p>Under review as a conference paper at ICLR 2025 Training Configurations We trained the alignment stage for 2 epochs and extended training to 6 epochs during the fine-tuning stage to further refine the model's summarization capabilities. For the bootstrapped DPO stage, we ran 1 epoch to prevent overfitting. During the alignment stage, we used a learning rate of 10 3 , while a learning rate of 2 × 10 5 was used for the summarization fine-tuning and bootstrapped DPO. A cosine decay learning rate scheduler with a warmup ratio of 0.03 was applied throughout the training process.</p><p>For the first step of alignment stage, we employed 8 NVIDIA A6000 GPUs, each with 48GB of memory. In subsequent stages, we transitioned to 8 NVIDIA A100 GPUs, each with 80GB of memory, to accommodate the increased data complexity and model requirements. A global batch size of 128 was distributed across all GPUs.</p><p>7 EXPERIMENTAL RESULTS</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="7.1">MAIN RESULT</head><p>We compare our results against several baselines, including a cascaded version of our model and a recent end-to-end SSum model proposed by <ref type="bibr" target="#b22">Kang &amp; Roy (2024)</ref>. The cascaded system uses the Whisper-Large-v2 model to transcribe speech inputs into text, which the fine-tuned Mamba-2.8Bzephyr model then summarizes. See Appendix C.1 for more cascaded model details. In contrast, <ref type="bibr" target="#b22">Kang &amp; Roy (2024)</ref> employs HuBERT and MiniChat2-3b, connected via Q-Former.</p><p>The results, shown in Table <ref type="table" target="#tab_0">1</ref>, demonstrate that SQuBa outperforms the baseline models. Specifically, SQuBa exhibits significant improvements over the cascaded Whisper and Mamba LLM system, as well as the model proposed by <ref type="bibr" target="#b22">Kang &amp; Roy (2024)</ref>. We observed that transcription errors accumulated by Whisper significantly degrade the summarization quality of the cascaded model.</p><p>Human evaluation results in Table <ref type="table" target="#tab_1">2</ref> further validate SQuBa's effectiveness, with annotators strongly preferring our summaries over baselines. SQuBa wins 67.8% and 92.6% of comparisons against the cascaded baseline and <ref type="bibr" target="#b22">Kang &amp; Roy (2024)</ref>, respectively, confirming its ability to produce more coherent summaries. The cascaded baseline's 79.2% win rate over <ref type="bibr" target="#b22">Kang &amp; Roy (2024)</ref> suggests LLM-based approaches generally produce higher quality summaries. These results demonstrate that SQuBa successfully combines LLM summarization quality with end-to-end processing. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Speed Results</head><p>Another key aspect of our approach is the inference speed of the Mamba model, which powers our SQuBa model. To evaluate this, we conducted experiments on 400 data samples, measuring the average time required by each model to generate summaries from speech inputs.</p><p>As shown in Table <ref type="table" target="#tab_2">3</ref>, our proposed SQuBa model significantly outperforms transformer-based counterparts in terms of inference speed. Notably, SQuBa achieves a 17× speedup compared to the cascaded pipeline, a widely adopted approach in speech summarization. This significant speedup stems from replacing the Transformer-based Whisper decoder's quadratic complexity for intermediate transcription with Mamba LLM's linear complexity throughout the pipeline, making it particularly efficient for long-form speech processing up to 6 minutes in length.</p><p>While many researchers continue to pursue cascaded summarization summarization, we highlight that adopting an end-to-end approach with the Mamba model architecture results in substantially faster inference speeds, while still delivering comparable results. This demonstrates the advantage of our approach, not only in processing time but also in scalability for real-world applications, making SQuBa a more practical solution for reliable and fast speech summarization.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="7.2">ABLATION STUDIES</head><p>We conduct ablations on learnable query length and bootstrapped DPO. See Appendix D.1 for more ablation results on the unidirectional Mamba layer, downsampling approaches, and long speech alignment training.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="7.2.1">QUERY SIZE</head><p>The query length in the Mamba-based projector plays a significant role in determining how efficiently the model can extract relevant features from the speech input. Several query lengths were experimented with on the Librispeech dataset, and evaluated the model's performance on the testclean and test-other datasets.</p><p>As shown in Table <ref type="table" target="#tab_3">4</ref>, a query length of 2 was found to achieve the optimal balance between preserving contextual information and maintaining processing efficiency. This length allows the model to retain the necessary contextual relationships in speech while ensuring that the feature representation remains compact enough for efficient computation. When the query length is increased, the model tends to generate disconnected fragments, disrupting the natural flow of the speech signal and leading to a loss of coherence. Conversely, reducing the query length too much results in oversimpli- fication of the acoustic signal, as too much information is packed into a single query, which hampers the model's ability to interpret and process the speech effectively. Therefore, a query length of 2 provides the most favorable trade-off, ensuring both clarity and contextual integrity in the model's speech summarization process.</p><p>Note that query length optimization is performed during ASR alignment stage since this is when the projector learns fundamental speech-to-text mapping. While summarization may benefit from different representation characteristics than transcription, the initial alignment phase is crucial for establishing basic speech-to-text mapping capabilities. Given the sequential and computationally intensive nature of both training stages, optimizing query length during initial alignment ensures efficient development of a well-configured projector for subsequent fine-tuning.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="7.2.2">EFFECTS OF DPO</head><p>As part of our ablation study, we evaluated the performance of our SQuBa model without DPO training. As shown in Table <ref type="table" target="#tab_4">5</ref>, the inclusion of DPO training led to an improvement in performance across all evaluation metrics, with a particularly notable increase in ROUGE scores. The impact of DPO on summary quality was further highlighted in the qualitative results, as detailed in Appendix D. With DPO training, the model produced more focused and coherent summaries, capturing the key information more effectively compared to the variant without DPO.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="8">CONCLUSION</head><p>In this paper, we introduced SQuBa, an end-to-end Mamba-based speech summarization model designed to efficiently handle long speech inputs. By leveraging the Mamba architecture and queryingattention projector, SQuBa reduces the computational complexity typically seen in Transformerbased models. Our experiments show that SQuBa delivers competitive summarization performance with significant improvements in processing speed. The two-step training scheme effectively aligns speech and text, while Direct Preference Optimization (DPO) enhances the generation of concise, coherent summaries aligned with human preferences. SQuBa's architecture holds promise for applications like podcast summarization and meeting transcription, highlighting the potential of Mambabased querying-attention in multimodal processing.</p><p>Under review as a conference paper at ICLR 2025 handles complex auditory processing. Its window-level Q-Former enables efficient processing of variable-length audio sequences, proving effective for tasks like speech recognition, audio captioning, and joint reasoning across speech and audio inputs.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.2 LLM ALIGNMENT AND DIRECT PREFERENCE OPTIMIZATION</head><p>Human alignment <ref type="bibr" target="#b37">(Ouyang et al., 2022;</ref><ref type="bibr" target="#b1">Bai et al., 2022)</ref> in LLMs ensures that models generate helpful and harmless responses aligned with human preferences. A common approach is Reinforcement Learning with Human Feedback (RLHF), which trains LLMs using preference functions estimated via a neural reward model. RLHF <ref type="bibr" target="#b37">(Ouyang et al., 2022)</ref> typically involves three stages:</p><p>(1) supervised fine-tuning, (2) reward model training, and (3) reinforcement fine-tuning, usually with Proximal Policy Optimization (PPO) <ref type="bibr" target="#b46">(Schulman et al., 2017)</ref>. PPO requires a reference model to limit policy divergence and a value estimation model. The multi-stage training of several models creates a bottleneck, and RLHF training can be unstable and sensitive to hyperparameters.</p><p>Direct Preference Optimization (DPO) <ref type="bibr" target="#b44">(Rafailov et al., 2023)</ref> addresses these challenges by deriving an implicit reward function from the KL-constrained reward maximization objective, enabling direct optimization without the need for a reward model. By removing the unstable and resource-heavy reinforcement learning process, DPO offers a more stable and efficient approach to human alignment fine-tuning. However, further improvements are needed for DPO to reach the state-of-the-art performance of RLHF, leading to various adaptations and advancements in Preference Optimization <ref type="bibr" target="#b0">(Azar et al., 2023;</ref><ref type="bibr" target="#b10">Ethayarajh et al., 2024;</ref><ref type="bibr" target="#b33">Meng et al., 2024)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C ADDITIONAL DETAILS C.1 CASCADED MODEL DETAILS</head><p>For the cascaded model, to extract the intermediate transcriptions, we utilize the Whisper <ref type="bibr" target="#b43">(Radford et al., 2023)</ref> built-in chunking algorithm through the Transformers pipeline, which efficiently handles audio inputs of arbitrary length. While Whisper has a 30-second input limitation per forward pass, the pipeline automatically manages longer inputs by setting chunk length to 30, following the standard approach recommended in the official implementation.<ref type="foot" target="#foot_4">5</ref> </p><p>We maintain Whisper Large v2 in its frozen pre-trained state. The Mamba-2.8B backbone in our cascaded baseline is fine-tuned on the MediaSum text dataset (as shown in Table <ref type="table" target="#tab_0">1</ref> as "Mamba"). We made a deliberate choice not to apply DPO fine-tuning to the cascaded baseline, as the issue DPO addresses -the tendency toward transcription-like lengthy generations -is specific to end-to-end speech summarization models and does not manifest in pure text-to-text summarization scenarios.</p><p>Under review as a conference paper at ICLR 2025 We conducted a human evaluation of generated speech samples using Mean Opinion Score (MOS).</p><p>Five human annotators assessed 50 randomly selected speech samples, scoring them on a scale from 1 to 5, where 1 indicates completely unnatural and incoherent speech relative to the transcription, and 5 indicates completely natural and coherent speech. Our samples achieved an MOS of 4.16, demonstrating that the generated speech closely resembles real-world speech.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>D RESULTS</head><p>D.1 ADDITIONAL ABLATIONS</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>D.1.1 EFFECT OF UNIDIRECTIONAL MAMBA</head><p>The unidirectional Mamba layer is incorporated within the learnable queries before cross-attention to establish a causal structure aligned with LLM input expectations. This design choice draws inspiration from the self-attention layer in Q-former and the causal attention layer in SEED-LLaMA, facilitating better conformity of generated speech tokens to LLM input requirements. To evaluate the impact of this architectural decision, ablation studies were conducted during the ASR alignment stage, comparing model performance with and without the unidirectional Mamba layer.</p><p>As shown in As shown in Table <ref type="table" target="#tab_9">9</ref>, while both configurations achieve comparable performance on LibriSpeech test-clean (4.5% vs 4.8% WER), the performance gap widens significantly for longer inputs. On GigaSpeech test samples, the WER of the libri-only model deteriorates substantially as input length increases, reaching 23.9% at 120 seconds compared to 17.8% for the full model. This degradation in transcription quality directly impacts summarization performance, with the libri-only model showing markedly lower scores across all metrics (e.g., ROUGE-1 drops from 27.5 to 18.8, METEOR from 30.1 to 14.4). These results demonstrate that incorporating long-form speech during alignment training is crucial for developing models capable of effective speech summarization.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>D.2 QUALITATIVE RESULTS</head><p>Qualitative results from SQuBa with and without DPO can be seen in Table <ref type="table" target="#tab_10">10</ref> and Table <ref type="table" target="#tab_0">11</ref>.</p><p>Under review as a conference paper at ICLR 2025 </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Input Transcript</head><p>The World Cup file that finally is just around the corner, just a little over two days to wait. On Sunday France and Croatia face off for the championship. Until then, however, we have enough memes, those viral images to keep us occupied. ẄORLD SPORTS Don Riddell breaks down the best one so far. The World Cup has captured football fans all over the world bringing moments of delirium and plenty of heartbreak. And in turn, the fans have captured the World Cup, its highs, and its lows online in memes. As the most expensive player in the world, Neymar was always going to be under the microscope but the Brazilian star brought joy to millions in a way that he could never have imagined. Clips of his overly theatrical rolling around went viral. In training, young kids all learned to do with the Neymar. Neymar! And in general video editors were having a ball even turning him into one. It's not just the players who produce the magic, the fans do too. This clip has been viewed more than 20 million times. A grandma blessing the Mexico players before their win against Germany, granddaughter Paula tweeted I'm 100 percent convinced my grandma was the reason Mexico won. Later on, Mexican supporters were sure that South Korea was the reason that they were still in the tournament. After Korea's unexpected win against Germany, random Koreans were hoisted onto shoulders and paraded through the streets like gods. South Korea's Consul General in Mexico found himself to be the guest at a most unexpected celebration England surprise run to the semi-finals inspired all kinds of creative musing... Ground Truth Summary France and Croatia face off in the World Cup final on Sunday. Fans have created memes about the tournament, featuring Neymar's falls, a grandma's blessing of Mexico players, England fans' excitement, and a satirical video by Croatian firefighters who missed a quarter-final shootout.</p><p>SQuBa w/o DPO The World Cup coverage continues, with football fans all over the world captivated by the tournament. The Brazilian star, Neymar, brought moments of delight to millions of fans, with his over-the-top antics. In training, young kids all learned to do the same. The most expensive player in the world, Neymar, was always going to be under the microscope. But Brazilian fans were also responsible for the hype, with fans turning the tables and turning the fans into the stars. This clip has been viewed more than 20 million times. A grandma blessing the Mexico-Germany match even inspired her granddaughter to do the same with her own match. Fans have even turned the World Cup coverage into a meme, with a whole Neymar-inspired meme. And the World Cup coverage continues, with more coverage of the semi-finals and the final.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>SQuBa</head><p>The World Cup file is still in the news, with daily World Cup memes and viral images capturing moments of excitement and joy. The Brazilian star Neymar was always going to be under the microscope, but fans have brought joy to millions in the form of memes and over-the-top performances. The Brazilian star's nephew, Neymer, even turned the tables on fans by tweeting a photo of himself as Neymar. The World Cup coverage continues, with fans eagerly awaiting the tournament's final.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 1 :</head><label>1</label><figDesc>Figure 1: Comparison between two types of speech summarization models: (a) cascaded model (top) and (b) non-cascaded end-to-end model (bottom).The key distinction between these pipelines is whether an intermediate text transcription is generated. Our approach operates end-toend, mitigating error propagation and inference delays while fully utilizing the acoustic information.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 2 :</head><label>2</label><figDesc>Figure 2: Overall architecture of the proposed SQuBa (left) and the windowing queryingattention Mamba (Q-Mamba) projector (right). The windowing Q-Mamba projects each speech feature chunk from the speech encoder into learnable queries via cross-attention. These projected speech features serve as speech token inputs for the pre-trained Mamba LLM backbone.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: Two-Stage Training Process of SQuBa.In the alignment stage, only the projector is trained using an ASR task. In the fine-tuning stage, both the LLM backbone and the projector are trained on the summarization task. The first alignment step uses short speech inputs, while the second step and the fine-tuning stage process longer inputs that exceed the speech encoder's input length limit, creating chunks of speech tokens. Whisper encoder is frozen for all training stages.</figDesc><graphic coords="6,108.00,81.86,396.01,152.81" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head>Table 1 :</head><label>1</label><figDesc>Summarization results on the Mediasum corpus with different input modalities. Mamba refers to the Mamba-2.8B-Zephyr model fine-tuned on the Mediasum text corpus. Cascaded represents the cascaded system combining Whisper-Large-v2 and Mamba-2.8B-Zephyr. The third section compares end-to-end speech summarization models.</figDesc><table><row><cell>Model</cell><cell cols="5">Input Modality ROUGE-1 ROUGE-2 ROUGE-L METEOR</cell></row><row><cell>Mamba</cell><cell>Text</cell><cell>39.8</cell><cell>17.6</cell><cell>22.8</cell><cell>33.9</cell></row><row><cell>Cascaded</cell><cell>Speech</cell><cell>18.8</cell><cell>7.12</cell><cell>12.9</cell><cell>30.9</cell></row><row><cell cols="2">Kang &amp; Roy (2024) Speech</cell><cell>19.2</cell><cell>6.7</cell><cell>14.1</cell><cell>27.4</cell></row><row><cell>SQuBa (ours)</cell><cell>Speech</cell><cell>31.5</cell><cell>10.6</cell><cell>20.6</cell><cell>33.2</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 2 :</head><label>2</label><figDesc>Comparison between different speech summarization models based on human evaluation. Results show pairwise comparison (win rate %) between models across 5 human annotators, where a higher percentage indicates more preferred outputs. Each annotator evaluated 52 randomly sampled test examples from the MediaSum test set.</figDesc><table><row><cell>Model vs. Model</cell><cell>win-rate (%:%)</cell></row><row><cell>SQuBa (ours) vs. Cascaded</cell><cell>67.8 : 32.2</cell></row><row><cell>SQuBa (ours) vs. Kang &amp; Roy (2024)</cell><cell>92.6 : 7.4</cell></row><row><cell>Cascaded vs. Kang &amp; Roy (2024)</cell><cell>79.2 : 20.8</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_2"><head>Table 3 :</head><label>3</label><figDesc>Comparison of average time per sample for generating summaries from speech. Cascaded represents the cascaded system combining Whisper-Large-v2 and Mamba-2.8B-Zephyr.</figDesc><table><row><cell>Model</cell><cell>LLM</cell><cell>Avg. Time per Sample (seconds)</cell></row><row><cell>Cascaded</cell><cell>Mamba-2.8b</cell><cell>41.7</cell></row><row><cell cols="2">Kang &amp; Roy (2024) MiniChat2-3b</cell><cell>13.0</cell></row><row><cell>SQuBa</cell><cell>Mamba-2.8b</cell><cell>2.4</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_3"><head>Table 4 :</head><label>4</label><figDesc>WER(%) comparison of different query configurations of SQuBa on LibriSpeech test sets. Query Len. denotes the number of learnable queries representing 0.33 seconds of speech. Libri-clean and Libri-other denote WER(%) for each test subset, while Libri-all represents the average WER(%) across both subsets. Whisper Large v2 serves as our baseline speech encoder.</figDesc><table><row><cell>Model</cell><cell cols="4">Query Len. Libri-clean Libri-other Libri-all</cell></row><row><cell>Whisper</cell><cell>-</cell><cell>2.87</cell><cell>5.16</cell><cell>4.42</cell></row><row><cell>SQuBa</cell><cell>1</cell><cell>5.89</cell><cell>7.81</cell><cell>6.85</cell></row><row><cell></cell><cell>2</cell><cell>4.55</cell><cell>6.50</cell><cell>5.52</cell></row><row><cell></cell><cell>4</cell><cell>4.80</cell><cell>7.74</cell><cell>6.80</cell></row><row><cell></cell><cell>6</cell><cell>4.97</cell><cell>7.85</cell><cell>6.92</cell></row><row><cell></cell><cell>8</cell><cell>5.09</cell><cell>7.94</cell><cell>7.02</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_4"><head>Table 5 :</head><label>5</label><figDesc>Ablation studies on bootstrapped DPO training. 'X' denotes SQuBa without DPO training. Both models were trained using our two-stage training framework.</figDesc><table><row><cell cols="6">Model DPO ROUGE-1 ROUGE-2 ROUGE-L METEOR</cell></row><row><cell>SQuBa</cell><cell>x</cell><cell>27.5</cell><cell>10.1</cell><cell>19.8</cell><cell>30.1</cell></row><row><cell></cell><cell>✓</cell><cell>31.5</cell><cell>10.6</cell><cell>20.6</cell><cell>33.2</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_5"><head>Table 6 :</head><label>6</label><figDesc>ChaTTS Model Configuration and Parameters.</figDesc><table><row><cell>Component</cell><cell>Configuration/Parameters</cell></row><row><cell>Inference Temperature</cell><cell>0.3</cell></row><row><cell>Top-P Sampling</cell><cell>0.5</cell></row><row><cell>Top-K Sampling</cell><cell>15</cell></row><row><cell>Audio Sample Rate</cell><cell>24000 Hz</cell></row><row><cell>Maximum Token Length</cell><cell>2048 tokens</cell></row><row><cell>Laugh Parameter</cell><cell>0</cell></row><row><cell>Oral Parameter</cell><cell>2</cell></row><row><cell>Break Parameter</cell><cell>6</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_6"><head>Table 7 :</head><label>7</label><figDesc>Ablation studies on the effect of unidirectional Mamba in Q-Mamba projector with LibriSpeech and GigaSpeech. Default denotes our SQuBa configuration described in the training details, while no-mamba denotes SQuBa without a unidirectional Mamba layer inside the Q-Mamba projector. Giga-60, Giga-90, and Giga-120 each denote the WER(%) for GigaSpeech test samples of 60, 90, and 120 seconds, respectively.</figDesc><table><row><cell>Model</cell><cell>config</cell><cell cols="5">libri-clean libri-other giga-60 giga-90 giga-120</cell></row><row><cell>SQuBa</cell><cell>default</cell><cell>4.5</cell><cell>6.5</cell><cell>15.3</cell><cell>16.9</cell><cell>17.8</cell></row><row><cell cols="2">SQuBa no-mamba</cell><cell>4.8</cell><cell>9.8</cell><cell>16.5</cell><cell>22.9</cell><cell>23.9</cell></row><row><cell cols="2">C.2 CHATTTS DETAILS</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell cols="4">We utilize ChatTTS 6 with the configuration shown in table 6.</cell><cell></cell><cell></cell><cell></cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_7"><head>Table 7</head><label>7</label><figDesc>, including the unidirectional Mamba layer improves WER for LibriSpeech from 4.8% to 4.5%. This improvement is more pronounced in the GigaSpeech test set across different temporal spans (60s, 90s, and 120s), where the model consistently achieves lower WER, particularly for longer sequences. At 120 seconds, the model with Mamba maintains a WER of 17.8% compared to 23.9% without it, suggesting that the causal structure helps maintain coherence over extended temporal contexts.</figDesc><table><row><cell>D.1.2 DOWNSAMPLING METHOD</cell></row><row><cell>Q-Mamba compresses speech features into semantic vectors using cross-attention and learnable</cell></row><row><cell>queries, aiming to capture complex relationships more effectively than simple downsampling meth-</cell></row><row><cell>ods. To validate this design, we replaced only the cross-attention module with either average pool-</cell></row><row><cell>ing or convolutional layers while maintaining other components, and evaluated performance during</cell></row><row><cell>ASR alignment on LibriSpeech and GigaSpeech test sets.</cell></row></table><note><p><p><p>As shown in Table</p>8</p>, Q-Mamba's cross-attention mechanism with learnable queries outperforms simpler compression methods in preserving semantic information, achieving 4.5% WER on Lib-riSpeech compared to 4.8% and 4.7% for pooling and CNN projectors, respectively. This advantage is particularly evident in longer sequences, where Q-Mamba maintains a WER of 17.8% at Under review as a conference paper at ICLR 2025</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_8"><head>Table 8 :</head><label>8</label><figDesc>Ablation studies on downsampling method with LibriSpeech and GigaSpeech. Default denotes our SQuBa configuration described in the training details, while AvgPool denotes downsampling with average pooling, and CNN denotes downsampling with a convolutional layer. Giga-60, Giga-90, and Giga-120 each denote the WER(%) for GigaSpeech test samples of 60, 90, and 120 seconds, respectively.</figDesc><table><row><cell>Model</cell><cell>config</cell><cell cols="5">libri-clean libri-other giga-60 giga-90 giga-120</cell></row><row><cell>SQuBa</cell><cell>default</cell><cell>4.5</cell><cell>6.5</cell><cell>15.3</cell><cell>16.9</cell><cell>17.8</cell></row><row><cell cols="2">SQuBa AvgPool</cell><cell>4.8</cell><cell>7.9</cell><cell>17.4</cell><cell>24.5</cell><cell>25.2</cell></row><row><cell>SQuBa</cell><cell>CNN</cell><cell>4.7</cell><cell>11.6</cell><cell>15.2</cell><cell>20.8</cell><cell>21.0</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_9"><head>Table 9 :</head><label>9</label><figDesc>Ablation studies on long speech alignment. Default denotes our SQuBa configuration described in the training details, while libri-only denotes SQuBa without training on the GigaSpeech dataset. LC and LO each denote WER(%) for each test-clean and test-other subset from LibriSpeech. G60, G90, and G120 each denote the WER(%) for GigaSpeech test samples of 60, 90, and 120 seconds, respectively. For summarization, both models were fine-tuned on a synthesized summarization dataset. R1, R2, RL, and M each denote ROUGE-1, ROUGE-2, ROUGE-L, and METEOR scores, respectively. Bootstrapped DPO fine-tuning was not applied for both.</figDesc><table><row><cell>Model</cell><cell>config LC LN G60 G90 G120 R1</cell><cell>R2</cell><cell>RL</cell><cell>M</cell></row><row><cell cols="5">SQuBa default 4.5 6.5 15.3 16.9 17.8 27.5 10.1 19.8 30.1</cell></row><row><cell cols="5">SQuBa no-libri 4.8 9.8 16.5 22.9 23.9 18.8 3.5 12.3 14.4</cell></row><row><cell cols="5">120 seconds compared to 25.2% and 21.0% for average pooling and CNN projectors, respectively,</cell></row><row><cell cols="5">demonstrating better preservation of semantic information over extended temporal contexts.</cell></row><row><cell cols="2">D.1.3 EFFECT OF LONG SPEECH ALIGNMENT</cell><cell></cell><cell></cell><cell></cell></row><row><cell cols="5">Since the speech summarization involves long-form speech, it is expected that the model only trained</cell></row><row><cell cols="5">on LibriSpeech (short audio) should perform poorly on long speech summarization. To validate this</cell></row><row><cell cols="5">hypothesis, we conducted ablation studies comparing our full model without DPO training against</cell></row><row><cell cols="2">a variant trained without the GigaSpeech dataset.</cell><cell></cell><cell></cell><cell></cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_10"><head>Table 10 :</head><label>10</label><figDesc>Summary Results from SquBa Model Text</figDesc><table /></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="1" xml:id="foot_0"><p>https://huggingface.co/openai/whisper-large-v2</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="2" xml:id="foot_1"><p>https://huggingface.co/xiuyul/mamba-2.8b-zephyr</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="3" xml:id="foot_2"><p>https://github.com/2noise/ChatTTS</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="4" xml:id="foot_3"><p>https://huggingface.co/meta-llama/Meta-Llama-3-8B</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="5" xml:id="foot_4"><p>https://huggingface.co/openai/whisper-large-v2</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="6" xml:id="foot_5"><p>https://github.com/2noise/ChatTTS</p></note>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A TRAINING DETAILS</head><p>A.1 MODELS We use the pre-trained Whisper <ref type="bibr" target="#b43">(Radford et al., 2023)</ref> as our speech encoder, specifically Whisper Large v2, which has 1.55 billion parameters and is trained on 680,000 hours of multilingual audio. The encoder has a 30-second input limit and an output dimension of 5120.</p><p>For the LLM backbone, we utilize the pre-trained Mamba LLM <ref type="bibr" target="#b13">(Gu &amp; Dao, 2023)</ref> with 2.8 billion parameters. Mamba was pre-trained on the SlimPajama dataset <ref type="bibr" target="#b51">(Soboleva et al., 2023)</ref> (600 billion tokens), followed by instruction-tuning on UltraChat 200K <ref type="bibr" target="#b9">(Ding et al., 2023)</ref>, and fine-tuning on UltraFeedback <ref type="bibr" target="#b6">(Cui et al., 2023)</ref> using Direct Preference Optimization <ref type="bibr" target="#b44">(Rafailov et al., 2023)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.2 METRICS</head><p>ROUGE Metrics ROUGE <ref type="bibr" target="#b28">(Lin, 2004</ref>) is a set of metrics designed to evaluate automatic text summarization and machine translation by measuring the similarity between generated summaries and reference summaries. The core idea is to compute the overlap of n-grams (contiguous sequences of n words) between the generated text and the reference text. We incorporate three ROUGE variants in our evaluation:</p><p>• ROUGE-1: Calculates the overlap of unigrams (individual words) between the generated and reference summaries, assessing the presence of key words. • ROUGE-2: Calculates the overlap of bigrams (pairs of consecutive words), evaluating the preservation of word sequences and contextual information. • ROUGE-L: Based on the Longest Common Subsequence (LCS) between the generated and reference summaries, this metric evaluates sentence-level structure and coherence by considering the order of words.</p><p>METEOR METEOR <ref type="bibr" target="#b2">(Banerjee &amp; Lavie, 2005</ref>) is an evaluation metric originally developed for machine translation but has been effectively applied to summarization tasks due to its ability to capture semantic similarities beyond exact word matching. It evaluates the quality of the generated summary by aligning it to the reference summary and considering several factors:</p><p>• Word Alignment: Aligns words between the generated and reference summaries, accounting for exact matches, stem matches, and synonyms. • Precision and Recall: Calculates a weighted harmonic mean of unigram precision and recall, with higher weight on recall to emphasize coverage of relevant content from the reference. • Fragmentation Penalty: Applies a penalty for fragmented or disordered alignments, encouraging fluent and coherent summaries with proper word order.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B RELATED WORKS B.1 SPEECH LARGE LANGUAGE MODELS</head><p>With the rise of powerful large language models (LLMs) <ref type="bibr" target="#b37">(Ouyang et al., 2022;</ref><ref type="bibr" target="#b53">Touvron et al., 2023)</ref> and their application to end-to-end vision-language models <ref type="bibr" target="#b29">(Liu et al., 2023;</ref><ref type="bibr">OpenAI, 2024)</ref>, efforts have been made to extend LLMs to speech processing. Unlike static images, audio data is lengthvarying and temporal, posing unique challenges for alignment with text. While some models are task-specific, such as for speech recognition <ref type="bibr" target="#b11">(Fathullah et al., 2024)</ref>, translation <ref type="bibr" target="#b55">(Wu et al., 2023)</ref>, or synthesis <ref type="bibr" target="#b18">(Hao et al., 2023)</ref>, others aim to harness the full potential of general-purpose LLMs by using multi-task instruction tuning for broader applications <ref type="bibr" target="#b20">(Hu et al., 2024;</ref><ref type="bibr" target="#b45">Rubenstein et al., 2023;</ref><ref type="bibr" target="#b8">Das et al., 2024)</ref>.</p><p>Recently, SALMONN <ref type="bibr" target="#b52">(Tang et al., 2024)</ref> advanced the integration of diverse auditory inputs, including speech, audio events, and music. Using a dual-encoder architecture-Whisper <ref type="bibr" target="#b43">(Radford et al., 2023)</ref> for speech and BEATs <ref type="bibr" target="#b4">(Chen et al., 2022)</ref> for non-speech audio-SALMONN efficiently Under review as a conference paper at ICLR 2025 </p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<title level="m" type="main">A general theoretical paradigm to understand learning from human preferences</title>
+		<author>
+			<persName><forename type="first">Mohammad</forename><surname>Gheshlaghi Azar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Rowland</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bilal</forename><surname>Piot</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniele</forename><surname>Calandriello</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michal</forename><surname>Valko</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rémi</forename><surname>Munos</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2310.12036" />
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yuntao</forename><surname>Bai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andy</forename><surname>Jones</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kamal</forename><surname>Ndousse</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Askell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anna</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nova</forename><surname>Dassarma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dawn</forename><surname>Drain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stanislav</forename><surname>Fort</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deep</forename><surname>Ganguli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Henighan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicholas</forename><surname>Joseph</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saurav</forename><surname>Kadavath</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jackson</forename><surname>Kernion</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Conerly</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sheer</forename><surname>El-Showk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nelson</forename><surname>Elhage</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zac</forename><surname>Hatfield-Dodds</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Danny</forename><surname>Hernandez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tristan</forename><surname>Hume</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Scott</forename><surname>Johnston</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shauna</forename><surname>Kravec</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liane</forename><surname>Lovitt</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Neel</forename><surname>Nanda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Catherine</forename><surname>Olsson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dario</forename><surname>Amodei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jack</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Mccandlish</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><surname>Olah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ben</forename><surname>Mann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><surname>Kaplan</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2204.05862" />
+		<title level="m">Training a helpful and harmless assistant with reinforcement learning from human feedback</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">METEOR: An automatic metric for MT evaluation with improved correlation with human judgments</title>
+		<author>
+			<persName><forename type="first">Satanjeev</forename><surname>Banerjee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alon</forename><surname>Lavie</surname></persName>
+		</author>
+		<ptr target="https://aclanthology.org/W05-0909" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization</title>
+		<editor>
+			<persName><forename type="first">Jade</forename><surname>Goldstein</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Alon</forename><surname>Lavie</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Chin-Yew</forename><surname>Lin</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Clare</forename><surname>Voss</surname></persName>
+		</editor>
+		<meeting>the ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization<address><addrLine>Ann Arbor, Michigan</addrLine></address></meeting>
+		<imprint>
+			<publisher>Association for Computational Linguistics</publisher>
+			<date type="published" when="2005-06">June 2005</date>
+			<biblScope unit="page" from="65" to="72" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Gigaspeech: An evolving, multi-domain asr corpus with 10,000 hours of transcribed audio</title>
+		<author>
+			<persName><forename type="first">Guoguo</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuzhou</forename><surname>Chai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guan-Bo</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiayu</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei-Qiang</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chao</forename><surname>Weng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Povey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jan</forename><surname>Trmal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junbo</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mingjie</forename><surname>Jin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanjeev</forename><surname>Khudanpur</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shinji</forename><surname>Watanabe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuaijiang</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Zou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiangang</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuchen</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yongqing</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhao</forename><surname>You</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyong</forename><surname>Yan</surname></persName>
+		</author>
+		<idno type="DOI">10.21437/Interspeech.2021-1965</idno>
+	</analytic>
+	<monogr>
+		<title level="m">Interspeech 2021</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="3670" to="3674" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<monogr>
+		<title level="m" type="main">Beats: Audio pre-training with acoustic tokenizers</title>
+		<author>
+			<persName><forename type="first">Sanyuan</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chengyi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shujie</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Tompkins</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhuo</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Furu</forename><surname>Wei</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2212.09058" />
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<monogr>
+		<title level="m" type="main">Mobilevlm v2: Faster and stronger baseline for vision language model</title>
+		<author>
+			<persName><forename type="first">Xiangxiang</forename><surname>Chu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Limeng</forename><surname>Qiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinyu</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuang</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fei</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaofei</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yiming</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinyang</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chunhua</forename><surname>Shen</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<monogr>
+		<author>
+			<persName><forename type="first">Ganqu</forename><surname>Cui</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lifan</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ning</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guanming</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuan</forename><surname>Ni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guotong</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyuan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maosong</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Ultrafeedback</surname></persName>
+		</author>
+		<title level="m">Boosting language models with high-quality feedback</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Transformers are SSMs: Generalized models and efficient algorithms through structured state space duality</title>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Dao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Albert</forename><surname>Gu ; Ruslan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zico</forename><surname>Salakhutdinov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katherine</forename><surname>Kolter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adrian</forename><surname>Heller</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Weller</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 41st International Conference on Machine Learning</title>
+		<editor>
+			<persName><forename type="first">Nuria</forename><surname>Oliver</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Jonathan</forename><surname>Scarlett</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Felix</forename><surname>Berkenkamp</surname></persName>
+		</editor>
+		<meeting>the 41st International Conference on Machine Learning</meeting>
+		<imprint>
+			<date type="published" when="2024-07">Jul 2024</date>
+			<biblScope unit="volume">235</biblScope>
+			<biblScope unit="page" from="21" to="27" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<monogr>
+		<author>
+			<persName><forename type="first">Nilaksh</forename><surname>Das</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saket</forename><surname>Dingliwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Srikanth</forename><surname>Ronanki</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rohit</forename><surname>Paturi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhaocheng</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prashant</forename><surname>Mathur</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dhanush</forename><surname>Bekal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xing</forename><surname>Niu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Muralidhar</forename><surname>Sai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xilai</forename><surname>Jayanthi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karel</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Monica</forename><surname>Mundnich</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sundararajan</forename><surname>Sunkara</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kyu</forename><forename type="middle">J</forename><surname>Srinivasan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katrin</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Kirchhoff</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2405.08295" />
+		<title level="m">Speechverse: A largescale generalizable audio language model</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<monogr>
+		<title level="m" type="main">Enhancing chat language models by scaling high-quality instructional conversations</title>
+		<author>
+			<persName><forename type="first">Ning</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yulin</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bokai</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yujia</forename><surname>Qin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhi</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengding</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyuan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maosong</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bowen</forename><surname>Zhou</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<title level="m" type="main">Kto: Model alignment as prospect theoretic optimization</title>
+		<author>
+			<persName><forename type="first">Kawin</forename><surname>Ethayarajh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Winnie</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Niklas</forename><surname>Muennighoff</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Jurafsky</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Douwe</forename><surname>Kiela</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2402.01306" />
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">Prompting large language models with speech recognition abilities</title>
+		<author>
+			<persName><forename type="first">Yassir</forename><surname>Fathullah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chunyang</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Egor</forename><surname>Lakomkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junteng</forename><surname>Jia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuan</forename><surname>Shangguan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ke</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinxi</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenhan</forename><surname>Xiong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jay</forename><surname>Mahadeokar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ozlem</forename><surname>Kalinli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christian</forename><surname>Fuegen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mike</forename><surname>Seltzer</surname></persName>
+		</author>
+		<idno type="DOI">10.1109/ICASSP48485.2024.10447605</idno>
+	</analytic>
+	<monogr>
+		<title level="m">ICASSP 2024 -2024 IEEE International Conference on Acoustics, Speech and Signal Processing</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="page" from="13351" to="13355" />
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">Hungry hungry hippos: Towards language modeling with state space models</title>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Daniel Y Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Khaled</forename><surname>Dao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Armin</forename><forename type="middle">W</forename><surname>Kamal Saab</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Atri</forename><surname>Thomas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Rudra</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Re</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=COZDy0WYGg" />
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<title level="m" type="main">Mamba: Linear-time sequence modeling with selective state spaces</title>
+		<author>
+			<persName><forename type="first">Albert</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Dao</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Combining recurrent, convolutional, and continuous-time models with linear state-space layers</title>
+		<author>
+			<persName><forename type="first">Albert</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Isys</forename><surname>Johnson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karan</forename><surname>Goel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Khaled</forename><surname>Kamal Saab</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Dao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Atri</forename><surname>Rudra</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Christopher R'e</surname></persName>
+		</author>
+		<ptr target="https://api.semanticscholar.org/CorpusID" />
+	</analytic>
+	<monogr>
+		<title level="m">Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page">239998472</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Efficiently modeling long sequences with structured state spaces</title>
+		<author>
+			<persName><forename type="first">Albert</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karan</forename><surname>Goel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Re</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=uYLFoz1vlAC" />
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations, 2022a</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<monogr>
+		<title level="m" type="main">On the parameterization and initialization of diagonal state space models</title>
+		<author>
+			<persName><forename type="first">Albert</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ankit</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karan</forename><surname>Goel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Ré</surname></persName>
+		</author>
+		<idno>ArXiv, abs/2206.11893</idno>
+		<ptr target="https://api.semanticscholar.org/CorpusID:249953875" />
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">Diagonal state spaces are as effective as structured state spaces</title>
+		<author>
+			<persName><forename type="first">Ankit</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Albert</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Berant</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<editor>
+			<persName><forename type="first">Alice</forename><forename type="middle">H</forename><surname>Oh</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Alekh</forename><surname>Agarwal</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Danielle</forename><surname>Belgrave</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Kyunghyun</forename><surname>Cho</surname></persName>
+		</editor>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note>id=RjS0j6tsSrf</note>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<monogr>
+		<title level="m" type="main">Boosting large language model for speech synthesis: An empirical study</title>
+		<author>
+			<persName><forename type="first">Hongkun</forename><surname>Hao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Long</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shujie</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinyu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shujie</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Furu</forename><surname>Wei</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2401.00246" />
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">Long short-term memory</title>
+		<author>
+			<persName><forename type="first">Sepp</forename><surname>Hochreiter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jürgen</forename><surname>Schmidhuber</surname></persName>
+		</author>
+		<idno type="DOI">10.1162/neco.1997.9.8.1735</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Neural computation</title>
+		<imprint>
+			<biblScope unit="volume">9</biblScope>
+			<biblScope unit="page">1997</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<monogr>
+		<author>
+			<persName><forename type="first">Shujie</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Long</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shujie</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanyuan</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lingwei</forename><surname>Meng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongkun</forename><surname>Hao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jing</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xunying</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinyu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sunit</forename><surname>Sivasankaran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Linquan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Furu</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Wavllm</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2404.00656" />
+		<title level="m">Towards robust and adaptive speech large language model</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<title level="m" type="main">Dual-path mamba: Short and long-term bidirectional selective structured state space models for speech separation</title>
+		<author>
+			<persName><forename type="first">Xilin</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cong</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nima</forename><surname>Mesgarani</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2403.18257</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Prompting large language models with audio for general-purpose speech summarization</title>
+		<author>
+			<persName><forename type="first">Wonjune</forename><surname>Kang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deb</forename><surname>Roy</surname></persName>
+		</author>
+		<idno type="DOI">10.21437/Interspeech.2024-2213</idno>
+	</analytic>
+	<monogr>
+		<title level="m">Interspeech 2024</title>
+		<imprint>
+			<date type="published" when="1955">1955-1959, 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">Speech summarization of long spoken document: Improving memory efficiency of speech/text encoders</title>
+		<author>
+			<persName><forename type="first">Takatomo</forename><surname>Kano</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Atsunori</forename><surname>Ogawa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Delcroix</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roshan</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kohei</forename><surname>Matsuura</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shinji</forename><surname>Watanabe</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICASSP 2023 -2023 IEEE International Conference on Acoustics, Speech and Signal Processing</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="1" to="5" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Blip: Bootstrapping languageimage pre-training for unified vision-language understanding and generation</title>
+		<author>
+			<persName><forename type="first">Junnan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dongxu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Caiming</forename><surname>Xiong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><forename type="middle">C H</forename><surname>Hoi</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<analytic>
+		<title level="a" type="main">Blip-2: bootstrapping language-image pre-training with frozen image encoders and large language models</title>
+		<author>
+			<persName><forename type="first">Junnan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dongxu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Silvio</forename><surname>Savarese</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Hoi</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 40th International Conference on Machine Learning, ICML&apos;23. JMLR.org</title>
+		<meeting>the 40th International Conference on Machine Learning, ICML&apos;23. JMLR.org</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<monogr>
+		<title level="m" type="main">Spmamba: State-space model is all you need in speech separation</title>
+		<author>
+			<persName><forename type="first">Kai</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chen</forename><surname>Guo</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.02063</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<monogr>
+		<title level="m" type="main">Videomamba: State space model for efficient video understanding</title>
+		<author>
+			<persName><forename type="first">Kunchang</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinhao</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yinan</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yali</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Limin</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Qiao</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<analytic>
+		<title level="a" type="main">ROUGE: A package for automatic evaluation of summaries</title>
+		<author>
+			<persName><forename type="first">Chin-Yew</forename><surname>Lin</surname></persName>
+		</author>
+		<ptr target="https://aclanthology.org/W04-1013" />
+	</analytic>
+	<monogr>
+		<title level="m">Association for Computational Linguistics</title>
+		<meeting><address><addrLine>Barcelona, Spain</addrLine></address></meeting>
+		<imprint>
+			<date type="published" when="2004-07">July 2004</date>
+			<biblScope unit="page" from="74" to="81" />
+		</imprint>
+	</monogr>
+	<note>Text Summarization Branches Out</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Visual instruction tuning</title>
+		<author>
+			<persName><forename type="first">Haotian</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chunyuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qingyang</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yong Jae</forename><surname>Lee</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">NeurIPS</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yue</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunjie</forename><surname>Tian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuzhong</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongtian</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lingxi</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yaowei</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qixiang</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunfan</forename><surname>Liu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.10166</idno>
+		<title level="m">Vmamba: Visual state space model</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<monogr>
+		<title level="m" type="main">The llama 3 herd of models</title>
+		<author>
+			<persName><forename type="first">A</forename><forename type="middle">I</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Meta</forename><forename type="middle">Llama</forename><surname>Team</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2407.21783" />
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<analytic>
+		<title level="a" type="main">Leveraging large text corpora for end-to-end speech summarization</title>
+		<author>
+			<persName><forename type="first">Kohei</forename><surname>Matsuura</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Takanori</forename><surname>Ashihara</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Takafumi</forename><surname>Moriya</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomohiro</forename><surname>Tanaka</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Atsunori</forename><surname>Ogawa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Delcroix</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ryo</forename><surname>Masumura</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICASSP 2023 -2023 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="1" to="5" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Meng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mengzhou</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Danqi</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Simpo</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2405.14734</idno>
+		<title level="m">Simple preference optimization with a reference-free reward</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">Interpretation and transformation for abstracting conversations</title>
+		<author>
+			<persName><forename type="first">Gabriel</forename><surname>Murray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Giuseppe</forename><surname>Carenini</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Raymond</forename><surname>Ng</surname></persName>
+		</author>
+		<ptr target="https://aclanthology.org/N10-1132" />
+	</analytic>
+	<monogr>
+		<title level="m">Human Language Technologies: The 2010 Annual Conference of the North American Chapter of the Association for Computational Linguistics</title>
+		<editor>
+			<persName><forename type="first">Ron</forename><surname>Kaplan</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Jill</forename><surname>Burstein</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Mary</forename><surname>Harper</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Gerald</forename><surname>Penn</surname></persName>
+		</editor>
+		<meeting><address><addrLine>Los Angeles, California</addrLine></address></meeting>
+		<imprint>
+			<date type="published" when="2010-06">June 2010</date>
+			<biblScope unit="page" from="894" to="902" />
+		</imprint>
+	</monogr>
+	<note>Association for Computational Linguistics</note>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Automatic text summarization using a machine learning approach</title>
+		<author>
+			<persName><forename type="first">Joel Larocca</forename><surname>Neto</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><forename type="middle">A</forename><surname>Freitas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Celso</forename><forename type="middle">A A</forename><surname>Kaestner</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Artificial Intelligence</title>
+		<editor>
+			<persName><forename type="first">Guilherme</forename><surname>Bittencourt</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">L</forename><surname>Geber</surname></persName>
+		</editor>
+		<editor>
+			<persName><surname>Ramalho</surname></persName>
+		</editor>
+		<meeting><address><addrLine>Berlin, Heidelberg; Berlin Heidelberg</addrLine></address></meeting>
+		<imprint>
+			<publisher>Springer</publisher>
+			<date type="published" when="2002">2002</date>
+			<biblScope unit="page" from="205" to="215" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title/>
+	</analytic>
+	<monogr>
+		<title level="j">OpenAI. Gpt-4 technical report</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<monogr>
+		<title level="m" type="main">Training language models to follow instructions with human feedback</title>
+		<author>
+			<persName><forename type="first">Long</forename><surname>Ouyang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeff</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xu</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Diogo</forename><surname>Almeida</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carroll</forename><forename type="middle">L</forename><surname>Wainwright</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pamela</forename><surname>Mishkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chong</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katarina</forename><surname>Slama</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Ray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><surname>Schulman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Hilton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fraser</forename><surname>Kelton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Miller</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maddie</forename><surname>Simens</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Askell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Welinder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Paul</forename><surname>Christiano</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jan</forename><surname>Leike</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ryan</forename><surname>Lowe</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<analytic>
+		<title level="a" type="main">Multimodal abstractive summarization for how2 videos</title>
+		<author>
+			<persName><forename type="first">Shruti</forename><surname>Palaskar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jindřich</forename><surname>Libovický</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Spandana</forename><surname>Gella</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Florian</forename><surname>Metze</surname></persName>
+		</author>
+		<idno>doi: 10.18653</idno>
+		<ptr target="https://aclanthology.org/P19-1659" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics</title>
+		<editor>
+			<persName><forename type="first">Anna</forename><surname>Korhonen</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">David</forename><surname>Traum</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Lluís</forename><surname>Màrquez</surname></persName>
+		</editor>
+		<meeting>the 57th Annual Meeting of the Association for Computational Linguistics<address><addrLine>Florence, Italy</addrLine></address></meeting>
+		<imprint>
+			<publisher>Association for Computational Linguistics</publisher>
+			<date type="published" when="2019-07">July 2019</date>
+			<biblScope unit="page" from="19" to="1659" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<analytic>
+		<title level="a" type="main">Multimodal speech summarization through semantic concept learning</title>
+		<author>
+			<persName><forename type="first">Shruti</forename><surname>Palaskar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruslan</forename><surname>Salakhutdinov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alan</forename><forename type="middle">W</forename><surname>Black</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Florian</forename><surname>Metze</surname></persName>
+		</author>
+		<idno type="DOI">10.21437/Interspeech.2021-1923</idno>
+	</analytic>
+	<monogr>
+		<title level="m">Interspeech 2021</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="791" to="795" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<analytic>
+		<title level="a" type="main">Librispeech: An asr corpus based on public domain audio books</title>
+		<author>
+			<persName><forename type="first">Vassil</forename><surname>Panayotov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guoguo</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Povey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanjeev</forename><surname>Khudanpur</surname></persName>
+		</author>
+		<idno type="DOI">10.1109/ICASSP.2015.7178964</idno>
+	</analytic>
+	<monogr>
+		<title level="m">2015 IEEE International Conference on Acoustics, Speech and Signal Processing</title>
+		<imprint>
+			<date type="published" when="2015">2015</date>
+			<biblScope unit="page" from="5206" to="5210" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<monogr>
+		<title level="m" type="main">Simba: Simplified mamba-based architecture for vision and multivariate time series</title>
+		<author>
+			<persName><forename type="first">N</forename><surname>Badri</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vijay</forename><forename type="middle">S</forename><surname>Patro</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Agneeswaran</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<monogr>
+		<title level="m" type="main">Vl-mamba: Exploring state space models for multimodal learning</title>
+		<author>
+			<persName><forename type="first">Yanyuan</forename><surname>Qiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zheng</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Longteng</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sihan</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zijia</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mingzhen</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qi</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jing</forename><surname>Liu</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<analytic>
+		<title level="a" type="main">Robust speech recognition via large-scale weak supervision</title>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jong</forename><forename type="middle">Wook</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Greg</forename><surname>Brockman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christine</forename><surname>Mcleavey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Sutskever</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 40th International Conference on Machine Learning, ICML&apos;23. JMLR.org</title>
+		<meeting>the 40th International Conference on Machine Learning, ICML&apos;23. JMLR.org</meeting>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<analytic>
+		<title level="a" type="main">Direct preference optimization: Your language model is secretly a reward model</title>
+		<author>
+			<persName><forename type="first">Rafael</forename><surname>Rafailov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Archit</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Mitchell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><forename type="middle">D</forename><surname>Manning</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefano</forename><surname>Ermon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chelsea</forename><surname>Finn</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2305.18290" />
+	</analytic>
+	<monogr>
+		<title level="m">Thirtyseventh Conference on Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<monogr>
+		<author>
+			<persName><forename type="first">Paul</forename><forename type="middle">K</forename><surname>Rubenstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chulayuth</forename><surname>Asawaroengchai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dung</forename><surname>Duc</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ankur</forename><surname>Nguyen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zalán</forename><surname>Bapna</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Félix</forename><surname>Borsos</surname></persName>
+		</author>
+		<author>
+			<persName><surname>De Chaumont</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Quitry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dalia</forename><forename type="middle">El</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Badawy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eugene</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hannah</forename><surname>Kharitonov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dirk</forename><surname>Muckenhirn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Padfield</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Danny</forename><surname>Qin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tara</forename><surname>Rozenberg</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Johan</forename><surname>Sainath</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matt</forename><surname>Schalkwyk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michelle</forename><forename type="middle">Tadmor</forename><surname>Sharifi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marco</forename><surname>Ramanovich</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexandru</forename><surname>Tagliasacchi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mihajlo</forename><surname>Tudor</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Damien</forename><surname>Velimirović</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiahui</forename><surname>Vincent</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yongqiang</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vicky</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Neil</forename><surname>Zayats</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Zeghidour</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhishuai</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukas</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christian</forename><surname>Zilka</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Frank</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2306.12925" />
+		<title level="m">A large language model that can speak and listen</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<monogr>
+		<author>
+			<persName><forename type="first">John</forename><surname>Schulman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Filip</forename><surname>Wolski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oleg</forename><surname>Klimov</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/1707.06347" />
+		<title level="m">Proximal policy optimization algorithms</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b47">
+	<analytic>
+		<title level="a" type="main">Unsupervised abstractive meeting summarization with multisentence compression and budgeted submodular maximization</title>
+		<author>
+			<persName><forename type="first">Guokan</forename><surname>Shang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wensi</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zekun</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Antoine</forename><surname>Tixier</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Polykarpos</forename><surname>Meladianos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michalis</forename><surname>Vazirgiannis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jean-Pierre</forename><surname>Lorré</surname></persName>
+		</author>
+		<idno type="DOI">10.18653/v1/P18-1062</idno>
+		<ptr target="https://aclanthology.org/P18-1062" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 56th Annual Meeting of the Association for Computational Linguistics</title>
+		<editor>
+			<persName><forename type="first">Iryna</forename><surname>Gurevych</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Yusuke</forename><surname>Miyao</surname></persName>
+		</editor>
+		<meeting>the 56th Annual Meeting of the Association for Computational Linguistics<address><addrLine>Melbourne, Australia</addrLine></address></meeting>
+		<imprint>
+			<publisher>Association for Computational Linguistics</publisher>
+			<date type="published" when="2018-07">July 2018</date>
+			<biblScope unit="volume">1</biblScope>
+			<biblScope unit="page" from="664" to="674" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b48">
+	<monogr>
+		<title level="m" type="main">An end-to-end speech summarization using large language model</title>
+		<author>
+			<persName><forename type="first">Hengchao</forename><surname>Shang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zongyao</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiaxin</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shaojun</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiqiang</forename><surname>Rao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanchang</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daimeng</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Yang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2407.02005</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b49">
+	<analytic>
+		<title level="a" type="main">End-to-end speech summarization using restricted self-attention</title>
+		<author>
+			<persName><forename type="first">Roshan</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shruti</forename><surname>Palaskar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alan</forename><forename type="middle">W</forename><surname>Black</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Florian</forename><surname>Metze</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICASSP 2022 -2022 IEEE International Conference on Acoustics, Speech and Signal Processing</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="8072" to="8076" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b50">
+	<analytic>
+		<title level="a" type="main">Bass: Block-wise adaptation for speech summarization</title>
+		<author>
+			<persName><forename type="first">Roshan</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Siddhant</forename><surname>Arora</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kenneth</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shinji</forename><surname>Watanabe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rita</forename><surname>Singh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bhiksha</forename><surname>Raj</surname></persName>
+		</author>
+		<idno type="DOI">10.21437/Interspeech.2023-916</idno>
+	</analytic>
+	<monogr>
+		<title level="m">INTERSPEECH 2023</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="1454" to="1458" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b51">
+	<monogr>
+		<title level="m" type="main">SlimPajama: A 627B token cleaned and deduplicated version of RedPajama</title>
+		<author>
+			<persName><forename type="first">Daria</forename><surname>Soboleva</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Faisal</forename><surname>Al-Khateeb</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Robert</forename><surname>Myers</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><forename type="middle">R</forename><surname>Steeves</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joel</forename><surname>Hestness</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nolan</forename><surname>Dey</surname></persName>
+		</author>
+		<ptr target="https://huggingface.co/datasets/cerebras/SlimPajama-627B" />
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b52">
+	<analytic>
+		<title level="a" type="main">SALMONN: Towards generic hearing abilities for large language models</title>
+		<author>
+			<persName><forename type="first">Changli</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenyi</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guangzhi</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xianzhao</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tian</forename><surname>Tan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">M</forename><forename type="middle">A</forename><surname>Zejun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chao</forename><surname>Zhang</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=14rn7HpKVk" />
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b53">
+	<monogr>
+		<title level="m" type="main">Llama: Open and efficient foundation language models</title>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thibaut</forename><surname>Lavril</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gautier</forename><surname>Izacard</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xavier</forename><surname>Martinet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marie-Anne</forename><surname>Lachaux</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Timothée</forename><surname>Lacroix</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baptiste</forename><surname>Rozière</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naman</forename><surname>Goyal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Hambro</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Faisal</forename><surname>Azhar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aurelien</forename><surname>Rodriguez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Armand</forename><surname>Joulin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Edouard</forename><surname>Grave</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guillaume</forename><surname>Lample</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b54">
+	<analytic>
+		<title level="a" type="main">Attention is all you need</title>
+		<author>
+			<persName><forename type="first">Ashish</forename><surname>Vaswani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><forename type="middle">M</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Niki</forename><surname>Parmar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakob</forename><surname>Uszkoreit</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Llion</forename><surname>Jones</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aidan</forename><forename type="middle">N</forename><surname>Gomez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukasz</forename><surname>Kaiser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Illia</forename><surname>Polosukhin</surname></persName>
+		</author>
+		<ptr target="https://api.semanticscholar.org/CorpusID:13756489" />
+	</analytic>
+	<monogr>
+		<title level="m">Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b55">
+	<monogr>
+		<title level="m" type="main">On decoder-only architecture for speech-to-text and large language model integration</title>
+		<author>
+			<persName><forename type="first">Jian</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yashesh</forename><surname>Gaur</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhuo</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Long</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yimeng</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tianrui</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinyu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shujie</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Ren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Linquan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Wu</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2307.03917" />
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b56">
+	<analytic>
+		<title level="a" type="main">An exploratory study on long dialogue summarization: What works and what&apos;s next</title>
+		<author>
+			<persName><forename type="first">Yusen</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ansong</forename><surname>Ni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenguang</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Budhaditya</forename><surname>Deb</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Asli</forename><surname>Celikyilmaz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ahmed</forename><surname>Hassan Awadallah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dragomir</forename><surname>Radev</surname></persName>
+		</author>
+		<idno type="DOI">10.18653/v1/2021.findings-emnlp.377</idno>
+		<ptr target="https://aclanthology.org/2021.findings-emnlp.377" />
+	</analytic>
+	<monogr>
+		<title level="m">Findings of the Association for Computational Linguistics: EMNLP 2021</title>
+		<editor>
+			<persName><forename type="first">Marie-Francine</forename><surname>Moens</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Xuanjing</forename><surname>Huang</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Lucia</forename><surname>Specia</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Scott</forename><surname>Wen</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">-Tau</forename><surname>Yih</surname></persName>
+		</editor>
+		<meeting><address><addrLine>Punta Cana, Dominican Republic</addrLine></address></meeting>
+		<imprint>
+			<publisher>Association for Computational Linguistics</publisher>
+			<date type="published" when="2021-11">November 2021</date>
+			<biblScope unit="page" from="4426" to="4433" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b57">
+	<monogr>
+		<title level="m" type="main">Cobra: Extending mamba to multi-modal large language model for efficient inference</title>
+		<author>
+			<persName><forename type="first">Han</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Min</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pengxiang</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Siteng</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Donglin</forename><surname>Wang</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b58">
+	<analytic>
+		<title level="a" type="main">QMSum: A New Benchmark for Query-based Multi-domain Meeting Summarization</title>
+		<author>
+			<persName><forename type="first">Ming</forename><surname>Zhong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Da</forename><surname>Yin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ahmad</forename><surname>Zaidi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mutethia</forename><surname>Mutuma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rahul</forename><surname>Jha</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ahmed</forename><surname>Hassan Awadallah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Asli</forename><surname>Celikyilmaz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xipeng</forename><surname>Qiu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dragomir</forename><surname>Radev</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">North American Association for Computational Linguistics (NAACL)</title>
+		<imprint>
+			<biblScope unit="page">2021</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b59">
+	<monogr>
+		<title level="m" type="main">Tinyllava: A framework of small-scale large multimodal models</title>
+		<author>
+			<persName><forename type="first">Baichuan</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xi</forename><surname>Weng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junlong</forename><surname>Jia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xien</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ji</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lei</forename><surname>Huang</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b60">
+	<monogr>
+		<author>
+			<persName><forename type="first">Chenguang</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Mei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Zeng</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Mediasum</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2103.06410</idno>
+		<title level="m">A large-scale media interview dataset for dialogue summarization</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b61">
+	<monogr>
+		<title level="m" type="main">Vision mamba: Efficient visual representation learning with bidirectional state space model</title>
+		<author>
+			<persName><forename type="first">Lianghui</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bencheng</forename><surname>Liao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qian</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinlong</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenyu</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinggang</forename><surname>Wang</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

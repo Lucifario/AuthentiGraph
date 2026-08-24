@@ -8,18 +8,14 @@ GROBID_URL = "http://localhost:8070/api/processFulltextDocument"
 PDF_FILE = "QDER Document Entity Representations.pdf"
 OUTPUT_JSON = "base_graph_v2.json"
 
-
 def process_pdf_with_grobid(pdf_path):
     """Sends the PDF to the local GROBID server and returns TEI-XML."""
-
     try:
         health = requests.get("http://localhost:8070/api/isalive", timeout=3)
         if health.status_code != 200:
             raise RuntimeError("GROBID server is not alive. Run: docker run -t --rm -p 8070:8070 lfoppiano/grobid:0.8.0")
     except requests.exceptions.ConnectionError:
-        raise RuntimeError("Cannot connect to GROBID. Is it running? "
-                           "Start it with: docker run -t --rm -p 8070:8070 lfoppiano/grobid:0.8.0")
-
+        raise RuntimeError("Cannot connect to GROBID. Is it running? " "Start it with: docker run -t --rm -p 8070:8070 lfoppiano/grobid:0.8.0")
     print(f"Sending {pdf_path} to GROBID...")
     with open(pdf_path, 'rb') as f:
         files = {'input': (os.path.basename(pdf_path), f, 'application/pdf')}
@@ -29,17 +25,14 @@ def process_pdf_with_grobid(pdf_path):
             data={'consolidateHeader': '1'},
             timeout=60
         )
-
     if response.status_code != 200:
         raise Exception(f"GROBID Error: {response.status_code} - {response.text[:300]}")
-
     return response.text
 
 
 def parse_tei_xml(xml_content):
     """Parses GROBID TEI-XML into the AuthentiGraph DOM Schema."""
     soup = BeautifulSoup(xml_content, 'lxml-xml')
-
     sections = []
     bibliography = []
     hetero_edges = []
@@ -52,42 +45,32 @@ def parse_tei_xml(xml_content):
                 or bibl.get('xml:id')
             )
             raw_text = " ".join(bibl.get_text(separator=" ").split())
-
             if cite_id and raw_text:
                 bibliography.append({
                     "cite_id": f"Citation_{cite_id}",
                     "raw_text": raw_text,
                     "semantic_scholar_verified": None
                 })
-
     print("Extracting Sections and Paragraph Blocks...")
     body = soup.find('body')
-
     if not body:
-        print("  WARNING: No <body> found in GROBID output. "
-              "PDF may be scanned/image-only or parsing failed.")
+        print("  WARNING: No <body> found in GROBID output. " "PDF may be scanned/image-only or parsing failed.")
         return sections, bibliography, hetero_edges
-
     for div in body.find_all('div', recursive=False):
         head = div.find('head')
         section_title = head.get_text(strip=True) if head else "Untitled Section"
         sec_id = f"sec_{str(uuid.uuid4())[:8]}"
-
         current_section = {
             "section_id": sec_id,
             "title": section_title,
             "blocks": []
         }
-
         for p in div.find_all('p'):
             paragraph_text = p.get_text(separator=" ", strip=True)
-
             if len(paragraph_text) < 20:
                 continue
-
             block_id = f"b_{str(uuid.uuid4())[:8]}"
             inline_citations = []
-
             for ref in p.find_all('ref', type='bibr'):
                 target = ref.get('target')
                 if target:
@@ -98,30 +81,24 @@ def parse_tei_xml(xml_content):
                         "relation": "CITES_INLINE",
                         "target": target_id
                     })
-
             current_section["blocks"].append({
                 "block_id": block_id,
                 "type": "paragraph",
                 "text": paragraph_text,
                 "extracted_citations": inline_citations
             })
-
             hetero_edges.append({
                 "source": sec_id,
                 "relation": "CONTAINS_BLOCK",
                 "target": block_id
             })
-
         if current_section["blocks"]:
             sections.append(current_section)
-
     return sections, bibliography, hetero_edges
-
 
 def main():
     xml_content = process_pdf_with_grobid(PDF_FILE)
     sections, bibliography, hetero_edges = parse_tei_xml(xml_content)
-
     paper_graph = {
         "paper_metadata": {
             "paper_id": os.path.basename(PDF_FILE),
@@ -133,14 +110,10 @@ def main():
         },
         "heterogeneous_edges": hetero_edges
     }
-
     with open(OUTPUT_JSON, "w") as f:
         json.dump(paper_graph, f, indent=4)
 
-    print(f"\nDone. {len(sections)} sections | "
-          f"{len(bibliography)} citations | "
-          f"{len(hetero_edges)} edges -> {OUTPUT_JSON}")
-
+    print(f"\nDone. {len(sections)} sections | " f"{len(bibliography)} citations | " f"{len(hetero_edges)} edges -> {OUTPUT_JSON}")
 
 if __name__ == "__main__":
     main()

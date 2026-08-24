@@ -1,0 +1,2279 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 RLEF: GROUNDING CODE LLMS IN EXECUTION FEEDBACK WITH REINFORCEMENT LEARNING</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 RLEF: GROUNDING CODE LLMS IN EXECUTION FEEDBACK WITH REINFORCEMENT LEARNING</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">D2E82D422D3349DB7B5C3F3CF42C6BC7</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:11+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Large language models (LLMs) deployed as agents solve user-specified tasks over multiple steps while keeping the required manual engagement to a minimum. Crucially, such LLMs need to ground their generations in any feedback obtained to reliably achieve desired outcomes. We propose an end-to-end reinforcement learning method for teaching models to leverage execution feedback in the realm of code synthesis, where state-of-the-art LLMs struggle to improve code iteratively compared to independent sampling. We benchmark on competitive programming tasks, where we achieve new start-of-the art results with both small (8B parameters) and large (70B) models while reducing the amount of samples required by an order of magnitude. Our analysis of inference-time behavior demonstrates that our method produces LLMs that effectively leverage automatic feedback over multiple steps. 3 10 50 100 300 Sample Budget (k) 10 20 30 40 50 60 Solve Rate 10@k GPT-3.5 GPT-4 AlphaCodium GPT-3.5 AlphaCodium GPT-4 AlphaCode 2 (est.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>The consistent increase in capabilities of Large Language Models (LLMs) has prompted researchers and developers to benchmark and deploy them in increasingly complex environments <ref type="bibr">(Brown et al., 2020;</ref><ref type="bibr">OpenAI, 2023;</ref><ref type="bibr" target="#b0">AI @ Meta, 2024</ref>). An emerging research direction is to employ LLMs as agents to solve tasks in multiple steps with little to no human oversight, querying external computation or data sources when needed or as dictated by manual scaffolding <ref type="bibr" target="#b31">(Schick et al., 2023;</ref><ref type="bibr" target="#b14">Kapoor et al., 2024)</ref>. For example, such autonomous use of LLMs is of interest for ensuring accurate answers to user queries with up-to-date information <ref type="bibr" target="#b23">(Mialon et al., 2024)</ref>, interaction with websites <ref type="bibr" target="#b42">(Yao et al., 2022)</ref> or generating code to implement software features from high-level descriptions <ref type="bibr" target="#b41">(Yang et al., 2024)</ref>.</p><p>We posit that any decision-making agent offering a natural language interface has to possess two skills. First, the ability to accurately deduce a user's intent when prompted; for LLMs, this is typically achieved by fine-tuning to follow instructions according to user preferences <ref type="bibr" target="#b26">(Ouyang et al., 2022;</ref><ref type="bibr" target="#b28">Rafailov et al., 2023)</ref>. Second, feedback on intermediate results of the agent's actions has to be taken into account to arrive at the desired outcome. For example, a web page containing a necessary bit of information might have gone offline, requiring another search engine query. In the context of code generation, feedback can provide information about implementation bugs as well as Figure <ref type="figure">1</ref>: Solve rates of Llama 3.1 Models after RLEF training on CodeContests, compared to previously reported results across sampling budgets (log scale).</p><p>Under review as a conference paper at ICLR 2025 Figure <ref type="figure">2</ref>: Left: Overview of reinforcement learning with execution feedback (RLEF). The LLM is repeatedly prompted to implement code according to a problem description. Each attempt is evaluated on a public test set; upon failure, feedback is inserted into the conversation. If public tests are passing, or a specified turn limit is reached, execution on additional, private tests determines the reward signal. The model is then updated to optimize the reward with PPO. Right: Example dialog with two model responses. Execution feedback hints at an inefficient first solution, to which the model responds to utilizing a cache. The code passing the public test sets will be evaluated on the full test set. constraints that are inefficient or cumbersome to specify in full detail, e.g., software and hardware platform details or library dependencies. Intermediate feedback is therefore crucial to ground LLM generations in the concrete situations encountered at inference time.</p><p>In this work, we aim to endow pre-trained LLMs with the aforementioned skills, task alignment and grounding in inference-time feedback, in the domain of code synthesis from natural language descriptions <ref type="bibr" target="#b5">(Chen et al., 2021;</ref><ref type="bibr" target="#b30">Rozière et al., 2023)</ref>. Here, feedback is naturally provided as the result of the execution of generated code in the form of error messages and unit test results. However, to date, utilizing such feedback for code generation with LLMs has failed to yield substantial improvements when taking computational demands into account; indeed, obtaining samples independently often results in higher accuracy for a fixed inference budget <ref type="bibr" target="#b14">(Kapoor et al., 2024;</ref><ref type="bibr" target="#b39">Xia et al., 2024)</ref>. As a test-bed to investigate and improve grounding in execution feedback, we propose to frame code generation as an iterative task, repeatedly asking an LLM to produce code according to a provided natural language description (Fig. <ref type="figure">2</ref>). After each generation, code is evaluated on example test cases and the resulting feedback is provided as additional context for subsequent attempts. We thus obtain an interactive environment where actions correspond to code and observations correspond to execution feedback. Importantly, such a framing permits end-to-end optimization with reinforcement learning (RL) algorithms to maximize a reward signal -here, a binary reward based on whether the final code solution passes a set of held-out test cases.</p><p>We benchmark our training method incorporating repeated code actions and execution feedback in a reinforcement learning context (RLEF) on CodeContests <ref type="bibr" target="#b19">(Li et al., 2022)</ref>, a challenging competitive programming benchmark. Starting from Llama 3.1 models (AI @ Meta, 2024), we achieve substantial performance improvements, surpassing previous state-of-the-art results while reducing the amount of generations required by an order of magnitude (Fig. <ref type="figure">1</ref>). Our analysis shows that RLEF training unlocks the capability to leverage inference-time machine feedback, rendering LLMs effective in iterative, multi-turn scenarios. Our improvements from RLEF on CodeContests further generalize to HumanEval+ and MBPP+, two popular benchmarks for code synthesis, and to increased sample budgets compared to training time.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">METHOD</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.1">ITERATIVE CODE SYNTHESIS</head><p>We structure the task of code synthesis as a multi-turn conversation in which an LLM is repeatedly prompted to generate a code solution to a natural language problem description. After each solution, we provide an automatically generated response with results obtained by executing the solution's code against test cases. This setup is applicable to language models tuned for the common usecase of interacting with users in a chat setting, and follows previous work on self-repair for code generation <ref type="bibr" target="#b34">(Shinn et al., 2023;</ref><ref type="bibr" target="#b24">Olausson et al., 2024)</ref>.</p><p>Crucially, we utilize two different sets of test cases: a public test yields execution feedback that can be accessed during repeated attempts and forms the basis of selecting a final solution, whereas a private test set ultimately determines the correctness of the final solution. Separate test sets provide two main benefits. First, if test inputs and outputs are fixed, held-out tests guard against shortcuts during the optimization procedure in which an LLM can copy expected test outputs in subsequent answers, based on execution feedback. Second, running a full test suite may be computationally demanding and a limited set of public tests can accelerate the iterative code generation procedure. It may however be desirable to maximize test coverage for execution feedback at inference time, and we verify that this can indeed improve performance (Appendix B.2).</p><p>Our conversation flow for code generation is depicted in Fig. <ref type="figure">2</ref>. Concretely, we start the dialog with the problem description and query the LLM for an initial solution. The solution is verified against the public test set, which yields results in the form of passed and failed test cases, as well as potential syntax or runtime errors. If any public test fails, this execution feedback is formatted and appended to the dialog The LLM is then queried for an updated code solution, with the original problem text, previous solutions and their respective feedback provided in the prompt. If the solution passes all public tests, or a specified turn limit is reached, it is considered to be final and will be submitted for evaluation on the private test set. The kind reader is referred to Appendix C for a listing of our prompt and execution feedback templates.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.2">REINFORCEMENT LEARNING WITH EXECUTION FEEDBACK</head><p>The iterative code synthesis described in the previous section can be understood as a Markov Decision Process (MDP), and the language model as a policy <ref type="bibr" target="#b36">(Sutton &amp; Barto, 2018)</ref>. For generality, we assume a partially observable MDP as our reward function utilizes a held-out, private test set which is not accessible to the policy (unless an exact textual representation of the desired program behavior is provided in the problem description). Observations and actions are provided as tokenized text sequences. Concretely, the initial observation o 0 is the problem description and actions a t at each step t are textual responses. Successive observations o t consist of past observations and actions, including execution feedback obtained by evaluating the previous action a t-1 on public test cases. Episodes terminate when public test evaluation succeeds or a specified step limit is reached. At the end of an episode, a scalar reward is provided corresponding to whether all public and private tests are passing. We do not use reward discounting (i.e., γ = 1).</p><p>For optimizing a policy in the above environment we employ Proximal Policy Optimization (PPO), a common choice for fine-tuning large language models <ref type="bibr" target="#b32">(Schulman et al., 2017;</ref><ref type="bibr">Ziegler et al., 2020;</ref><ref type="bibr" target="#b26">Ouyang et al., 2022)</ref>. Following previous work, we include a KL penalty in our reward signal, acting both as an entropy bonus and as regularization towards the distribution of the LLMs we start from. In initial experiments we found that a possible failure mode concerns the generation of invalid code in non-final responses, which we address by providing a small penalty for invalid responses. Denoting the policy to be optimized with π and the initial policy with ρ, and abbreviating previous observations and actions with c t = o 0 , a 0 , o 1 , a 1 , . . . , o t our reward function at step t is</p><formula xml:id="formula_0">R(s t , a t ) = r(s t , a t ) -β log π(a t |c t ) ρ(a t |c t ) , r(s t , a t ) =    1,</formula><p>if end of episode and all tests pass -1, if end of episode and any test fails -0.2, if a t does not contain valid code with a constant β trading off between task reward and KL maximization. For PPO, we compute policy gradients by incorporating a concurrently learned value function as a baseline, i.e., we train the policy to maximize the advantage</p><formula xml:id="formula_1">A t = -V (c t ) + T i=t R(s i , a i ); see Appendix A.1.</formula><p>We note that while the above MDP considers full responses as actions, the underlying policy and value functions are implemented as language models outputting single tokens. Selecting a suitable action space for optimization hence requires consideration in our setup, and a suitable choice may depend on the concrete task at hand. We propose to model the policy at the token level while learning a value function for whole turns; compared to optimizing both models at either the turn or token level, this hybrid approach worked best in our early experiments. Hence, we predict the value of a response a t from the last token of its respective prompt, and we use a single advantage value for each token action within a response. Our response-based value estimation is closely related to <ref type="bibr" target="#b46">Zhou et al. (2024)</ref>; however, we do not train an additional Q-function. For the KL penalty, we found it beneficial to compute the probabilities of responses π(a t |c t ) as the geometric mean rather than product of token probabilities. This counteracts a possibly detrimental bias towards shorter generations, in particular for non-final responses.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">EXPERIMENTAL RESULTS</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.1">SETUP</head><p>We perform experiments on the CodeContests benchmark introduced by <ref type="bibr" target="#b19">Li et al. (2022)</ref> which requires generating a code solution to a problem specified in natural language along with a textual description of public test cases. Problems are of high difficulty and used in human competitive programming with a focus on algorithms, data structures and runtime efficiency. The correctness of solutions is evaluated with private tests that are hidden from contestants, which we implement in our setup by presenting feedback from public tests only. The CodeContests dataset consists of a training set and two test sets, "valid" and "test", consisting of 117 and 165 problems, respectively; we use the former for model and hyperparameter selection. We optimize our models on the training set, from which we discard 115 of the 13,328 problems due to missing public test cases. We prompt and train all models to output Python 3 code.</p><p>The Llama 3 family of models (AI @ Meta, 2024) comprises our initial policies, specifically the Instruct 8B and 70B parameter models of the 3.0 and 3.1 release. These models exhibit strong code generation performance out of the box and are able to follow instructions in the prompt, alleviating the need for an initial fine-tuning stage prior to RL training. During training and for evaluations, unless noted, we set the turn limit to allow for 3 LLM attempts at solving each problem. We perform 12,000 and 8,000 updates to the 8B and 70B models, respectively, and select checkpoints based on valid set performance. Hyper-parameters and further experimental details are provided in Appendix A.</p><p>We follow <ref type="bibr" target="#b19">Li et al. (2022)</ref> in reporting results as n@k average solve rates. The n@k metric represents the expectation that any of n solutions, selected from k samples in total, is correct, i.e., passes all tests. In our multi-turn setup, each turn counts as a sample. This allows for fair comparisons with respect to sample budgets, which is particularly relevant when employing large LLMs with high inference cost in agentic scaffoldings <ref type="bibr" target="#b14">(Kapoor et al., 2024)</ref> <ref type="foot" target="#foot_0">1</ref> .</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">MAIN RESULTS</head><p>In Table <ref type="table" target="#tab_1">1</ref> we list our solve rates on the CodeContest valid and test sets for iterative code generation with up to three turns, along with previously reported results. When sampling from our models, we use temperatures 0.2 for 1@3 and 1.0 for 10@100, and nucleus sampling with top-p 0.95 in all cases <ref type="bibr" target="#b11">(Holtzman et al., 2020)</ref>. Each solve rate is estimated on 200 rollouts, using the estimator described in <ref type="bibr" target="#b19">(Li et al., 2022)</ref>. We compare against AlphaCode <ref type="bibr" target="#b19">(Li et al., 2022)</ref> and PPO with rewards from test execution on the Code Llama 34B model from <ref type="bibr" target="#b40">Xu et al. (2024)</ref>, which both report results with a large number of samples. AlphaCodium <ref type="bibr" target="#b29">(Ridnik et al., 2024) and</ref><ref type="bibr" target="#b12">MapCoder (Islam et al., 2024)</ref> are high-performing agentic frameworks built on top of the proprietary GPT models and combine chain-of-thought prompting, code execution, program repair, and, in the case of AlphaCodium, automatic test generation. The sample budget k in n@k refers to the number of LLM responses, e.g., 1@3 for our results corresponds to a single rollout with up to three model responses. Best results per sample budget (up to 10, up to 100) in bold. The 70B model obtains state-of-the-art results after RLEF, and significantly outperforms AlphaCodium and MapCoder generally, and on the test set with a fraction of the samples. The RLEF-trained 8B model outperforms AlphaCodium with 100 samples and MapCoder (gpt-3.5-turbo) with 3 samples.</p><p>With RLEF training we improve markedly on the original Llama 3.1 models and outperform prior works by a significant margin. Notably, on the test set the 70B model beats AlphaCodium with GPT-4, the previous state-of-the-art, with a single rollout compared to 5 solutions from 100 samples (38.0 and 29). Likewise, the 8B model with RLEF is slightly ahead compared to the similar-sized AlphaCode 9B model (16.0 and 13.3), but with a sample budget of 3 in our case and 1,000 for AlphaCode. While we cannot compare directly to the more recent AlphaCode 2 (AlphaCode Team, 2023), a performance estimate of 34.2 on the valid set for 10@100 puts our 70B model ahead (37.5) with just 3 samples<ref type="foot" target="#foot_1">2</ref> . When considering a larger budget of 100 samples -corresponding to 33 rollouts -the stock 70B model beats all previously reported results, including AlphaCodium on the valid set. With RLEF training, we obtain further improvements to 54.5 on the valid and test set. The relative improvements over the initial models, while still significant, are reduced in the 10@100 setting as compared to the 1@3 setting. <ref type="bibr" target="#b15">Kirk et al. (2024)</ref> observe that RL training of LLMs can reduce the diversity of outputs and we interpret our results as further evidence of their hypothesis.</p><p>Table <ref type="table" target="#tab_1">1</ref> also highlights that the released Llama 3.1 models offer competitive performance on Code-Contests from the start, which we attribute to a focus on coding capabilities during instruction tuning (AI @ Meta, 2024). However, our RLEF method is also highly effective on the previously released 3.0 8B model, improving 1@3 solve rates from 4.1 to 12.5 and 3.2 to 12.1 on the valid and test set, respectively. Thus, RLEF may be useful as a partial substitute for instruction tuning for tasks where automatic evaluation is possible.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.3">INFERENCE-TIME BEHAVIOR</head><p>In Table <ref type="table" target="#tab_2">2</ref> we first take a closer look at single-and multi-turn performance with a fixed budget of 3 LLM generations (1@3). This corresponds to our iterative setup with up to three model responses, or three independent responses for single-turn results. We further consider generalization to two popular code generation benchmarks, HumanEval+ and MBPP+ <ref type="bibr">(Liu et al., 2023b)</ref> we modify to match our iterative code generation setup with "base" tests for inference-time execution feedback and "plus" tests for solve rate estimation (see Appendix C.4 for details). Our results demonstrate that, when considering a fixed sample budget, base models rarely benefit from access to faulty solutions and execution feedback in the multi-turn code generation setup. This also applies to gpt-4o-2024-05-13, which shows stronger performance when sampling solutions independently on CodeContests and HumanEval+. After RLEF training, the 8B and 70B Llama 3.1 model both benefit from execution feedback and can therefore achieve larger gains on top of improved singleturn scores, with the exception of the 8B model on CodeContests and MBPP+ where single-turn performance drops. While multi-turn gains from RLEF are most pronounced on CodeContests, the training domain of our models, we also observe notable improvements on HumanEval+ and MBPP+.</p><p>Next, we seek to determine where the gains of RLEF training stem from. Based on the improved single-turn results in Table <ref type="table" target="#tab_2">2</ref> we hypothesize that, for the 70B model, these are partly due to training on the specific domain of competitive programming questions. More importantly, higher scores in the iterative setting for both the 8B and 70B model could be attributed to either an increased capability of sampling diverse solutions within a rollout, or more targeted self-repair based on execution feedback. For probing the sensitivity of our models to the observed feedback, we perform inference-time ablations with random execution feedback. We implement random feedback by executing a faulty solution to an unrelated problem, but still end the dialog if the current solution passes public tests (details in Appendix C.2).</p><p>In Fig. <ref type="figure">3</ref> we consider errors on public tests (to which the execution feedback relates) over 20 rollouts on the valid and test set combined. We observe that after RLEF training, both the 8B (top row) and Figure <ref type="figure">4</ref>: (a) Pass@1 and pass@10 across turn limits with RLEF-trained models, providing either true or random execution feedback (temperature 0.2). With random feedback pass@1 is reduced while pass@10 suffers only slightly, indicating that programs can be repaired less consistently. (b) Impact of turn limits on 10@k solve rates per sample budget (top: 8B model, bottom: 70B model) with temperature 1.0. With RLEF, iterative code generation can leverage up to 5 turns to achieve compute-optimal performance.</p><p>70B (bottom row) models produce fewer wrong outputs in their initial response but are more prone to exceeding the allocated time limit. In subsequent responses, recovery from all error categories is significantly improved. With random feedback, however, we see a clear impairment of self-repairs, demonstrating that RLEF allows LLMs to effectively leverage the provided feedback. We further gauge changes from one response to the next by computing the a character n-gram F-Score <ref type="bibr" target="#b27">(Popović, 2015, chrF)</ref> among successive codes (Fig. <ref type="figure">3</ref>, right). This underscores a shortcoming of the Instruct models without RLEF in that they perform only minimal code edits; indeed, we observe that they frequently output the same code solution despite inline feedback pointing out errors.</p><p>The analysis of Fig. <ref type="figure">3</ref> above suggests that, with RLEF, samples within a rollout are of higher diversity (less similar codes) but that edits are also targeted in that random execution feedback results in fewer successful repairs. This finding is echoed in Fig. <ref type="figure">4a</ref>, in which we compare models with true and random feedback across different turn limits. Here, we compare pass@1 and pass@10 metrics, irrespective of different sample budgets due to varying turn limits <ref type="bibr" target="#b5">(Chen et al., 2021)</ref>. While pass@1 captures the precision with which we arrive at a correct final solution, pass@10 reflects the ability to recall a correct solution (i.e., whether any of 10 solutions passes the private tests). On both valid and test sets, random feedback results in a drop in pass@1 which is amplified as the turn limit is increased. This provides further evidence for less targeted repair capabilities with random feedback, as programs can be repaired less reliably. Notably, with ground truth feedback, the probability of producing a correct solution keeps increasing with higher turn limits. For pass@10, the difference between true and random execution feedback is less pronounced. As this metric can be optimized by sampling many diverse candidate solutions within a dialog, these results indicate that with random feedback, our models resort to sampling a succession of diverse, potentially correct solutions.</p><p>Finally, we evaluate the generalization across turn limits with respect to a given sample budget. In Fig. <ref type="figure">4b</ref>, we perform rollouts with temperature 1.0 to emphasize performance at higher sample budgets by increasing the diversity of generations. We compute 10@k solve rates by distributing k samples equally across rollouts with different turn limits. For the 8B model (top row), prior to RLEF training, best performance can be obtained with independent samples (1 turn), with the exception of the test set above 30 samples. The initial 70B model performs better with 3 or 5 turns, although, for small budgets, single turn performance is competitive. After RLEF, we observe that 3, 5 and 10 turns yield a consistent improvement over independent sampling, with best performance obtained with 5 turns. In all cases, increasing the turn limit to 10 provides no benefits under a fixed sample budget.</p><p>Under review as a conference paper at ICLR 2025   <ref type="table" target="#tab_4">3a</ref> show that fewshot prompting is detrimental to the instruction-tuned models. In Appendix B.1 we report few-shot 1@3 solve rates for pre-trained models and find that they achieve lower performance compared to zero-shot prompting for instruction models (1.2 and 1.8 for 8B, 4.6 and 5.8 for 70B on valid and test set, respectively). Supervised fine-tuning improves Instruct model performance on the validation set only; we do not see improvements on the test set. For pre-trained models, we see improvements from SFT but lower scores compared to instruction-tuned models (Appendix B.1). With RLEF we obtain significantly higher solve rates compared to SFT models, underscoring the efficacy of our RL training loop.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Model</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.4.2">SINGLE-TURN TRAINING</head><p>In Table <ref type="table" target="#tab_4">3b</ref> we compare our iterative code generation setup to traditional, single-turn generation where the model is not presented with inference-time feedback. We use the same training loop for single generations, albeit without the penalty for invalid code (Section 2.2) as this is subsumed by the reward signal for incorrect solutions. For Llama 3.1 Instruct 8B, single-turn training (ST) hurts performance on the test set. The 70B model benefits from single-turn training and improves over multi-turn SFT results in Table <ref type="table" target="#tab_4">3a</ref>. Moreover, we observe transfer in that applying the single-turn model in a multi-turn setting improves 1@3 solve rates. We attribute this to the existent but comparabily weak multi-turn capabilities of the vanilla 70B Instruct model. Overall, we see strongest performance with the RLEF method employing multiple turns at training and inference time.</p><p>Further ablations can be found in the appendix. In Appendix B.3 we evaluate the effect of training a dedicated repair model on outputs of the single-turn 8B training run in Table <ref type="table" target="#tab_4">3b</ref>, similar to <ref type="bibr" target="#b17">(Le et al., 2022)</ref>. Together, the single-turn and repair model obtain 1@3 solve rates of 14.8 on the validation set and 12.6 on the test set; an improvement over the single-turn model alone (10.2 and 10.9) but significantly below the corresponding multi-turn model (17.2 and 16.0). In Appendix B.4 we show that withholding public test execution feedback during training results in significantly worse performance. Finally, in Appendix B.5 we experimentally validate the design choice of a turn-level value function (Section 2.2).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">RELATED WORK</head><p>Generating program code with LLMs to automate and assist software development has been studied extensively in recent years, with evaluations predominantly focusing on code synthesis from natural language descriptions <ref type="bibr" target="#b7">(Clement et al., 2020;</ref><ref type="bibr" target="#b5">Chen et al., 2021;</ref><ref type="bibr" target="#b1">Austin et al., 2021)</ref>. A major boost in performance is obtained by including large quantities of source code in pre-training and selecting or generating suitable data for subsequent fine-tuning for instruction following <ref type="bibr" target="#b18">(Li et al., 2023;</ref><ref type="bibr" target="#b10">Gunasekar et al., 2023;</ref><ref type="bibr" target="#b30">Rozière et al., 2023;</ref><ref type="bibr" target="#b0">AI @ Meta, 2024)</ref>.</p><p>More recently, several works investigated prompting and flow engineering techniques to improve performance at inference time, including the verification of generated code via compilation and execution, followed by re-prompting. Recent works highlight further issues with scaffolds like AlphaCodium or MapCoder. <ref type="bibr" target="#b24">Olausson et al. (2024)</ref> show that sampling code solutions independently is competitive to repairing faulty code, that large models are required to provide effective feedback on errors, and that multiple rounds of repair are not effective. <ref type="bibr" target="#b14">Kapoor et al. (2024)</ref> focus on inference cost and demonstrate that independent sampling beats the approaches from Shinn et al. ( <ref type="formula">2023</ref>) and <ref type="bibr" target="#b45">Zhong et al. (2024)</ref> when considering equal sampling budgets. With our method, the self-repair capabilities of LLMs can be dramatically enhanced, resulting in superior performance of iterative code generation for both small and large sample budgets. At the same time, we propose to trade complex, domain-specific prompt engineering and scaffolding for domain-specific fine-tuning.</p><p>Fine-tuning large language models with reinforcement learning is a popular method for aligning their output to user preferences <ref type="bibr">(Ziegler et al., 2020;</ref><ref type="bibr" target="#b37">Touvron et al., 2023;</ref><ref type="bibr">OpenAI, 2023;</ref><ref type="bibr" target="#b8">DeepSeek-AI et al., 2024;</ref><ref type="bibr" target="#b0">AI @ Meta, 2024)</ref>. Here, the learning signal is provided by special-purpose reward models. For code synthesis, however, rewards can be determined by executing LLM generations against available test cases ( <ref type="bibr" target="#b17">Le et al., 2022;</ref><ref type="bibr" target="#b35">Shojaee et al., 2023;</ref><ref type="bibr" target="#b9">Dou et al., 2024;</ref><ref type="bibr" target="#b43">Yu et al., 2024)</ref>. <ref type="bibr" target="#b17">Le et al. (2022)</ref> pre-train an LLM for code generation and subsequently fine-tune it with both policy gradients and next-token loss on rewards from execution. From the rollouts obtained during finetuning, they train further models for predicting test outcome labels and for mapping incorrect to ground truth solutions, which allows for inference-time code correct based on test results ("critic sampling"), albeit without explicitly presenting the output from execution. Subsequently, <ref type="bibr">Liu et al. (2023a)</ref> extends this work with an extended, fine-grained reward function. Finally, <ref type="bibr" target="#b40">Xu et al. (2024)</ref> fine-tune a stronger, code-specific LLM in a simpler setup with a binary reward from unit tests and observe substantial improvements from RL on the difficult competitive programming benchmark we consider here. We likewise propose a simple setting without extra inference scaffolding or usage of ground truth solutions. Crucially, we expand the natural-language-to-code setting to an iterative environment where execution feedback is not only provided as a scalar reward but also in textual form. This allows us to acquire both code synthesis and code repair capabilties with a single model, and to shift focus from large-sample inference regimes to obtaining high accuracy with low sample budgets.</p><p>Concurrently to our work, <ref type="bibr" target="#b16">Kumar et al. (2024)</ref> propose a two-stage RL method (SCoRe) to improve the self-correction capabilities of LLMs and train them to output two successive solutions. In contrast to our method, SCoRe does not leverage execution feedback at inference time and instead asks the model to reconsider its initial solution. While this approach allows for potential applications to domains where automatic feedback is not available, it cannot benefit from the information provided in the feedback message. Furthermore, inference-time feedback can help the model generalize to new environments after training. Finally, Chen et al. (2024a) address code generation with human feedback and develop an appropriate supervised fine-tuning strategy based on training a separate code repair model. In our work, we effectively leverage automatically generated feedback, formatted in natural language, with a single model only.</p><p>Past work on applying reinforcement learning to LLMs on longer-horizon decision-making tasks placed an emphasis on acquiring the necessary grounding in the environment. <ref type="bibr" target="#b3">Carta et al. (2023)</ref> report that RL tuning with PPO <ref type="bibr" target="#b32">(Schulman et al., 2017)</ref> is superior to supervised training for grounding in text-based navigation games as measured by successful task completions. <ref type="bibr" target="#b46">Zhou et al. (2024)</ref> propose a family of RL algorithms for LLMs and test them in text games (versus an oracle LLM) and for buying produces using a simplified web shop API, and <ref type="bibr" target="#b44">Zhai et al. (2024)</ref> tackle environments with visual observations, adapting the parameters of a pre-trained vision LLM. While our work follows similar motivations, we address a fundamentally different domain -code synthesiswhich features a significantly larger action space compared to previous work, i.e., the space of valid Python programs.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">CONCLUSION</head><p>In this work, we proposed reinforcement learning from execution feedback (RLEF), a fine-tuning method for LLMs that endows them with a crucial capability for autonomous operation: grounding future generations in environment feedback. We applied RLEF to iterative code synthesis and obtained substantial improvements in solve rates on the CodeContests competitive programming benchmark while reducing the required sample budget for inference. The RLEF-trained models further generalize to increased turn limits and to HumanEval+ and MBPP+, two popular code generation benchmarks that exhibit simpler programming questions and different execution feedback formatting. Our in-depth analysis revealed that, while an increase in correct first-turn generations and in the diversity of successive generations offers a major contribution of performance, our models also meaningfully take execution feedback into account and resolve errors over multiple turns.</p><p>Limitations. While our results demonstrate effective usage of inference-time feedback, the code synthesis task we consider is limited to improving a single solution to a given problem. Generalizing our method to environments with larger tasks that require decomposition, either via manual scaffolding or, eventually, in a self-directed manner, remains the subject of further research. Iterating on the execution results of unit tests naturally requires test cases, which may not be readily available. We regard a potential combination with automatic unit test generation <ref type="bibr" target="#b38">(Watson et al., 2020;</ref><ref type="bibr" target="#b13">Jain et al., 2024)</ref> as an interesting avenue for further experiments.</p><p>Broader Impact. Successful grounding of LLMs for code generation execution feedback will amplify their utility when applied to impactful tasks such as assisting software development and performing quality control. In general, however, increasing the capabilities of LLMs, now widely deployed in a range of applications, requires quality control and guard-railing to promote safety and minimize potentially harmful output. We limit our study to the generation of source code, where we confine the execution of model-generated output to local sandboxes. We believe the framework of <ref type="bibr" target="#b33">Shavit et al. (2023)</ref> regarding the governance of AI agents to be a useful resource for practitioners.</p><p>Reproducibility Statement. We perform all experiments with publicly available models and datasets. Section 3.1 describes the dataset and pre-processing steps, the exact Llama model versions used, and details our evaluation metric. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A EXPERIMENTAL DETAILS</head><p>A.1 RLEF</p><p>We initialize separate policy and value function networks from pre-trained and instruction-tuned LLMs as indicated in the respective experiments; for the value function, we replace the output layer with a randomly initialized linear projection. For PPO, we use a AdamW <ref type="bibr" target="#b22">(Loshchilov &amp; Hutter, 2019)</ref> with a learning rate of 2e -7 , weight decay of 0.1, and a linear warm-up over 50 steps. We set the KL regularization factor β of the reward term to 0.05 (Section 2.2). All models are trained with an online, asynchronous training infrastructure that decouples inference and optimization. We incorporate importance sampling in PPO's clipped surrogate objective <ref type="bibr">(Schulman et al., 2017, Eq.7)</ref>:</p><formula xml:id="formula_2">r t (θ) = π θ (a t |c t ) π θold (a t |c t ) stop grad min π θ (a t |c t ) π b (a t |c t ) , 1 L π (θ) = Êt min r t (θ) Ât , clip (r t (θ), 1 -ϵ, 1 + ϵ) Ât</formula><p>for model parameters θ, normalized advantage Ât , and the behavior policy π b . We set ϵ = 0.2.</p><p>For optimizing the value function, we use a clipped value loss. With value model parameters ψ and reward function R(s t , a t ) (see Section 2.2) we have</p><formula xml:id="formula_3">R t = T i=t γ i-t R(s i , a i ) L V (ψ) = Êt 1 2 max (V ψ (c t ) -R t ) 2 , (clip (V ψ (c t ), V ψold (c t ) -α, V ψold (c t ) + α) -R t ) 2</formula><p>where we set the discount factor γ to 1 and the value clipping threshold α to 0.2.</p><p>During training, we perform inference with a temperature of 1.0; we use neither nucleus (top-p) nor top-k sampling. We collect 1024 rollouts and perform 4 updates on 256 sequences each. Models are evaluated every 800 updates, and we select the final model based on validation set performance. We train our models on NVidia H100 GPUs; a training run takes approx. 20 wall time hours. With the above parameters we use 288 (128 for traning, 160 for inference) and 2304 (1024 for training, 1280 for inference) GPUs for 8B and 70B models, respectively.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.2 CODE EXECUTION</head><p>We evaluate candidate solutions with the accompanying code-base of <ref type="bibr" target="#b19">Li et al. (2022)</ref> <ref type="foot" target="#foot_3">3</ref> using Python 3.10. All problems in the validation and test set specify a memory limit, and only a few problems define a time limit. If specified, we apply these limits for RLEF training and evaluations; otherwise, we use a 1GB memory limit and maximum wall clock time of 10 seconds per test case.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A.3 SUPERVISED FINE-TUNING</head><p>We perform supervised fine-tuning (SFT) for the ablations in Section 3.4.1. In order to assemble a training dataset, we perform iterative code generation with our proposed setup on the CodeContests training set with the Llama 3.1 70B Instruct model. We set top-p to 0.95 and sample a temperature for each response in U(0.1, 1.0). For each problem in the training set we collect 100 multi-turn rollouts and obtain 313,639 successful trajectories.</p><p>We fine-tune models for next-token prediction, computing losses on the last response only (i.e., on responses passing both public and private tests); this produced slightly better models compared to training on all responses. We sweep over learning rates 5e -6 and 2e -6 , and 2 and 3 epochs with a batch size of 64 and sequence length 8192. A linear warmup is performed over 10 steps, and learning rates are annealed according to a cosine schedule. Weight decay is set to 0.  </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B ADDITIONAL EXPERIMENTAL RESULTS</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.1 PRE-TRAINED MODELS</head><p>In Table <ref type="table" target="#tab_8">4a</ref> we list solve rates for few-shot prompting and supervised fine-tuning from pre-trained Llama 3.1 models. We observe significantly lower performance compared to the Instruct models in all cases ( During the RL training procedure, we collect all generations that do not pass the public unit tests.</p><p>For the training duration of 12,000 gradient steps, this amounts to 1.48M samples. Next we construct training dialogues with the original prompt (as described in Appendix C.1), the wrong generation, and a random correct generation for the respective problem from the CodeContest training set. We apply additional processing to the CodeContest solutions by making sure they do indeed pass the provided unit tests and unifying their indentation. We then train repair models via supervised finetuning of Llama 3.1 8B Instruct, sweeping over learning rates 5e -6 , 2e -6 , and 1e -6 , and 1 or 2 epochs with a batch size of 64 and a sequence length of 8192.</p><p>For evaluations, we estimate 1@3 solve rates by generating an initial program with the RL-trained model followed by up to two independent samples from the repair model. Similar to our main RLEF setting, we refrain from (further) repair if the latest solution passes the public tests. We evaluate Under review as a conference paper at ICLR 2025 all models from the sweep in intervals of 400 gradient steps and select the best checkpoint based on validation set performance. This checkpoint achieves, in combination with the single-turn RL model, a 1@3 solve rate of 14.8 on the validation set and 12.6 on the test set, which is a significant increase over the single-turn RL model alone (10.2 and 10.9, respectively; We validate our setup consisting of inline execution feedback and early stopping based on public tests (Section 2.1) with an ablation where we withhold information from public tests. Concretely, we remove execution feedback from the prompt for subsequent solutions (Appendix C.1), starting directly with "Give it another try". We always ask the model for two follow-up solutions this way (i.e., for a total of three solutions). We do keep our reward definition from Section 2.2 but do not end episodes when public tests are passing.</p><p>The resulting model, starting from Llama 3.1 8B Instruct, obtains a 1@3 solve rate of 12.2 on the validation and 10.9 on the test set (Table <ref type="table" target="#tab_8">4b</ref>). This is better than the initial instruct model (8.9 and 10.2, respectively) but significantly below the corresponding RLEF-trained model (17.2 and 16.0, respectively).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.5 TOKEN-LEVEL VALUE FUNCTION</head><p>Here we do not train a value function the level of responses (Section 2.2, Appendix A.1) but rather predict a value for each token of a response. Our reward formulation remains unchagned; consequently, due to the discount factor being set to 1, the value function target (reward-to-go) for each token of a response is the same. However, we now compute separate per-token advantages.</p><p>With this approach and otherwise identical settings, we achieve a 1@3 solve rate of 13.1 on the validation and 13.7 on the test set, starting from Llama 3.1 8B Instruct (Table <ref type="table" target="#tab_8">4b</ref>). This is below the 17.2 and 16.0 results with the turn-level value function (Table <ref type="table" target="#tab_1">1</ref>).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C PROMPTS C.1 CODECONTESTS</head><p>In the initial prompt, we substitute ${problem} by the original problem description as-is.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Initial Prompt</head><p>Provide a Python solution for the following competitive programming question: \${problem}.</p><p>Your code should be enclosed in triple backticks like so: '''python YOUR CODE HERE '''. Use the backticks for your code only.</p><p>In the execution feedback prompt below, we show templates for the four different error types we consider: wrong answer, exception, timeout, and out of memory. We then show the respective feedback for each failing test.</p><p>Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Execution Feedback</head><p>Your code failed some test cases:</p><p>-Failure: '${test}': '${assertion_error}' -Failure: '${test}': ${stacktrace} -Failure: '${test}': Execution took too long.</p><p>-Success: '${test}'</p><p>Give it another try.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C.5 MBPP+</head><p>Each MBPP prompt consists of a problem description and a single example test.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Initial Prompt</head><p>Provide a Python solution for the following problem: ${problem} Your code should pass these tests:</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>${test}</head><p>Your code should be enclosed in triple backticks like so: '''python YOUR CODE HERE '''. Use the backticks for your code only.</p><p>Execution feedback follows the HumanEval+ format from Appendix C.4 with additional formatting guidelines.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Execution Feedback</head><p>Your code failed some test cases:</p><p>-Failure: '${test}': '${error}' -Failure: '${test}': ${stacktrace} -Failure: '${test}': Execution took too long.</p><p>-Success: '${test}'</p><p>Give it another try. Your code should be enclosed in triple backticks like so: '''python YOUR CODE HERE '''. Use the backticks for your code only.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>D EXAMPLES</head><p>The following examples are selected from the valid set of CodeContests with the RLEF-trained 70B model, using temperature 0.2 and top-p 0.95. We apply some light re-formatting of the initial prompts for better readability.</p><p>In the first example, the first model response is on the right track, but the first print() statement outputs a wrong value. The second response implements the requested algorithm naively, but the code is inefficient due to the loop from l to r; it would take about two minutes for the last line in the public test. Finally, the third response contains code that is both correct and fast.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head></head><label></label><figDesc>Provide a Python solution for the following competitive programming question: Let's call the string beautiful if it does not contain a substring of length at least 2 which is a palindrome. Recall that a palindrome[...]    </figDesc><table><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>Natural Language Problem Description</cell></row><row><cell></cell><cell>Natural Language</cell><cell></cell><cell></cell></row><row><cell></cell><cell>Problem Description</cell><cell></cell><cell></cell></row><row><cell>Execution</cell><cell></cell><cell></cell><cell></cell></row><row><cell>feedback</cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>Code Solution (turn 1)</cell></row><row><cell></cell><cell>LLM</cell><cell>update</cell><cell></cell><cell>found = False def min_cost_to_beautiful(substring): while True:</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>for length in range(len(substring), 1, -1):</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>[...]</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>…</cell><cell>Public Tests: FAIL</cell></row><row><cell></cell><cell>Code Solution</cell><cell></cell><cell>PPO</cell><cell>Execution feedback</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>Your code failed the following tests:</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>-input '5A baacb 13 15 23' failed: Execution took too</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>long.</cell></row><row><cell></cell><cell>Turn limit</cell><cell>YES</cell><cell>reward</cell><cell>Give it another try. [...]</cell></row><row><cell></cell><cell>reached?</cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>Code Solution (turn 2)</cell></row><row><cell></cell><cell>NO</cell><cell></cell><cell>Private Tests Execution</cell><cell>def is_beautiful(s): from functools import lru cache</cell></row><row><cell>FAIL</cell><cell>Execution Public Tests</cell><cell>PASS</cell><cell></cell><cell>[...] for length in range(2. len(s) + 1): for i in range(len(s) -length + 1):</cell></row><row><cell>Inference-Time Execution Feedback</cell><cell></cell><cell cols="2">Training-Time Execution Feedback</cell><cell>…</cell><cell>Public Tests: PASS Submitting solution to Private Tests Execution</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 1 :</head><label>1</label><figDesc>Under review as a conference paper at ICLR 2025 Results on CodeContests of our initial and RLEF-trained models compared to prior work.</figDesc><table><row><cell>Model</cell><cell>Source</cell><cell>n@k</cell><cell cols="2">Valid Set Test Set</cell></row><row><cell>AlphaCode 9B</cell><cell>Li et al. (2022)</cell><cell>10@1000</cell><cell>16.9</cell><cell>13.3</cell></row><row><cell>AlphaCode 41B + clustering</cell><cell>Li et al. (2022)</cell><cell>10@1000</cell><cell>21.0</cell><cell>16.4</cell></row><row><cell>Code Llama 34B + PPO</cell><cell>Xu et al. (2024)</cell><cell>10@1000</cell><cell>19.7</cell><cell>22.4</cell></row><row><cell cols="3">AlphaCodium gpt-3.5-turbo-16k Ridnik et al. (2024) 5@100</cell><cell>25</cell><cell>17</cell></row><row><cell>AlphaCodium gpt-4-0613</cell><cell cols="2">Ridnik et al. (2024) 5@100</cell><cell>44</cell><cell>29</cell></row><row><cell>MapCoder gpt-3.5-turbo-1106</cell><cell>Islam et al. (2024)</cell><cell>1@23</cell><cell>-</cell><cell>12.7</cell></row><row><cell>MapCoder gpt-4-1106-preview</cell><cell>Islam et al. (2024)</cell><cell>1@19</cell><cell>-</cell><cell>28.5</cell></row><row><cell>Llama 3.0 8B Instruct</cell><cell>Ours</cell><cell>1@3</cell><cell>4.1</cell><cell>3.2</cell></row><row><cell>+ RLEF</cell><cell>Ours</cell><cell>1@3</cell><cell>12.5</cell><cell>12.1</cell></row><row><cell>Llama 3.1 8B Instruct</cell><cell>Ours</cell><cell>1@3</cell><cell>8.9</cell><cell>10.5</cell></row><row><cell>+ RLEF</cell><cell>Ours</cell><cell>1@3</cell><cell>17.2</cell><cell>16.0</cell></row><row><cell>Llama 3.1 70B Instruct</cell><cell>Ours</cell><cell>1@3</cell><cell>25.9</cell><cell>27.5</cell></row><row><cell>+ RLEF</cell><cell>Ours</cell><cell>1@3</cell><cell>37.5</cell><cell>40.1</cell></row><row><cell>Llama 3.1 8B Instruct</cell><cell>Ours</cell><cell>10@100</cell><cell>21.7</cell><cell>24.8</cell></row><row><cell>+ RLEF</cell><cell>Ours</cell><cell>10@100</cell><cell>29.8</cell><cell>28.7</cell></row><row><cell>Llama 3.1 70B Instruct</cell><cell>Ours</cell><cell>10@100</cell><cell>50.2</cell><cell>50.3</cell></row><row><cell>+ RLEF</cell><cell>Ours</cell><cell>10@100</cell><cell>54.5</cell><cell>54.5</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_2"><head>Table 2 :</head><label>2</label><figDesc>1@3 solve rates in single-turn (ST) and multi-turn (MT) setups for base and RLEF models. On CodeContests, iterative code generation yields modest gains at best and drops in performance at worst, unless RLEF training is employed. Improvements from RLEF on CodeContests in the multiturn setting carry over to HumanEval+ and MBPP+, which require a slightly different execution feedback formatting. Solve rates estimated on 20 rollouts per problem, temperature 0.2.</figDesc><table><row><cell>, which</cell></row></table><note><p><p><p>Figure</p>3</p>: Behavior analysis of initial and RLEF-trained models with respect to public test results, for 8B (top) and 70B (bottom) models. Within 20 rollouts per problem (5640 in total) we count errors in the initial solution (turn 1); errors turned into correct code in turn 2 and 3; code changes across successive solutions according to the chrF metric. RLEF-trained models make fewer errors initially, can fix errors more reliably and perform larger code edits; initial models frequently repeat previous solutions. With random execution feedback, error recovery is severely impaired.</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_4"><head>Table 3 :</head><label>3</label><figDesc>1@3 solve rates starting from Llama 3.1 models, temperature 0.2. (a) Comparison of different methods for acquiring the iterative code synthesis capabilities. RLEF is the most effective training method, followed by supervised fine-tuning (SFT). We find few-shot prompting to be detrimental to Instruct models. (b) Conventional single-turn (ST) compared to our multi-turn (MT) training with our RL loop. MT training yields larger improvements compared to ST, and improvements carrying over to multi-turn over single-turn inference is restricted to the 70B model.</figDesc><table /><note><p><p><p><p><p>3.4 ABLATION STUDIES</p>3.4.1 LEARNING ITERATIVE CODE SYNTHESIS</p>We investigate whether LLMs can, apart from our RL training, be effective in multi-turn code generation using few-shot prompting</p>(Brown et al., 2020)  </p>and supervised fine-tuning (SFT). Lacking suitable ground truth training examples for SFT, we mine rollouts on the CodeContests training set with Llama 3.1 70B Instruct and filter them based on the correctness of final solutions. We then finetune Base and Instruct versions of the Llama 3.1 8B and 70B parameter models on the mined corpus and also source it for few-shot examples (Appendix A.3). The results in Table</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_5"><head></head><label></label><figDesc><ref type="bibr" target="#b34">Shinn et al. (2023)</ref> andChen et al. (2024b)  use feedback from unit tests to correct previously wrong generations and found it crucial to include model-generated error analysis in the prompt for successive generations. LDB<ref type="bibr" target="#b45">(Zhong et al., 2024)</ref>, AlphaCodium<ref type="bibr" target="#b29">(Ridnik et al., 2024)</ref> and<ref type="bibr" target="#b12">MapCoder (Islam et al., 2024)</ref> can be regarded as agentic frameworks as they provide rich manual scaffolding for code generation, chaining several LLM calls (e.g., for chainof-thought planning, test generation, and program repair) combined with code execution. These approaches are effective on difficult benchmarks, such as the CodeContests dataset we consider in this work, but significantly increase inference cost by requiring dozens of LLM calls per solution.</figDesc><table /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_6"><head></head><label></label><figDesc>The loss function and hyper-parameters for training, as well as a description of the compute infrastructure can be found in Appendix A.1. Appendix A.3 describes (narrow) hyper-parameter ranges for supervised fine-tuning, and Appendix A.2 contains notes regarding code execution during training and evaluation. All prompts are listed in Appendix C.</figDesc><table /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_7"><head></head><label></label><figDesc>1. Models are evaluated after 200 optimizer steps with AdamW and we select final parameters based on validation set performance.</figDesc><table><row><cell cols="4">Under review as a conference paper at ICLR 2025</cell><cell></cell><cell></cell><cell></cell></row><row><cell>Model</cell><cell>Method</cell><cell cols="2">Valid Test</cell><cell>Method (8B)</cell><cell cols="2">Valid Test</cell></row><row><cell>8B Base</cell><cell>Few-Shot</cell><cell>1.2</cell><cell>1.8</cell><cell>RLEF</cell><cell>17.2</cell><cell>16.0</cell></row><row><cell></cell><cell>SFT</cell><cell>6.9</cell><cell>3.5</cell><cell>No Execution Feedback</cell><cell>12.2</cell><cell>10.9</cell></row><row><cell cols="2">70B Base Few-Shot</cell><cell>4.6</cell><cell>5.8</cell><cell cols="2">Token-level Value Function 13.1</cell><cell>13.7</cell></row><row><cell></cell><cell>SFT</cell><cell cols="2">11.1 10.9</cell><cell>Single-turn RL</cell><cell>10.2</cell><cell>10.9</cell></row><row><cell></cell><cell>(a)</cell><cell></cell><cell></cell><cell>Single-turn w/ Repair</cell><cell>14.8</cell><cell>12.6</cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>(b)</cell><cell></cell><cell></cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_8"><head>Table 4 :</head><label>4</label><figDesc>(a) 1@3 solve rates for few-shot prompting and supervised fine-tuning (SFT) with Llama 3.1 Base models on CodeContests. (b) Further results from Llama 3.1 Instruct 8B (1@3): withholding execution feedback from public training during RL; learning a value function on the token level; training a dedicated code repair model and applying it to outputs of the single-turn RL model.</figDesc><table /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_9"><head></head><label></label><figDesc>Table3a).B.2 FEEDBACK FROM PRIVATE TESTSOur main evaluations on CodeContests match our training setting, i.e., we provide inference-time feedback on public test cases and estimate solve rates on private (and the dataset's generated) tests. The number of public test cases in the CodeContests validation and test sets vary between 1-7, with a median of 1; typically, a higher number of private tests and a large number of generated tests are available per problem.<ref type="bibr" target="#b17">Le et al. (2022)</ref> implements program repair on top of an RL-trained LLM with two extra models: a "critic" predicts the joint outcome of all unit tests (e.g., success, failure, runtime error) and can be used for ranking and determining promising prefixes, and a "repair" model maps wrong solutions to ground truth solutions. In this spirit, we evaluate the effect of a dedicated repair model to improve the single-turn 8B model from Section 3.4.2 as follows.</figDesc><table><row><cell>We verify whether our RLEF-trained models can benefit from larger test sets during inference by</cell></row><row><cell>including feedback from private and generated tests. Specifically, we test each model response</cell></row><row><cell>against 20 available test cases, including private tests, and provide execution feedback for up to 8</cell></row><row><cell>failed test cases. Comparing 1@3 solve rates (temperature 0.2) with a turn limit of 3, the 8B RLEF</cell></row><row><cell>model can improve from 17.2 to 18.1 on the valid set, whereas on the test set we see a drop from</cell></row><row><cell>16.0 to 14.4. For the 70B RLEF model, validation set performance improves from 37.5 to 40.4, and</cell></row><row><cell>on the test set we obtain 41.2 compared to 38.0 with feedback limited to public tests.</cell></row><row><cell>B.3 EXTRA REPAIR MODEL</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_10"><head></head><label></label><figDesc>Table 3b) but falls short of the corresponding RLEF-trained model which combines code synthesis and code repair (17.2 and 16.0, respectively; Table 1) B.4 RL TRAINING WITHOUT PUBLIC TEST EXECUTION FEEDBACK</figDesc><table /></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="1" xml:id="foot_0"><p>For simplicity, we consider a full LLM response as a single sample in our evaluations. We also note that for iterative code generation, the allocated sample budget may not be fully utilized as a successful public test run will result in early termination of a dialog.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="2" xml:id="foot_1"><p>AlphaCode Team (2023)  train and evaluate on non-disclosed competition problems but report a sample efficiency increase of 10,000x over AlphaCode, which achieves a 10@1M solve rate of</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" xml:id="foot_2"><p>34.2 on the valid set.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="3" xml:id="foot_3"><p>https://github.com/google-deepmind/code_contests</p></note>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Under review as a conference paper at ICLR 2025</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Execution Feedback</head><p>Your code failed the following tests:</p><p>-input '${input}' failed: Expected output '${expected_output}' but got '${observed_output}' -input '${input}' failed: ${stacktrace} -input '${input}' failed: Execution took too long.</p><p>-input '${input}' failed: Out of memory.</p><p>Give it another try. Your code should be enclosed in triple backticks like so: '''python YOUR CODE HERE '''. Use the backticks for your code only.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C.2 RANDOM FEEDBACK ABLATION</head><p>In Section 3.3 we test RLEF-trained models with random execution feedback. For each problem, we sample a different problem from the respective test set that contains incorrect solutions. We obtain unrelated feedback by evaluating one of these incorrect solutions, chosen at random, against the corresponding public tests and present the resulting feedback to the model. If none of the incorrect solutions fail the public tests, we evaluate raise NotImplementedError(). In this case, the feedback will contain backtraces pointing to this error. Otherwise our dialog proceeds as usual, i.e., if the code solution produced by the LLM passes the true public tests of the problem in questions we stop and evaluate the solution all test cases.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C.3 FEW-SHOT PROMPTING</head><p>For the few-shot ablations in Section 3.4, we select successful trajectories from the Llama 3.1 70B Instruct model on problems from the CodeContests training set. We select trajectories with both 2 and 3 successful attempts to as demonstrations for successful multi-turn code generation. For instruction models, we initialize the dialog with the few-shot examples, separating them with an empty assistant message. For few-shot experiments with pre-trained models (Appendix B.1), we use a dialog format in which each message is either prefixed by [USER] or [ASSISTANT]. The token for ||, an invalid symbol in Python, is used as a message delimiter.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C.4 HUMANEVAL+</head><p>HumanEval problem prompts consist of starter code, with a docstring and example tests following the function declaration.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Initial Prompt</head><p>Write a solution to the following problem and make sure that it passes the tests: ${problem}</p><p>We then provide the problem prompt again at the start of each model response for completion.</p><p>The tests in HumanEval+ consist of a single function with several assert statements. In order to obtain execution feedback for individual tests, we extract them from original test function (for computing pass rates, we use the original test code). We further transform assert statements into matching function calls of Python's built-in unittest.TestCase class. This way, test failures will result in more informative AssertionError exceptions with run-time values; these are provided as assertion error to the template. We also show successful test cases.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Initial Prompt</head><p>Provide a Python solution for the following competitive programming question: You are given two integers l and r, l ≤ r. Find the largest possible value of a mod b over all pairs (a, b) of integers for which r ≥ a ≥ b ≥ l. As a reminder, a mod b is a remainder we get when dividing a by b. For example, 26 mod 8 = 2. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Input</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Note</head><p>In the first test case, the only allowed pair is (a, b) = (1, 1), for which a mod b = 1 mod 1 = 0. In the second test case, the optimal choice is pair (a, b) = (1000000000, 999999999), for which a mod b = 1.. Your code should be enclosed in triple backticks like so: '''python YOUR CODE HERE '''. Use the backticks for your code only.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Model Response</head><p>'''python t = int(input())</p><p>for _ in range(t): l, r = map(int, input().split())</p><p>if r // 2 + 1 &gt;= l: print((r // 2)) else:</p><p>print(r % l) '''</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Execution Feedback</head><p>Your code failed the following tests:</p><p>-input '4 1 1 999999999 1000000000 8 26 1 999999999 ' failed: Expected output '0 1 12 499999999 ' but got '0 1 13 499999999 '</p><p>Give it another try. Your code should be enclosed in triple backticks like so: '''python YOUR CODE HERE '''. Use the backticks for your code only.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Model Response</head><p>'''python t = int(input()) for _ in range(t): l, r = map(int, input().split()) max_mod = 0 for b in range(l, r + 1): a = r mod = a % b max_mod = max(max_mod, mod) print(max_mod) '''</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Execution Feedback</head><p>Your code failed the following tests:</p><p>-input '4 1 1 999999999 1000000000 8 26 1 999999999 ' failed: Execution took too long Give it another try. Your code should be enclosed in triple backticks like so: '''python YOUR CODE HERE '''. Use the backticks for your code only. print(r % l) '''</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Model Response</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Result</head><p>Passes public and private tests.</p><p>In the second example, the first code solution does not reset the value for p k . The second and correct attempt fixes this. Note that both solutions contain an unused variable, curr in the first and curr a in the second response. For this question, an approach with dynamic programming that starts initializes p k from p k-1 would be preferred; however, the second solution passes all test cases, too.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Initial Prompt</head><p>Provide a Python solution for the following competitive programming question: You have an array a consisting of n distinct positive integers, numbered from 1 to n. Define p_k as $$$p_k = _{1 ≤ i, j ≤ k} a_i mod a_j, where x \bmod y denotes the remainder when x is divided by y. You have to find and print p_1, p_2, \ldots, p_n$$$.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Input</head><p>The first line contains n -the length of the array (2 ≤ n ≤ 2 • 10ˆ5). The second line contains n space-separated distinct integers a_1, ..., a_n (1 -input '4 6 2 7 3 ' failed: Expected output '0 2 12 22 ' but got '0 2 14 36 ' -input '3 3 2 1 ' failed: Expected output '0 3 5 ' but got '0 3 8 ' Give it another try. Your code should be enclosed in triple backticks like so: '''python YOUR CODE HERE '''. Use the backticks for your code only. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Model Response</head></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<analytic>
+		<title level="a" type="main">The Llama 3 Herd of Models</title>
+		<author>
+			<persName><forename type="first">Llama</forename><surname>Team</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ai @</forename><surname>Meta</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Google DeepMind AlphaCode Team. AlphaCode</title>
+		<imprint>
+			<biblScope unit="volume">2</biblScope>
+			<date type="published" when="2023">2024. 2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">Technical report</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<monogr>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Austin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Augustus</forename><surname>Odena</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maxwell</forename><surname>Nye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maarten</forename><surname>Bosma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Henryk</forename><surname>Michalewski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Dohan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ellen</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carrie</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Terry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quoc</forename><surname>Le</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Charles</forename><surname>Sutton</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2108.07732</idno>
+		<title level="m">Program Synthesis with Large Language Models</title>
+		<imprint>
+			<date type="published" when="2021-08">Aug 2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Language Models are Few-Shot Learners</title>
+		<author>
+			<persName><forename type="first">B</forename><surname>Tom</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nick</forename><surname>Mann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Melanie</forename><surname>Ryder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><surname>Subbiah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Kaplan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arvind</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pranav</forename><surname>Neelakantan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Girish</forename><surname>Shyam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Sastry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Askell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ariel</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gretchen</forename><surname>Herbert-Voss</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Krueger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rewon</forename><surname>Henighan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aditya</forename><surname>Child</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><forename type="middle">M</forename><surname>Ramesh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Ziegler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clemens</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Winter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Hesse</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mateusz</forename><surname>Sigler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Scott</forename><surname>Litwin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Gray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jack</forename><surname>Chess</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Berner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Mccandlish</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dario</forename><surname>Sutskever</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Amodei</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">NeurIPS</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<monogr>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Carta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clément</forename><surname>Romac</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Wolf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sylvain</forename><surname>Lamprier</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Olivier</forename><surname>Sigaud</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierre-Yves</forename><surname>Oudeyer</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2302.02662</idno>
+		<title level="m">Grounding Large Language Models in Interactive Environments with Online Reinforcement Learning</title>
+		<imprint>
+			<date type="published" when="2023-09">Sep 2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<monogr>
+		<title level="m" type="main">Improving Code Generation by Training with Natural Language Feedback</title>
+		<author>
+			<persName><forename type="first">Angelica</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jérémy</forename><surname>Scheurer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomasz</forename><surname>Korbak</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jon</forename><surname>Ander Campos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Shern Chan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Samuel</forename><forename type="middle">R</forename><surname>Bowman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kyunghyun</forename><surname>Cho</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ethan</forename><surname>Perez</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2303.16749</idno>
+		<imprint>
+			<date type="published" when="2024-02">Feb 2024a</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<monogr>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jerry</forename><surname>Tworek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heewoo</forename><surname>Jun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiming</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Henrique</forename><surname>Pondé De Oliveira Pinto</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><surname>Kaplan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Harrison</forename><surname>Edwards</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuri</forename><surname>Burda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicholas</forename><surname>Joseph</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Greg</forename><surname>Brockman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Ray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Raul</forename><surname>Puri</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gretchen</forename><surname>Krueger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Petrov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Heidy</forename><surname>Khlaaf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Girish</forename><surname>Sastry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pamela</forename><surname>Mishkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Brooke</forename><surname>Chan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Scott</forename><surname>Gray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nick</forename><surname>Ryder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mikhail</forename><surname>Pavlov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alethea</forename><surname>Power</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukasz</forename><surname>Kaiser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mohammad</forename><surname>Bavarian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clemens</forename><surname>Winter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Philippe</forename><surname>Tillet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Felipe</forename><forename type="middle">Petroski</forename><surname>Such</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dave</forename><surname>Cummings</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthias</forename><surname>Plappert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fotios</forename><surname>Chantzis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Elizabeth</forename><surname>Barnes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ariel</forename><surname>Herbert-Voss</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><surname>Hebgen Guss</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Nichol</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Paino</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikolas</forename><surname>Tezak</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Igor</forename><surname>Babuschkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Suchir</forename><surname>Balaji</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shantanu</forename><surname>Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><surname>Saunders</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Hesse</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><forename type="middle">N</forename><surname>Carr</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jan</forename><surname>Leike</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joshua</forename><surname>Achiam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vedant</forename><surname>Misra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Evan</forename><surname>Morikawa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><surname>Knight</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Miles</forename><surname>Brundage</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mira</forename><surname>Murati</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katie</forename><surname>Mayer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Welinder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bob</forename><surname>Mcgrew</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dario</forename><surname>Amodei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Mccandlish</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Sutskever</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wojciech</forename><surname>Zaremba</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2107.03374</idno>
+		<title level="m">Evaluating Large Language Models Trained on Code</title>
+		<imprint>
+			<date type="published" when="2021-07">Jul 2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<monogr>
+		<title level="m" type="main">Teaching Large Language Models to Self-Debug</title>
+		<author>
+			<persName><forename type="first">Xinyun</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maxwell</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nathanael</forename><surname>Schärli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Denny</forename><surname>Zhou</surname></persName>
+		</author>
+		<imprint/>
+	</monogr>
+	<note>In ICLR, 2024b</note>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Multi-mode translation of natural language and Python code with transformers</title>
+		<author>
+			<persName><forename type="first">Colin</forename><forename type="middle">B</forename><surname>Clement</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dawn</forename><surname>Drain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Timcheck</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Svyatkovskiy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Neel</forename><surname>Sundaresan</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">EMNLP</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="volume">5</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<monogr>
+		<author>
+			<persName><forename type="first">Deepseek-Ai</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qihao</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daya</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhihong</forename><surname>Shao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dejian</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peiyi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Runxin</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yukun</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huazuo</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shirong</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wangding</forename><surname>Zeng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Bi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zihui</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hanwei</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Damai</forename><surname>Dai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kai</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liyue</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yishi</forename><surname>Piao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhibin</forename><surname>Gou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhenda</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhewen</forename><surname>Hao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bingxuan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junxiao</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deli</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xin</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kang</forename><surname>Guan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuxiang</forename><surname>You</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aixin</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiushi</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenjun</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuan</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qinyu</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yaohui</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chengqi</forename><surname>Deng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiashi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenggang</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chong</forename><surname>Ruan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fuli</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenfeng</forename><surname>Liang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2406.11931</idno>
+		<title level="m">DeepSeek-Coder-V2: Breaking the Barrier of Closed-Source Models in Code Intelligence</title>
+		<imprint>
+			<date type="published" when="2024-06">Jun 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<monogr>
+		<author>
+			<persName><forename type="first">Shihan</forename><surname>Dou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haoxiang</forename><surname>Jia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Limao</forename><surname>Xiong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Enyu</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junjie</forename><surname>Shan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Caishuang</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaoran</forename><surname>Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiheng</forename><surname>Xi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuhao</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Ji</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuanjing</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Gui</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.01391</idno>
+		<title level="m">StepCoder: Improve Code Generation with Reinforcement Learning from Compiler Feedback</title>
+		<imprint>
+			<date type="published" when="2024-02">Feb 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<author>
+			<persName><forename type="first">Suriya</forename><surname>Gunasekar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jyoti</forename><surname>Aneja</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Caio</forename><surname>César</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Teodoro</forename><surname>Mendes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Allie</forename><surname>Del Giorno</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sivakanth</forename><surname>Gopi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mojan</forename><surname>Javaheripi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piero</forename><surname>Kauffmann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gustavo</forename><surname>De Rosa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Olli</forename><surname>Saarikivi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adil</forename><surname>Salim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shital</forename><surname>Shah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Harkirat</forename><surname>Singh Behl</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xin</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sébastien</forename><surname>Bubeck</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ronen</forename><surname>Eldan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Tauman Kalai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yin</forename><surname>Tat Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2306.11644</idno>
+		<title level="m">Textbooks Are All You Need</title>
+		<imprint>
+			<date type="published" when="2023-06">Jun 2023</date>
+		</imprint>
+	</monogr>
+	<note>Under review as a conference paper at ICLR 2025</note>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">The Curious Case of Neural Text Degeneration</title>
+		<author>
+			<persName><forename type="first">Ari</forename><surname>Holtzman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jan</forename><surname>Buys</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Li</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maxwell</forename><surname>Forbes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yejin</forename><surname>Choi</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICLR</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<monogr>
+		<author>
+			<persName><forename type="first">Ashraful</forename><surname>Md</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mohammed</forename><forename type="middle">Eunus</forename><surname>Islam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Md</forename><surname>Ali</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Rizwan Parvez</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Mapcoder</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2405.11403</idno>
+		<title level="m">Multi-Agent Code Generation for Competitive Problem Solving</title>
+		<imprint>
+			<date type="published" when="2024-05">May 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<title level="m" type="main">TestGenEval: A Real World Unit Test Generation and Test Completion Benchmark</title>
+		<author>
+			<persName><forename type="first">Kush</forename><surname>Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriel</forename><surname>Synnaeve</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baptiste</forename><surname>Rozière</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2410.00752</idno>
+		<imprint>
+			<date type="published" when="2024-10">Oct 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<monogr>
+		<title/>
+		<author>
+			<persName><forename type="first">Sayash</forename><surname>Kapoor</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benedikt</forename><surname>Stroebl</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zachary</forename><forename type="middle">S</forename><surname>Siegel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nitya</forename><surname>Nadgir</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arvind</forename><surname>Narayanan</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2407.01502</idno>
+		<imprint>
+			<date type="published" when="2024-07">Jul 2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">AI Agents That Matter</note>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Understanding the Effects of RLHF on LLM Generalisation and Diversity</title>
+		<author>
+			<persName><forename type="first">Robert</forename><surname>Kirk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ishita</forename><surname>Mediratta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christoforos</forename><surname>Nalmpantis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jelena</forename><surname>Luketina</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Hambro</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Edward</forename><surname>Grefenstette</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roberta</forename><surname>Raileanu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICLR</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<monogr>
+		<author>
+			<persName><forename type="first">Aviral</forename><surname>Kumar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vincent</forename><surname>Zhuang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rishabh</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><forename type="middle">D</forename><surname>Co-Reyes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Avi</forename><surname>Singh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kate</forename><surname>Baumli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shariq</forename><surname>Iqbal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Colton</forename><surname>Bishop</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rebecca</forename><surname>Roelofs</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lei</forename><forename type="middle">M</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kay</forename><surname>Mckinney</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Disha</forename><surname>Shrivastava</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cosmin</forename><surname>Paduraru</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">George</forename><surname>Tucker</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2409.12917</idno>
+		<title level="m">Doina Precup, Feryal Behbahani, and Aleksandra Faust. Training Language Models to Self-Correct via Reinforcement Learning</title>
+		<imprint>
+			<date type="published" when="2024-09">Sep 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<monogr>
+		<title level="m" type="main">CodeRL: Mastering Code Generation through Pretrained Models and Deep Reinforcement Learning</title>
+		<author>
+			<persName><forename type="first">Hung</forename><surname>Le</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yue</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Akhilesh</forename><surname>Deepak Gotmare</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Silvio</forename><surname>Savarese</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><forename type="middle">C H</forename><surname>Hoi</surname></persName>
+		</author>
+		<editor>NeurIPS</editor>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<monogr>
+		<title/>
+		<author>
+			<persName><forename type="first">Raymond</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Loubna</forename><surname>Ben Allal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yangtian</forename><surname>Zi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Niklas</forename><surname>Muennighoff</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Denis</forename><surname>Kocetkov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenghao</forename><surname>Mou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Marone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Akiki</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jia</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jenny</forename><surname>Chim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qian</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Evgenii</forename><surname>Zheltonozhskii</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Terry</forename><surname>Yue Zhuo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Olivier</forename><surname>Dehaene</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joel</forename><surname>Lamy-Poirier</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joao</forename><surname>Monteiro</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicolas</forename><surname>Gontier</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ming-Ho</forename><surname>Yee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Logesh</forename><surname>Kumar Umapathi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ben</forename><surname>Lipkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Muhtasham</forename><surname>Oblokulov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiruo</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rudra</forename><surname>Murthy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><forename type="middle">T</forename><surname>Stillerman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sankalp</forename><surname>Siva</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dmitry</forename><surname>Patel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marco</forename><surname>Abulkhanov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Manan</forename><surname>Zocca</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhihan</forename><surname>Dey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Urvashi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenhao</forename><surname>Bhattacharyya</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sasha</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Paulo</forename><surname>Luccioni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fedor</forename><surname>Villegas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tony</forename><surname>Zhdanov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nadav</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jennifer</forename><surname>Timor</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Claire</forename><forename type="middle">S</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hailey</forename><surname>Schlesinger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jan</forename><surname>Schoelkopf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tri</forename><surname>Ebert</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Dao</surname></persName>
+		</author>
+		<editor>Mayank Mishra, Alex Gu, Carolyn Jane Anderson, Brendan Dolan-Gavitt, Danish Contractor, Siva Reddy, Daniel Fried, Dzmitry Bahdanau, Yacine Jernite, Carlos Muñoz Ferrandis, Sean Hughes, Thomas Wolf, Arjun Guha</editor>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<publisher>Leandro Von Werra, and Harm de Vries</publisher>
+		</imprint>
+	</monogr>
+	<note>StarCoder: May the source be with you! Transactions on Machine Learning Research</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title/>
+		<author>
+			<persName><forename type="first">Yujia</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Choi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junyoung</forename><surname>Chung</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nate</forename><surname>Kushman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julian</forename><surname>Schrittwieser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rémi</forename><surname>Leblond</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Eccles</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Keeling</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Felix</forename><surname>Gimeno</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Agustin</forename><forename type="middle">Dal</forename><surname>Lago</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Hubert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Choy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cyprien</forename><surname>De Masson D'autume</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Igor</forename><surname>Babuschkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinyun</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Po-Sen</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Johannes</forename><surname>Welbl</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sven</forename><surname>Gowal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><surname>Cherepanov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Molloy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><forename type="middle">J</forename><surname>Mankowitz</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Esme</forename><surname>Sutherland Robson</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2203.07814</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nando de Freitas, Koray Kavukcuoglu, and Oriol Vinyals. Competition-Level Code Generation with AlphaCode</title>
+		<imprint>
+			<biblScope unit="volume">378</biblScope>
+			<biblScope unit="page" from="1092" to="1097" />
+			<date type="published" when="2022-12">Dec 2022</date>
+		</imprint>
+	</monogr>
+	<note>Pushmeet Kohli</note>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">RLTF: Reinforcement Learning from Unit Test Feedback</title>
+		<author>
+			<persName><forename type="first">Jiate</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yiqin</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaiwen</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiang</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deheng</forename><surname>Ye</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">TMLR</title>
+		<imprint>
+			<biblScope unit="volume">11</biblScope>
+			<date type="published" when="2023">2023. 2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<title level="m" type="main">Is Your Code Generated by ChatGPT Really Correct? Rigorous Evaluation of Large Language Models for Code Generation</title>
+		<author>
+			<persName><forename type="first">Jiawei</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chunqiu</forename><surname>Steven Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuyao</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lingming</forename><surname>Zhang</surname></persName>
+		</author>
+		<imprint/>
+	</monogr>
+	<note>In NeurIPS, 2023b</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Decoupled Weight Decay Regularization</title>
+		<author>
+			<persName><forename type="first">Ilya</forename><surname>Loshchilov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Frank</forename><surname>Hutter</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICLR</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">GAIA: A benchmark for General AI Assistants</title>
+		<author>
+			<persName><forename type="first">Grégoire</forename><surname>Mialon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clémentine</forename><surname>Fourrier</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Craig</forename><surname>Swift</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Wolf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yann</forename><surname>Lecun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Scialom</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICLR</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title/>
+		<author>
+			<persName><forename type="first">Theo</forename><forename type="middle">X</forename><surname>Olausson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeevana</forename><surname>Priya Inala</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenglong</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianfeng</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Armando</forename><surname>Solar-Lezama</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Is Self-Repair a Silver Bullet for Code Generation? In ICLR</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<monogr>
+		<idno type="arXiv">arXiv:2303.08774</idno>
+		<title level="m">OpenAI. GPT-4 technical report</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title/>
+		<author>
+			<persName><forename type="first">Long</forename><surname>Ouyang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xu</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Diogo</forename><surname>Almeida</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carroll</forename><forename type="middle">L</forename><surname>Wainwright</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pamela</forename><surname>Mishkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chong</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katarina</forename><surname>Slama</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Ray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><surname>Schulman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Hilton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fraser</forename><surname>Kelton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Miller</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maddie</forename><surname>Simens</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Askell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Welinder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Paul</forename><forename type="middle">F</forename><surname>Christiano</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jan</forename><surname>Leike</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ryan</forename><surname>Lowe</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Training Language Models to Follow Instructions with Human Feedback. In NeurIPS</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<analytic>
+		<title level="a" type="main">Character n-Gram F-score for automatic MT evaluation</title>
+		<author>
+			<persName><forename type="first">Maja</forename><surname>Popović</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Chrf</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">WMT 2015</title>
+		<meeting><address><addrLine>Lisbon, Portugal</addrLine></address></meeting>
+		<imprint>
+			<publisher>Association for Computational Linguistics</publisher>
+			<date type="published" when="2015">2015</date>
+			<biblScope unit="page" from="392" to="395" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<monogr>
+		<title level="m" type="main">Direct Preference Optimization: Your Language Model is Secretly a Reward Model</title>
+		<author>
+			<persName><forename type="first">Rafael</forename><surname>Rafailov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Archit</forename><surname>Sharma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Mitchell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stefano</forename><surname>Ermon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><forename type="middle">D</forename><surname>Manning</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chelsea</forename><surname>Finn</surname></persName>
+		</author>
+		<editor>NeurIPS</editor>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Code Generation with AlphaCodium</title>
+		<author>
+			<persName><forename type="first">Tal</forename><surname>Ridnik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dedy</forename><surname>Kredo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Itamar</forename><surname>Friedman</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2401.08500</idno>
+	</analytic>
+	<monogr>
+		<title level="m">From Prompt Engineering to Flow Engineering</title>
+		<imprint>
+			<date type="published" when="2024-01">Jan 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<author>
+			<persName><forename type="first">Jonas</forename><surname>Baptiste Rozière</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fabian</forename><surname>Gehring</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sten</forename><surname>Gloeckle</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Itai</forename><surname>Sootla</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Gat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ellen</forename><surname>Xiaoqing</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yossi</forename><surname>Tan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jingyu</forename><surname>Adi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tal</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jérémy</forename><surname>Remez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Artyom</forename><surname>Rapin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ivan</forename><surname>Kozhevnikov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joanna</forename><surname>Evtimov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Manish</forename><surname>Bitton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cristian Canton</forename><surname>Bhatt</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aaron</forename><surname>Ferrer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenhan</forename><surname>Grattafiori</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexandre</forename><surname>Xiong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jade</forename><surname>Défossez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Faisal</forename><surname>Copet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Azhar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Louis</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Martin</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2308.12950</idno>
+		<title level="m">Nicolas Usunier, Thomas Scialom, and Gabriel Synnaeve. Code Llama: Open Foundation Models for Code</title>
+		<imprint>
+			<date type="published" when="2023-08">Aug 2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<monogr>
+		<title level="m" type="main">Toolformer: Language Models Can Teach Themselves to Use Tools</title>
+		<author>
+			<persName><forename type="first">Timo</forename><surname>Schick</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jane</forename><surname>Dwivedi-Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roberto</forename><surname>Dessì</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roberta</forename><surname>Raileanu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maria</forename><surname>Lomeli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luke</forename><surname>Zettlemoyer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicola</forename><surname>Cancedda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Scialom</surname></persName>
+		</author>
+		<editor>NeurIPS</editor>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<monogr>
+		<author>
+			<persName><forename type="first">John</forename><surname>Schulman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Filip</forename><surname>Wolski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oleg</forename><surname>Klimov</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1707.06347</idno>
+		<title level="m">Proximal Policy Optimization Algorithms</title>
+		<imprint>
+			<date type="published" when="2017-08">Aug 2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<monogr>
+		<title/>
+		<author>
+			<persName><forename type="first">Yonadav</forename><surname>Shavit</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">O'</forename><surname>Cullen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tyna</forename><surname>Keefe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Paul</forename><surname>Eloundou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Mcmillan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Miles</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Brundage</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rosie</forename><surname>Adler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Teddy</forename><surname>Campbell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pamela</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alan</forename><surname>Mishkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katarina</forename><surname>Hickey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lama</forename><surname>Slama</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Ahmad</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexandre</forename><surname>Beutel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><forename type="middle">G</forename><surname>Passos</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Robinson</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<publisher>Practices for Governing Agentic AI Systems</publisher>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<monogr>
+		<title level="m" type="main">Reflexion: Language Agents with Verbal Reinforcement Learning</title>
+		<author>
+			<persName><forename type="first">Noah</forename><surname>Shinn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Federico</forename><surname>Cassano</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Edward</forename><surname>Berman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashwin</forename><surname>Gopinath</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karthik</forename><surname>Narasimhan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shunyu</forename><surname>Yao</surname></persName>
+		</author>
+		<editor>NeurIPS</editor>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Execution-based Code Generation using Deep Reinforcement Learning</title>
+		<author>
+			<persName><forename type="first">Parshin</forename><surname>Shojaee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aneesh</forename><surname>Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sindhu</forename><surname>Tipirneni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chandan</forename><forename type="middle">K</forename><surname>Reddy</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">TMLR</title>
+		<imprint>
+			<date type="published" when="2023">07/2023, 2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<monogr>
+		<title level="m" type="main">Reinforcement Learning: An Introduction. Adaptive Computation and Machine Learning Series</title>
+		<author>
+			<persName><forename type="first">Richard</forename><forename type="middle">S</forename><surname>Sutton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><forename type="middle">G</forename><surname>Barto</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+			<publisher>The MIT Press</publisher>
+			<pubPlace>Cambridge, Massachusetts</pubPlace>
+		</imprint>
+	</monogr>
+	<note>second edition edition</note>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<monogr>
+		<title/>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Louis</forename><surname>Martin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevin</forename><surname>Stone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Albert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amjad</forename><surname>Almahairi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yasmine</forename><surname>Babaei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikolay</forename><surname>Bashlykov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Soumya</forename><surname>Batra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prajjwal</forename><surname>Bhargava</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shruti</forename><surname>Bhosale</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Bikel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukas</forename><surname>Blecher</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cristian</forename><surname>Canton-Ferrer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Moya</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guillem</forename><surname>Cucurull</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Esiobu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jude</forename><surname>Fernandes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeremy</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenyin</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Brian</forename><surname>Fuller</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cynthia</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vedanuj</forename><surname>Goswami</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naman</forename><surname>Goyal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anthony</forename><surname>Hartshorn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saghar</forename><surname>Hosseini</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Hou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hakan</forename><surname>Inan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marcin</forename><surname>Kardas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Viktor</forename><surname>Kerkez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Madian</forename><surname>Khabsa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Isabel</forename><surname>Kloumann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Artem</forename><surname>Korenev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Punit</forename><surname>Singh Koura</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marie-Anne</forename><surname>Lachaux</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thibaut</forename><surname>Lavril</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jenya</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Diana</forename><surname>Liskovich</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yinghai</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuning</forename><surname>Mao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xavier</forename><surname>Martinet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Todor</forename><surname>Mihaylov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pushkar</forename><surname>Mishra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Igor</forename><surname>Molybog</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yixin</forename><surname>Nie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><surname>Poulton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeremy</forename><surname>Reizenstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rashi</forename><surname>Rungta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kalyan</forename><surname>Saladi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alan</forename><surname>Schelten</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruan</forename><surname>Silva</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2307.09288</idno>
+		<editor>Eric Michael Smith, Ranjan Subramanian, Xiaoqing Ellen Tan, Binh Tang, Ross Taylor, Adina Williams, Jian Xiang Kuan, Puxin Xu, Zheng Yan, Iliyan Zarov, Yuchen Zhang, Angela Fan, Melanie Kambadur, Sharan Narang, Aurélien Rodriguez, Robert Stojnic, Sergey Edunov</editor>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note>and Thomas Scialom. Llama 2: Open foundation and fine-tuned chat models</note>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<analytic>
+		<title level="a" type="main">On Learning Meaningful Assert Statements for Unit Test Cases</title>
+		<author>
+			<persName><forename type="first">Cody</forename><surname>Watson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michele</forename><surname>Tufano</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevin</forename><surname>Moran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriele</forename><surname>Bavota</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Denys</forename><surname>Poshyvanyk</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICSE</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="1398" to="1409" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<monogr>
+		<author>
+			<persName><forename type="first">Chunqiu</forename><surname>Steven Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yinlin</forename><surname>Deng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Soren</forename><surname>Dunn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lingming</forename><surname>Zhang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2407.01489</idno>
+		<title level="m">Agentless: Demystifying LLM-based Software Engineering Agents</title>
+		<imprint>
+			<date type="published" when="2024-07">Jul 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<analytic>
+		<title level="a" type="main">Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study</title>
+		<author>
+			<persName><forename type="first">Shusheng</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Fu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiaxuan</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenjie</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weilin</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyu</forename><surname>Mei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guangju</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chao</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Wu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICML</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<monogr>
+		<author>
+			<persName><forename type="first">John</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carlos</forename><forename type="middle">E</forename><surname>Jimenez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Wettig</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kilian</forename><surname>Lieret</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shunyu</forename><surname>Yao</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2405.15793</idno>
+		<title level="m">SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering</title>
+		<imprint>
+			<publisher>Karthik Narasimhan, and Ofir Press</publisher>
+			<date type="published" when="2024-05">May 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<monogr>
+		<title level="m" type="main">WebShop: Towards Scalable Real-World Web Interaction with Grounded Language Agents</title>
+		<author>
+			<persName><forename type="first">Shunyu</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Howard</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karthik</forename><surname>Narasimhan</surname></persName>
+		</author>
+		<editor>NeurIPS</editor>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<monogr>
+		<title/>
+		<author>
+			<persName><forename type="first">Zishun</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunzhe</forename><surname>Tao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liyu</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongxia</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>B-Coder</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.03173</idno>
+		<imprint>
+			<date type="published" when="2024-03">Mar 2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">Value-Based Deep Reinforcement Learning for Program Synthesis</note>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<monogr>
+		<author>
+			<persName><forename type="first">Yuexiang</forename><surname>Zhai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Bai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zipeng</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiayi</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengbang</forename><surname>Tong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yifei</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alane</forename><surname>Suhr</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Saining</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yann</forename><surname>Lecun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sergey</forename><surname>Levine</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2405.10292</idno>
+		<title level="m">Fine-Tuning Large Vision-Language Models as Decision-Making Agents via Reinforcement Learning</title>
+		<imprint>
+			<date type="published" when="2024-05">May 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<monogr>
+		<title level="m" type="main">Debug like a Human: A Large Language Model Debugger via Verifying Runtime Execution Step-by-step</title>
+		<author>
+			<persName><forename type="first">Li</forename><surname>Zhong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zilong</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jingbo</forename><surname>Shang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.16906</idno>
+		<imprint>
+			<date type="published" when="2024-06">Jun 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<analytic>
+		<title level="a" type="main">ArCHer: Training Language Model Agents via Hierarchical Multi-Turn RL</title>
+		<author>
+			<persName><forename type="first">Yifei</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrea</forename><surname>Zanette</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiayi</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sergey</forename><surname>Levine</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aviral</forename><surname>Kumar</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">ICLR 2024 Workshop on Large Language Model (LLM) Agents</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b47">
+	<monogr>
+		<author>
+			<persName><forename type="first">M</forename><surname>Daniel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nisan</forename><surname>Ziegler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Stiennon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><forename type="middle">B</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alec</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dario</forename><surname>Radford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Paul</forename><surname>Amodei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Geoffrey</forename><surname>Christiano</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Irving</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1909.08593</idno>
+		<title level="m">Fine-Tuning Language Models from Human Preferences</title>
+		<imprint>
+			<date type="published" when="2020-01">Jan 2020</date>
+		</imprint>
+	</monogr>
+	<note>cs, stat</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

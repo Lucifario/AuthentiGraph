@@ -1,0 +1,1152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 EXTREME COMBINED COMPRESSION OF LARGE LAN-GUAGE MODELS THROUGH JOINT OPTIMIZATION</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 EXTREME COMBINED COMPRESSION OF LARGE LAN-GUAGE MODELS THROUGH JOINT OPTIMIZATION</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">E56BD7987635DBA0800F37298F16DE10</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:13+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Post-Training Quantization (PTQ) and Sparsification (PTS) are dominant methods in the compression of Large Language Models (LLMs) due to their minimal resource usage and generalizability. It is a natural idea to integrate quantization and sparsification in a unified framework, which however, often results in substantial accuracy losses. Here we argue that, the key lies in optimization. This paper introduces a novel joint optimization strategy that concurrently mitigates errors induced by both sparsification and quantization. Unlike sequential approaches, our method employs learnable transformation matrices to simultaneously optimize errors across both dimensions, preventing the typical misalignments associated with sequential optimizations. Furthermore, we present a reordering mechanism within the learnable mask sparsification process to maintain consistent sparsity ratios. This mechanism ensures the prioritization of the least important weights during each update iteration, thus enhancing the stability of the compression process. Our approach demonstrates considerable performance enhancements across diverse models and datasets, with the most notable gains observed under conditions of extremely low-bit quantization and high sparsity ratios. For example, in the LLaMA2-13b model with weight quantization at 2 bit and a 75% sparsity configuration, our method surpasses the state-of-the-art (SOTA) by 9.03% in average accuracy across five zero-shot tasks. Meanwhile, in the newest LLaMA3-8b model, with weight quantization at 3 bit and a 50% sparsity configuration, our method outperforms the SOTA by 4.58% (56.86% vs 52.28%) in zero-shot tasks and achieves a perplexity reduction of 4.45 on the WikiText2 dataset (10.78 vs 15.23).</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>The remarkable capabilities of large language models (LLMs) <ref type="bibr">(Touvron et al., 2023a;</ref><ref type="bibr">b;</ref><ref type="bibr" target="#b3">Brown et al., 2020;</ref><ref type="bibr" target="#b10">Le Scao et al., 2023;</ref><ref type="bibr" target="#b30">Zhang et al., 2022)</ref> have garnered considerable interest across a multitude of disciplines. Yet, the escalating dimensions of these models present significant deployment challenges on consumer-grade graphics processing units (GPUs). As a result, the topics of model compression and acceleration have increasingly become focal points within the research community. Two prevalent techniques-model quantization and sparsification-are recognized for their effectiveness in both compressing and accelerating model inference processes. Quantization <ref type="bibr">(Frantar et al., 2023;</ref><ref type="bibr" target="#b28">Yuan et al., 2023;</ref><ref type="bibr" target="#b12">Lin et al., 2023;</ref><ref type="bibr" target="#b26">Xiao et al., 2023;</ref><ref type="bibr" target="#b19">Shao et al., 2023;</ref><ref type="bibr" target="#b13">Ma et al., 2024)</ref> involves mapping high-precision floating-point parameters to lower-bit fixed-point representations. This method not only reduces the model size by minimizing the bit requirements but also boosts memory access efficiency, a crucial factor in speeding up computation. Especially on hardware platforms equipped to accelerate bitwise operations, or on processors specifically optimized for low-bit computations, quantized models can achieve notably faster processing speeds. Additionally, model sparsification <ref type="bibr">(Frantar &amp; Alistarh, 2023;</ref><ref type="bibr" target="#b20">Sun et al., 2023;</ref><ref type="bibr" target="#b31">Zhang et al., 2023;</ref><ref type="bibr" target="#b27">Xu et al., 2024)</ref> compresses models by transforming dense weight matrices into sparse formats through the application of sparse masks. This approach can significantly quicken computation on hardware platforms that are optimized for handling sparse matrix operations, thereby enhancing the overall execution speed of the models.</p><p>While model compression techniques such as quantization and sparsification accelerate computational processes, they invariably entail some degree of performance degradation. The extensive Under review as a conference paper at ICLR 2025 fine-tuning required for large language models, which often comprise hundreds of millions of parameters, involves significant time and computational resources. As a result, compression methods that bypass extensive training phases are gaining prominence. Among these, post-training quantization, which necessitates no fine-tuning or only minor calibration, has been widely adopted from the era of convolutional neural networks through to that of large language models. GPTQ <ref type="bibr">(Frantar et al., 2023)</ref> exemplifies advanced quantization techniques, implementing progressive quantization with the Optimal Brain Surgeon (OBS) <ref type="bibr" target="#b9">(Hassibi et al., 1993)</ref> algorithm to mitigate quantization errors by revising high-precision parameters. Similarly, AWQ <ref type="bibr" target="#b12">(Lin et al., 2023)</ref> performs input channel scaling, utilizing activation statistics to achieve equivalent scaling of weight activations, effectively managing the impact of outliers on quantization. OmniQuant <ref type="bibr" target="#b19">(Shao et al., 2023)</ref> pioneered the adaptation of scaling and clipping parameters into learnable entities, facilitating block-wise optimization using small data batches. In the realm of large language models, non-training-dependent sparsification methods are increasingly favored over those requiring fine-tuning. For instance, Wanda <ref type="bibr" target="#b20">(Sun et al., 2023)</ref> posits that activations must be included in weight importance assessments, suggesting that a singular weight statistic is insufficient to capture a weight's true role within the model. Dsnot <ref type="bibr" target="#b31">(Zhang et al., 2023)</ref> introduces a training-free approach by iteratively updating sparse masks, dynamically reducing the density of weights. Moreover, BESA <ref type="bibr" target="#b27">(Xu et al., 2024)</ref> innovates by applying a learnable factor to a set of candidate sparsity rates, assigning variable sparsity to different linear layers, and enabling dynamic mask optimization through adaptive sparsity.</p><p>The two compression techniques under consideration-model quantization and sparsification-do not require a training phase, which allows for their combination to potentially enhance model compression further. However, this amalgamation significantly impairs the model's performance. Even with advancements in cutting-edge compression algorithms, the performance of the model severely deteriorates under configurations characterized by low bit-width and high compression ratios. A primary contributor to this decline is the sequential implementation of the quantization and sparsity algorithms. Our experiments indicate that initiating with quantization optimization followed by the application of weight sparsity amplifies the quantization errors, consequently increasing the overall mean squared error loss. This paper introduces a joint optimization strategy designed to concurrently minimize errors associated with quantization and sparsity. More precisely, following each iteration that establishes a sparsity mask, we calibrate the quantization process using small data batches, applying the sparsity mask to the weights concurrently. Losses resulting from quantization and sparsity are optimized using a learnable transformation matrix, which adjusts dynamically. This joint optimization approach is designed to be orthogonal to a broad spectrum of existing quantization and sparsity algorithms, and it has demonstrated superior performance across a variety of algorithmic configurations. Furthermore, because the learnable transformation matrix modifies the distribution of weight data in each iteration, the learnable mask sparsity strategy must consistently ensure that weights with lower importance factors are preferentially masked. To maintain this selection, we implement a reordering of the weights based on sparsity metrics at every iteration, prioritizing the least important weights to sparsity. This reordering strategy promotes stable convergence and maintains optimal performance throughout the training process. Ultimately, our method excels in the combined compression of large language models, particularly under conditions of low-bit and high-sparsity configurations. In conclusion, the key contributions of this study are summarized as follows:</p><p>• We introduce a novel joint optimization strategy that integrates compression techniques to concurrently minimize errors associated with quantization and sparsity. This methodology is designed to be orthogonal to a wide spectrum of existing compression algorithms, demonstrating unparalleled performance across diverse algorithmic combinations.</p><p>• Furthermore, we have proposed a dynamic reordering method to enhance the efficacy of learnable masks. By systematically reordering weight rows according to sparsity metrics at each iteration, this method ensures the consistent masking of the least significant weights. This process not only stabilizes the convergence of the optimization algorithm but also maximizes the effectiveness of learnable masking, contributing to more reliable model training outcomes.</p><p>• Our techniques have set new benchmarks in the field of combined compression for large language models, particularly in configurations characterized by low bit-width and high sparsity. Notably, our strategy improved average performance by 9.03% over traditional sequential compression methods in five zero-shot tasks on the LLaMA2-13b model configured with 2-bit quantization and 75% sparsity. Additionally, in a setting with 3-bit quantization and 50% sparsity on the LLaMA3-8b model, our method surpassed the current state-of-the-art by 4.58% (achieving 56.86% compared to 52.28%) in zero-shot tasks, and significantly reduced perplexity by 4.45 on the WikiText2 dataset (10.78 compared to 15.23).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">RELATED WORK</head><p>The substantial parameter count of large language models presents considerable challenges for the application of quantization and sparsity methods, especially when fine-tuning is required. Given these challenges, this paper focuses on the efficient strategies of post-training quantization and sparsity.</p><p>Post-training Quantization (PTQ). In the convolutional neural network (CNN) domain, several post-training quantization methods, such as Adaround <ref type="bibr" target="#b15">(Nagel et al., 2020)</ref>, BRECQ <ref type="bibr" target="#b11">(Li et al., 2021)</ref>, and QDROP <ref type="bibr">(Wei et al., 2022a)</ref>, employ adaptive rounding techniques for model weights. This involves reconstructing the model either layer-wise or block-wise to optimize the rounding parameters, thereby minimizing quantization errors. Specifically, in large language models, outliers significantly complicate the quantization process. GPTQ <ref type="bibr">(Frantar et al., 2023)</ref> addresses this by correcting full-precision parameters using the OBS <ref type="bibr" target="#b9">(Hassibi et al., 1993)</ref> algorithm. Furthermore, numerous studies <ref type="bibr">(Wei et al., 2022b;</ref><ref type="bibr" target="#b12">Lin et al., 2023;</ref><ref type="bibr" target="#b26">Xiao et al., 2023;</ref><ref type="bibr" target="#b28">Yuan et al., 2023;</ref><ref type="bibr" target="#b19">Shao et al., 2023;</ref><ref type="bibr" target="#b13">Ma et al., 2024</ref>) have adopted equivalent transformation operations-including scaling, shifting, rotating, and rearranging-to relocate the effects of activation outliers to the weights, effectively diminishing their adverse impacts. Furthermore, the quantization method based on orthogonal matrix <ref type="bibr" target="#b0">(Ashkboos et al., 2024)</ref> transformation efficiently generates a quantized model without the need for retraining. This orthogonally constrained sampling matrix effectively mitigates the impact of outliers in activations on the quantization process.</p><p>Post-training Sparsity. Similarly, outliers in activations detrimentally influence sparsity performance within large language models. Traditional pruning algorithms can severely degrade model performance, typically necessitating subsequent fine-tuning for performance recovery. To address this, a variety of post-training sparsity techniques <ref type="bibr">(Frantar &amp; Alistarh, 2023;</ref><ref type="bibr" target="#b20">Sun et al., 2023;</ref><ref type="bibr" target="#b31">Zhang et al., 2023;</ref><ref type="bibr" target="#b27">Xu et al., 2024)</ref> have been developed to efficiently implement sparsity in large models. They range from employing single-dimensional to multi-dimensional importance metrics, from those based on statistical characteristics to those relying on gradient-based optimization, and evolve from static to dynamic sparsity approaches. The evolution of post-training sparsity methods has significantly enhanced the adaptability of large language models across diverse computing platforms, promoting broader deployment and application.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">METHODOLOGY</head><p>In this section, we initially introduce foundational concepts and establish notation conventions relevant to quantization and sparsification. We then propose the application of a joint optimization combination compression method in large language models. This method, in contrast to other combined compression strategies, consistently achieves stable and low mean squared error losses throughout the optimization process. Finally, to ensure effective sparsification of weights with low importance, we introduce a reordering strategy that maintains the priority of non-critical weights, thus preserving the model's overall performance.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.1">PRELIMINARY</head><p>Quantization. Model quantization typically involves mapping the weights or activation parameters to low-bit integers to compress the model. To clarify, we define our quantization function as follows:</p><formula xml:id="formula_0">Q(x) = ∆ * clamp x ∆ + zp, 0, 2 n -1 -zp . (<label>1</label></formula><formula xml:id="formula_1">)</formula><p>Where ∆ is the quantization step size, zp is the zero point, n is the quantization bit width, and the clamp(•) operation truncates data that exceeds the range to the upper or lower bounds. The quantization step size is commonly used to map the distribution range of the input data x to the range of the quantized fixed-point distribution. Consequently, calculating the step size factor and the zero point based on the maximum and minimum values of x is a standard approach, as follows:</p><formula xml:id="formula_2">∆ = max(x) -min(x) 2 n -1 , zp = -min(x) * (2 n -1) max(x) -min(x) . (<label>2</label></formula><formula xml:id="formula_3">)</formula><p>The presence of outliers in large language models significantly impairs performance <ref type="bibr">(Frantar et al., 2023;</ref><ref type="bibr" target="#b12">Lin et al., 2023;</ref><ref type="bibr" target="#b26">Xiao et al., 2023)</ref> when the maximum and minimum values are used to determine the quantization step size. These outliers compress the bulk of non-outlier values towards near-zero quantized integers, introducing substantial rounding errors for a majority of parameters.</p><p>Additionally, directly truncating outliers can lead to a marked decline in performance <ref type="bibr" target="#b2">(Bondarenko et al., 2024)</ref>. To mitigate these issues, the maximum and minimum values are often scaled by a learnable factor <ref type="bibr" target="#b19">(Shao et al., 2023)</ref>, enabling the determination of an optimal truncation range via gradient descent. This approach is formalized as follows:</p><formula xml:id="formula_4">∆ = α * max(x) -β * min(x) 2 n -1 , zp = -β * min(x) * (2 n -1) α * max(x) -β * min(x) . (<label>3</label></formula><formula xml:id="formula_5">)</formula><p>Where α and β are learnable parameters, adjusted with a small sample of data through gradientbased calibration.</p><p>Sparsification. Sparsification of LLMs entails converting dense weight matrices into sparse matrices through the application of a sparse mask. During this process, our objective is to minimize the mean squared loss between the features before and after sparsification. The sparsity rate p is defined as the ratio of the number of sparse elements to the total number of weight parameters. Specifically, for a given weight matrix W and activations X, the sparsification optimization problem is formalized as follows:</p><formula xml:id="formula_6">arg min M ∥XW -X (M ⊙ W )∥ 2 F , p = 1 - ∥W ∥ 0 C in * C out . (<label>4</label></formula><formula xml:id="formula_7">)</formula><p>Where M denotes the sparse mask, ⊙ represents the Hadamard product, ||W || 0 indicates the count of non-zero elements in W , and C in /C out correspond to the number of input and output channels, respectively, in the weight matrix W .</p><p>Blockwise Optimization. Due to the large number of parameters in LLMs, in order to save the memory used by the model, we adopt a block-wise optimization strategy. Specifically, for the optimization process of quantization or sparsification, our optimization problem is constructed as follows:</p><formula xml:id="formula_8">arg min W ′ ∥f i (X, W ) -f i (X, W ′ )∥ 2 F .<label>(5)</label></formula><p>In this formulation, for quantization and sparsification respectively,</p><formula xml:id="formula_9">W ′ = Q(W ) or W ′ = M ⊙ W is used.</formula><p>The term f i denotes the i-th transformer block.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">JOINT OPTIMIZATION</head><p>Recent methodologies <ref type="bibr" target="#b27">(Xu et al., 2024)</ref> in combined compression typically sequence quantization and sparsification processes. Given the prevalence of outliers in LLMs, contemporary quantization techniques <ref type="bibr" target="#b19">(Shao et al., 2023;</ref><ref type="bibr" target="#b13">Ma et al., 2024)</ref> employ learnable scales or matrices to execute equivalent transformations on both weights and activation vectors. Consider a scenario where the input activations are denoted as X and the weights as W , the quantization optimization problem can be formalized as follows:  Where A is a learnable transformation matrix. The latest combined compression methods <ref type="bibr" target="#b27">(Xu et al., 2024)</ref> first optimize quantization errors according to Eq. 6, and subsequently calculate the importance factors for the quantized weights Q(AW ) to determine the sparse mask. Specifically, this process can be described as follows: assuming the matrix</p><formula xml:id="formula_10">arg min A XW -XA -1 Q(AW ) 2 F .<label>(6)</label></formula><formula xml:id="formula_11">A opt makes XW -XA -1 opt Q(A opt W ) 2 F optimal, the sparse mask M is then optimized to minimize XW -XA -1 opt (M ⊙ Q(A opt W ))<label>2</label></formula><p>F . This sequential optimization approach results in quantization optimization that does not account for the loss introduced by sparsification. Consequently, this two-stage combined compression method causes the matrix A and the mask M to achieve only local optimality in their respective stages. As a result, the overall mean squared error loss of the features is difficult to minimize globally. Therefore, we propose the following combined compression method based on joint optimization:</p><formula xml:id="formula_12">arg min A,M XW -XA -1 (M ⊙ Q(AW )) 2 F .<label>(7)</label></formula><p>Specifically, in cases where the sparsification method statically determines the mask without relying on gradient information, the matrix M is computed before the optimization process begins and remains unchanged. Throughout the optimization process, the joint optimization method consistently demonstrates superior performance in reducing mean squared error loss across various models. As illustrated in Fig. <ref type="figure">1</ref>, for the LLaMA2-13b and OPT-2.7b models, joint optimization consistently Under review as a conference paper at ICLR 2025 achieves lower loss compared to sequential optimization across different transformer blocks, under varying bit widths and sparsity rates.</p><p>Additionally, we conduct experiments to analyze the distribution of mean squared error (MSE) losses on LLaMA1&amp;3. As illustrated in Fig. <ref type="figure" target="#fig_0">2</ref>, the MSE losses resulting from joint optimization are consistently lower than those from sequential optimization across both LLaMA1&amp;3, highlighting the effectiveness of the joint optimization approach.</p><p>For large language models, the objective of block-wise combined compression optimization is defined as follows:</p><formula xml:id="formula_13">arg min A,M,δ f i (X, W ) -f i ((X -δ)A -1 , M ⊙ Q(AW ), b + δW ) 2 F .<label>(8)</label></formula><p>Where δ represents a learnable offset designed to align the distributions across different channels of weights and activations. Consistent with previous research <ref type="bibr" target="#b19">(Shao et al., 2023;</ref><ref type="bibr" target="#b13">Ma et al., 2024;</ref><ref type="bibr" target="#b27">Xu et al., 2024)</ref>, we overlook the impact of quantization and sparsification on this offset when compensating for the bias in linear layers. Detailed derivations are provided in the Appendix A.1.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.3">REORDERING</head><p>To reduce the complexity of optimization, the learnable mask sparsification strategy typically establishes a set of candidate sparsity rates for each row of the weight matrix W . Each candidate sparsity rate is multiplied by a learnable factor to ascertain the optimal sparsity rate for every row. Concurrently, the rows of W are organized according to a sparsity importance factor, and weights deemed less important are sparsified based on the aggregate sparsity rate derived from the candidate rates. However, the learnable transformation matrix A, as specified in Eq. 7, alters the distribution of weights with each iteration. Consequently, the importance of weights changes dynamically throughout the optimization process. We propose that at the beginning of each optimization iteration, the quantized weights Q(AW ) are reordered based on the following importance metric:</p><formula xml:id="formula_14">γ i,j = ∥X :,i ∥ 2 F • |W i,j | .<label>(9)</label></formula><p>By employing a reordering strategy, the dynamic mask sparsification method consistently and accurately targets weights with lower importance in each iteration. This approach significantly enhances the generalizability and effectiveness of the joint optimization method, thereby ensuring consistently superior performance across various models and datasets.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">EXPERIMENTS</head><p>4.1 SETTINGS Implementation Details. The implementation details of our proposed joint optimization strategy are outlined as follows. Consistent with established quantization <ref type="bibr" target="#b19">(Shao et al., 2023;</ref><ref type="bibr" target="#b13">Ma et al., 2024)</ref> and sparsification <ref type="bibr">(Frantar &amp; Alistarh, 2023;</ref><ref type="bibr" target="#b20">Sun et al., 2023;</ref><ref type="bibr" target="#b31">Zhang et al., 2023;</ref><ref type="bibr" target="#b27">Xu et al., 2024)</ref> methodologies, our calibration dataset comprises 128 segments, each consisting of 2048 tokens sampled from the WikiText2 <ref type="bibr" target="#b14">(Merity et al., 2016)</ref> training corpus. In terms of hyperparameter configuration, when employing AffineQuant <ref type="bibr" target="#b13">(Ma et al., 2024)</ref> for quantization, we set the stability factor α = 0.1. For all experiments utilizing DSnoT <ref type="bibr" target="#b31">(Zhang et al., 2023)</ref> as the sparsification method, we define the maximum cycle T = 50 and the update threshold ϵ = 0.1. In experiments involving BESA <ref type="bibr" target="#b27">(Xu et al., 2024)</ref> as the sparsification approach, the sparsity radio β is set to 5e 0 . Our proposed methodology is implemented in PyTorch <ref type="bibr" target="#b16">(Paszke et al., 2019)</ref> and leverage the HuggingFace Transformers library <ref type="bibr" target="#b25">Wolf et al. (2019)</ref> for data and model management.</p><p>Baselines. We apply joint optimization strategy to the LLaMA <ref type="bibr">(Touvron et al., 2023a)</ref>, LLaMA2 <ref type="bibr">(Touvron et al., 2023b)</ref>, LLaMA-3, and OPT <ref type="bibr" target="#b30">(Zhang et al., 2022)</ref> families, representing the forefront of open-source Large Language Models (LLMs). Notably, our approach transcends limitations in model size, enabling optimization across a spectrum ranging from 125 million to 70 billion parameters on a single NVIDIA A800 GPU with 80GB of memory. To benchmark our methodology, we juxtapose it with the state-of-the-art (SOTA) sequential optimization proposed by Table <ref type="table">1</ref>: Comparison of perplexity and zero-shot dataset accuracy between sequential optimization and joint optimization at 75% sparsity on LLAMA1&amp;2. "Sequential" and "Joint" denote the sequential and joint combined compression methods, respectively. "w2a16g128" refers to 2-bit weight-only quantization with a group size of 128. "Affine" indicates that quantization is performed using AffineQuant <ref type="bibr" target="#b13">(Ma et al., 2024)</ref>. BESA <ref type="bibr" target="#b27">(Xu et al., 2024)</ref> for combined compression. For fair comparison, we adopt per-channel weight quantization, per-token activation quantization, and unstructured sparsity across all experiments.</p><p>Evaluation. To evaluate the efficacy of the LLM compression achieved through the joint optimization strategy, we conducted evaluations across a range of benchmark zero-shot accuracies, encompassing PIQA <ref type="bibr" target="#b1">(Bisk et al., 2020)</ref>, BoolQ <ref type="bibr" target="#b4">(Clark et al., 2019)</ref>, ARC <ref type="bibr" target="#b5">(Clark et al., 2018)</ref>, HellaSwag <ref type="bibr" target="#b29">(Zellers et al., 2019)</ref>, and WinoGrande <ref type="bibr" target="#b18">(Sakaguchi et al., 2019)</ref>. Leveraging the lmeval-harness <ref type="bibr" target="#b8">(Gao et al., 2021)</ref>, we executed all zero-shot tasks and reported precision results for each benchmark, as well as the overall average accuracy. Furthermore, we conducted perplexity evaluations on the WikiText2 <ref type="bibr" target="#b14">(Merity et al., 2016)</ref> and C4 <ref type="bibr" target="#b17">(Raffel et al., 2020)</ref> datasets, serving as stable and robust indicators of model generation performance.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.2">RESULTS</head><p>As shown in Tabs. 1, 2, 3 and 5 we evaluate the perplexity and zero-shot task accuracy of joint optimization and sequential optimization under different compression configurations using LLaMA1, LLaMA2, LLaMA3, and OPT models of various scales. The experimental results demonstrate Under review as a conference paper at ICLR 2025  that joint optimization consistently exhibits performance improvements across various combinations of compression methods (for example, LLaMA3-8B with w3a16g128 and 50% sparsity achieved 56.86% accuracy vs. 52.28% with sequential optimization on zero-shot datasets). Notably, in scenarios with high compression rates, the performance gains from joint optimization are even more significant. Specifically, on the LLaMA-7B model using the w2a16g128 quantization configuration with 75% sparsity and employing the Wanda <ref type="bibr" target="#b20">(Sun et al., 2023)</ref> sparsification method, joint optimization reduces the perplexity on the WikiText2 dataset by 3476.24 compared to sequential optimization <ref type="bibr">(44.79 vs. 3521.03)</ref>. These experiments further substantiate the substantial benefits of joint optimization over sequential optimization.</p><p>Tab. 6 presents the results of combined compression for larger-scale models of LLaMA 1 and 2.</p><p>The experiments indicate that our method continues to outperform the latest combined compression techniques. For instance, with a quantization configuration of w2a16g128 and 75% sparsity for LLaMA-30B, the joint optimization strategy using the Wanda sparsity method reduced the average perplexity on the WikiText2 and C4 datasets by 519.46 (from 577.02 to 57.56). Similarly, for LLaMA2-70B with the same quantization configuration and sparsity rate, the joint optimization strategy using the DSnoT sparsity method achieved a reduction in average perplexity by 79.41 (from 102.67 to 23.26).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.3">ABLATION STUDY</head><p>Reordering Effectiveness. As shown in Tab. 4, we demonstrate the effectiveness of the reordering method for learnable sparse masks on dynamic weights. On the LLaMA2-13B model with the  w2a16g128 quantization configuration and 50% sparsity, the reordering method reduces the average perplexity on WikiText2 and C4 by 397.74 compared to the method without reordering (13.44 vs. 411.18). Thus, the reordering method ensures that less important weight parameters are sparsified in each iteration, thereby improving the performance of the compressed model.</p><p>Impact of Calibration Data and Epochs. Fig. <ref type="figure" target="#fig_1">3</ref> illustrates the impact of varying amounts of calibration data and epochs on the performance of joint optimization. Overall, as the number of samples and epochs increases, perplexity generally decreases across different models. This trend indicates that more calibration data and training epochs are beneficial for joint optimization. Additionally, the %ORFN 6SDUVLW\5DWH 7DUJHW6SDUVLW\5DWH 6SDUVHILUVW 4XDQWILUVW</p><p>Figure <ref type="figure">4</ref>: Comparison of sparsity rates using different sequential compression methods for various blocks. The method of quantizing first and then sparsifying achieves the target sparsity rate. In contrast, performing sparsification first can be undermined by the zero points introduced during quantization, leading to a final sparsity rate significantly lower than the intended target.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A APPENDIX</head><p>A.1 BIAS COMPENSATING Given that we use only a small amount of data for compression optimization, avoiding model overfitting presents a significant challenge. To mitigate this, we aim to approximate the final output of the compressed model to match that of the original model. By ensuring similar output distributions, we can better preserve the model's generalization ability. Consequently, it is necessary to compensate for the bias in the linear layer. Specifically, we proceed with the following derivation:</p><p>Y =XW + bias (10)</p><formula xml:id="formula_15">=XA -1 AW + bias,<label>(11)</label></formula><p>=(X -δ)A -1 AW + (bias + δW ),</p><p>≈(X -δ)A -1 Q(AW ) + (bias + δW ),</p><p>≈(X -δ)A -1 (M ⊙ Q(AW )) + (bias + δW ).</p><p>Ultimately, we need to compensate for the bias with δW to maintain approximate output equivalence. Consistent with previous research <ref type="bibr" target="#b19">(Shao et al., 2023;</ref><ref type="bibr" target="#b13">Ma et al., 2024;</ref><ref type="bibr" target="#b27">Xu et al., 2024)</ref>, we approximate Q(AW ) ≈ AW and M ⊙ Q(AW ) ≈ Q(AW ) to ensure equivalent model outputs.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 2 :</head><label>2</label><figDesc>Figure 2: Comparison of Mean Squared Error (MSE) losses for combined compression techniques using joint optimization and sequential optimization methods on LLaMA1&amp;3.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: Impact of calibration samples and number of epochs on joint optimization performance. We evaluate the perplexity of WikiText2 across different models using the w2a16g128 quantization configuration with 50% sparsity. To enhance visualization clarity, the perplexities of the OPT model and LLaMA-7B model (left part) are divided by 100, while the perplexity of the LLaMA3 model (right part) is divided by 10.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head></head><label></label><figDesc>Comparison of Mean Squared Error (MSE) losses for combined compression techniques using joint and sequential optimization methods. The label "w2a16g128" indicates weight-only quantization at a 2-bit and a group size of 128. The "75%" refers to the sparsity rate implemented. "Block" denotes transformer blocks of various depths. MSE losses of features are computed after 20 epochs of optimization across each block. The sparsification is performed using the Wanda<ref type="bibr" target="#b20">(Sun et al., 2023)</ref> method, and quantization is conducted with the OmniQuant<ref type="bibr" target="#b19">(Shao et al., 2023)</ref> method.</figDesc><table><row><cell>Under review as a conference paper at ICLR 2025</cell><cell></cell><cell></cell></row><row><cell>//D0$EZDJ</cell><cell></cell><cell>237EZDJ</cell></row><row><cell>MRLQWRSWLPL]DWLRQ</cell><cell></cell><cell>MRLQWRSWLPL]DWLRQ</cell></row><row><cell>VHTXHQWLDORSWLPL]DWLRQ</cell><cell></cell><cell>VHTXHQWLDORSWLPL]DWLRQ</cell></row><row><cell>/RVV</cell><cell>/RVV</cell><cell></cell></row><row><cell>%ORFN</cell><cell></cell><cell>%ORFN</cell></row><row><cell>/RVV Figure 1: %ORFN //D0$EZDJ MRLQWRSWLPL]DWLRQ VHTXHQWLDORSWLPL]DWLRQ</cell><cell>/RVV</cell><cell>%ORFN //D0$EZDJ MRLQWRSWLPL]DWLRQ VHTXHQWLDORSWLPL]DWLRQ</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 2 :</head><label>2</label><figDesc>Comparison of perplexity and zero-shot dataset accuracy between joint optimization and sequential optimization under different compression configurations on LLAMA3.</figDesc><table><row><cell>Model</cell><cell>Bits</cell><cell>Sparsity</cell><cell>Method</cell><cell></cell><cell>PPL ↓</cell><cell></cell><cell></cell><cell></cell><cell cols="2">Accuracy (%) ↑</cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>WikiText2</cell><cell>C4</cell><cell>Avg.</cell><cell cols="6">BoolQ HellaSwag WinoGrande ARC-c ARC-e Avg.</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>4.88</cell><cell>6.73</cell><cell>5.81</cell><cell>80.55</cell><cell>60.04</cell><cell>72.21</cell><cell>48.46</cell><cell>79.37</cell><cell>68.13</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Sequential-Wanda</cell><cell>2677.90</cell><cell cols="3">3837.04 3257.47 37.82</cell><cell>26.19</cell><cell>47.35</cell><cell>22.18</cell><cell>25.33</cell><cell>31.77</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-Wanda</cell><cell>83.46</cell><cell>123.17</cell><cell>103.32</cell><cell>57.18</cell><cell>29.01</cell><cell>49.25</cell><cell>20.64</cell><cell>32.36</cell><cell>37.69</cell></row><row><cell>LLaMA2-13B</cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-Wanda-Affine</cell><cell>26.86</cell><cell>38.82</cell><cell>32.84</cell><cell>62.23</cell><cell>31.19</cell><cell>51.46</cell><cell>22.01</cell><cell>37.12</cell><cell>40.80</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Sequential-DSnoT</cell><cell>3918.30</cell><cell cols="3">7890.29 5904.30 37.82</cell><cell>26.23</cell><cell>48.38</cell><cell>20.81</cell><cell>25.46</cell><cell>31.74</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-DSnoT</cell><cell>112.16</cell><cell>139.08</cell><cell>125.62</cell><cell>51.34</cell><cell>28.60</cell><cell>49.17</cell><cell>20.39</cell><cell>32.11</cell><cell>36.32</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-DSnoT-Affine</cell><cell>59.92</cell><cell>76.93</cell><cell>68.43</cell><cell>52.53</cell><cell>29.19</cell><cell>51.30</cell><cell>21.24</cell><cell>31.48</cell><cell>37.15</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>5.63</cell><cell>7.07</cell><cell>6.35</cell><cell>75.10</cell><cell>56.95</cell><cell>69.85</cell><cell>41.89</cell><cell>75.29</cell><cell>63.82</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Sequential-Wanda</cell><cell>3521.03</cell><cell cols="3">3567.52 3544.28 37.82</cell><cell>25.72</cell><cell>48.69</cell><cell>21.33</cell><cell>26.17</cell><cell>31.95</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-Wanda</cell><cell>1247.68</cell><cell cols="3">1398.08 1322.88 37.82</cell><cell>25.86</cell><cell>49.56</cell><cell>21.24</cell><cell>26.76</cell><cell>32.25</cell></row><row><cell>LLaMA-7B</cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-Wanda-Affine</cell><cell>44.79</cell><cell>70.32</cell><cell>57.56</cell><cell>50.12</cell><cell>28.22</cell><cell>49.80</cell><cell>20.22</cell><cell>32.70</cell><cell>36.21</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Sequential-DSnoT</cell><cell>3146.59</cell><cell cols="3">4742.01 3944.30 37.82</cell><cell>25.99</cell><cell>50.43</cell><cell>21.67</cell><cell>26.09</cell><cell>32.40</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-DSnoT</cell><cell>1297.72</cell><cell cols="3">1468.20 1382.96 37.82</cell><cell>25.72</cell><cell>50.90</cell><cell>20.05</cell><cell>27.27</cell><cell>32.35</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-DSnoT-Affine</cell><cell>85.69</cell><cell>126.70</cell><cell>106.20</cell><cell>39.41</cell><cell>27.50</cell><cell>52.80</cell><cell>20.98</cell><cell>35.01</cell><cell>35.14</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>5.03</cell><cell>6.61</cell><cell>5.82</cell><cell>77.98</cell><cell>59.91</cell><cell>72.77</cell><cell>46.50</cell><cell>77.35</cell><cell>66.90</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Sequential-Wanda</cell><cell>1345.77</cell><cell cols="3">1705.19 1525.48 37.82</cell><cell>26.10</cell><cell>50.03</cell><cell>20.90</cell><cell>25.67</cell><cell>32.10</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-Wanda</cell><cell>61.57</cell><cell>73.72</cell><cell>67.65</cell><cell>45.87</cell><cell>29.55</cell><cell>52.40</cell><cell>21.58</cell><cell>34.13</cell><cell>36.71</cell></row><row><cell>LLaMA-13B</cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-Wanda-Affine</cell><cell>30.50</cell><cell>46.90</cell><cell>38.70</cell><cell>56.85</cell><cell>30.76</cell><cell>54.22</cell><cell>20.22</cell><cell>35.81</cell><cell>39.57</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Sequential-DSnoT</cell><cell>1408.23</cell><cell cols="3">1913.72 1660.98 37.82</cell><cell>26.00</cell><cell>48.85</cell><cell>21.24</cell><cell>26.38</cell><cell>32.06</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-DSnoT</cell><cell>95.21</cell><cell>93.78</cell><cell>94.50</cell><cell>47.43</cell><cell>29.31</cell><cell>50.74</cell><cell>20.05</cell><cell>32.32</cell><cell>35.97</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>75%</cell><cell>Joint-DSnoT-Affine</cell><cell>52.20</cell><cell>64.35</cell><cell>58.28</cell><cell>57.79</cell><cell>29.70</cell><cell>51.38</cell><cell>20.05</cell><cell>37.12</cell><cell>39.21</cell></row><row><cell>Model</cell><cell>Bits</cell><cell>Sparsity</cell><cell>Method</cell><cell cols="2">PPL ↓</cell><cell></cell><cell></cell><cell></cell><cell cols="2">Accuracy (%) ↑</cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>WikiText2</cell><cell>C4</cell><cell cols="7">Avg. PIQA HellaSwag WinoGrande ARC-c ARC-e Avg.</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>6.04</cell><cell>8.88</cell><cell>7.46</cell><cell>79.70</cell><cell>60.17</cell><cell>72.69</cell><cell>50.42</cell><cell>80.09</cell><cell>68.61</cell></row><row><cell></cell><cell>w4a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>10.89</cell><cell cols="3">15.65 13.27 74.21</cell><cell>50.76</cell><cell>67.79</cell><cell>35.49</cell><cell>67.97</cell><cell>59.24</cell></row><row><cell></cell><cell>w4a16g128</cell><cell>50%</cell><cell>Joint-Wanda</cell><cell>9.13</cell><cell cols="3">13.62 11.38 74.70</cell><cell>51.84</cell><cell>68.24</cell><cell>38.65</cell><cell>71.54</cell><cell>60.99</cell></row><row><cell></cell><cell>w4a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>10.06</cell><cell cols="3">14.87 12.46 74.53</cell><cell>50.97</cell><cell>67.24</cell><cell>38.22</cell><cell>70.70</cell><cell>60.33</cell></row><row><cell>LLaMA3-8B</cell><cell>w4a16g128</cell><cell>50%</cell><cell>Joint-DSnoT</cell><cell>9.01</cell><cell cols="3">13.58 11.30 74.75</cell><cell>51.85</cell><cell>68.03</cell><cell>38.48</cell><cell>71.33</cell><cell>60.89</cell></row><row><cell></cell><cell>w3a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>15.23</cell><cell cols="3">22.10 18.66 68.44</cell><cell>60.61</cell><cell>43.07</cell><cell>28.66</cell><cell>60.60</cell><cell>52.28</cell></row><row><cell></cell><cell>w3a16g128</cell><cell>50%</cell><cell>Joint-Wanda</cell><cell>10.78</cell><cell cols="3">15.72 13.25 71.54</cell><cell>65.03</cell><cell>48.73</cell><cell>33.61</cell><cell>65.40</cell><cell>56.86</cell></row><row><cell></cell><cell>w3a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>15.51</cell><cell cols="3">22.56 19.04 68.28</cell><cell>43.36</cell><cell>61.24</cell><cell>28.58</cell><cell>61.74</cell><cell>52.64</cell></row><row><cell></cell><cell>w3a16g128</cell><cell>50%</cell><cell>Joint-DSnoT</cell><cell>10.66</cell><cell cols="3">15.73 13.20 72.47</cell><cell>48.49</cell><cell>64.40</cell><cell>34.30</cell><cell>65.78</cell><cell>57.09</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_2"><head>Table 3 :</head><label>3</label><figDesc>Comparison of perplexity and five zero-shot datasets accuracy between sequential optimization and joint optimization on LLaMA1&amp;2.</figDesc><table><row><cell>Model</cell><cell>Bits</cell><cell>Sparsity</cell><cell>Method</cell><cell cols="2">PPL ↓</cell><cell></cell><cell></cell><cell></cell><cell>Accuracy(%) ↑</cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>WikiText2</cell><cell>C4</cell><cell cols="7">Avg. BoolQ HellaSwag WinoGrande ARC-c ARC-e Avg.</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>4.88</cell><cell>6.73</cell><cell>5.81</cell><cell>80.55</cell><cell>60.04</cell><cell>72.21</cell><cell>48.46</cell><cell>79.37</cell><cell>68.13</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>10.88</cell><cell cols="3">13.63 12.26 61.83</cell><cell>44.32</cell><cell>56.59</cell><cell>28.58</cell><cell>59.55</cell><cell>50.17</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-Wanda-Affine</cell><cell>9.17</cell><cell cols="3">12.26 10.72 66.20</cell><cell>45.00</cell><cell>58.01</cell><cell>31.48</cell><cell>62.83</cell><cell>52.70</cell></row><row><cell>LLaMA2-13B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>11.83</cell><cell cols="3">14.49 13.16 59.51</cell><cell>43.58</cell><cell>58.16</cell><cell>29.60</cell><cell>58.33</cell><cell>49.84</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-DSnoT-Affine</cell><cell>9.44</cell><cell cols="3">12.52 10.98 64.37</cell><cell>43.95</cell><cell>57.69</cell><cell>28.58</cell><cell>57.44</cell><cell>50.41</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>60%</cell><cell>Sequential-BESA</cell><cell>12.50</cell><cell cols="3">14.80 13.65 63.18</cell><cell>42.76</cell><cell>56.69</cell><cell>27.30</cell><cell>58.12</cell><cell>49.61</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>60%</cell><cell>Joint-BESA-Affine</cell><cell>10.75</cell><cell cols="3">13.70 12.23 67.09</cell><cell>42.69</cell><cell>55.80</cell><cell>29.94</cell><cell>59.09</cell><cell>50.92</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>5.63</cell><cell>7.07</cell><cell>6.35</cell><cell>75.10</cell><cell>56.95</cell><cell>69.85</cell><cell>41.89</cell><cell>75.29</cell><cell>63.82</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>12.68</cell><cell cols="3">16.29 14.49 48.16</cell><cell>39.47</cell><cell>53.98</cell><cell>24.82</cell><cell>52.39</cell><cell>43.76</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-Wanda-Affine</cell><cell>10.89</cell><cell cols="3">14.48 12.69 62.01</cell><cell>40.40</cell><cell>55.16</cell><cell>25.85</cell><cell>55.59</cell><cell>47.80</cell></row><row><cell>LLaMA-7B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>13.32</cell><cell cols="3">16.98 15.15 40.45</cell><cell>38.96</cell><cell>53.82</cell><cell>24.14</cell><cell>52.81</cell><cell>42.04</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-DSnoT-Affine</cell><cell>11.84</cell><cell cols="3">15.60 13.72 57.64</cell><cell>41.04</cell><cell>56.35</cell><cell>27.98</cell><cell>58.03</cell><cell>48.21</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>60%</cell><cell>Sequential-BESA</cell><cell>16.05</cell><cell cols="3">20.03 18.04 49.26</cell><cell>36.85</cell><cell>51.85</cell><cell>24.14</cell><cell>48.14</cell><cell>42.05</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>60%</cell><cell>Joint-BESA-Affine</cell><cell>14.59</cell><cell cols="3">19.17 16.88 53.48</cell><cell>37.24</cell><cell>55.48</cell><cell>23.72</cell><cell>50.37</cell><cell>44.06</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>5.03</cell><cell>6.61</cell><cell>5.82</cell><cell>77.98</cell><cell>59.91</cell><cell>72.77</cell><cell>46.50</cell><cell>77.35</cell><cell>66.90</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>9.17</cell><cell cols="3">11.79 10.48 62.93</cell><cell>45.68</cell><cell>61.40</cell><cell>29.01</cell><cell>60.26</cell><cell>51.86</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-Wanda-Affine</cell><cell>8.17</cell><cell cols="2">10.98 9.58</cell><cell>65.96</cell><cell>46.17</cell><cell>63.69</cell><cell>31.31</cell><cell>66.03</cell><cell>54.63</cell></row><row><cell>LLaMA-13B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>9.52</cell><cell cols="3">12.13 10.83 64.18</cell><cell>45.48</cell><cell>61.79</cell><cell>27.90</cell><cell>60.35</cell><cell>51.94</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-DSnoT-Affine</cell><cell>8.92</cell><cell cols="3">11.63 10.28 66.11</cell><cell>46.45</cell><cell>63.14</cell><cell>31.65</cell><cell>64.30</cell><cell>54.33</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>60%</cell><cell>Sequential-BESA</cell><cell>11.23</cell><cell cols="3">13.72 12.48 63.42</cell><cell>43.18</cell><cell>58.95</cell><cell>27.38</cell><cell>57.23</cell><cell>50.03</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>60%</cell><cell>Joint-BESA-Affine</cell><cell>10.41</cell><cell cols="3">13.61 12.01 63.39</cell><cell>44.57</cell><cell>61.08</cell><cell>29.69</cell><cell>62.12</cell><cell>52.17</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_3"><head>Table 4 :</head><label>4</label><figDesc>The contribution of the reordering method to the combined compression approach based on learned sparsification masks.</figDesc><table><row><cell>Model</cell><cell>Bits</cell><cell>Sparsity</cell><cell>Method</cell><cell></cell><cell>PPL ↓</cell><cell></cell><cell></cell><cell></cell><cell cols="2">Accuracy (%) ↑</cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>WikiText2</cell><cell>C4</cell><cell>Avg.</cell><cell cols="6">BoolQ HellaSwag WinoGrande ARC-c ARC-e Avg.</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>5.63</cell><cell>7.07</cell><cell>6.35</cell><cell>75.10</cell><cell>56.95</cell><cell>69.85</cell><cell>41.89</cell><cell>75.29</cell><cell>63.82</cell></row><row><cell>LLaMA-7B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint without Reorder</cell><cell>114.72</cell><cell cols="3">316.01 215.36 37.82</cell><cell>25.87</cell><cell>50.83</cell><cell>19.19</cell><cell>27.78</cell><cell>32.30</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint with Reorder</cell><cell>13.85</cell><cell>19.06</cell><cell>16.46</cell><cell>58.68</cell><cell>38.34</cell><cell>52.80</cell><cell>24.57</cell><cell>52.44</cell><cell>45.37</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>4.88</cell><cell>6.73</cell><cell>5.81</cell><cell>80.55</cell><cell>60.04</cell><cell>72.21</cell><cell>48.46</cell><cell>79.37</cell><cell>68.13</cell></row><row><cell>LLaMA2-13B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint without Reorder</cell><cell>236.09</cell><cell cols="3">586.26 411.18 37.88</cell><cell>25.93</cell><cell>50.19</cell><cell>19.96</cell><cell>26.59</cell><cell>32.11</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint with Reorder</cell><cell>11.88</cell><cell>14.99</cell><cell>13.44</cell><cell>59.26</cell><cell>40.82</cell><cell>52.72</cell><cell>25.08</cell><cell>52.18</cell><cell>46.12</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_4"><head>Table 5 :</head><label>5</label><figDesc>Comparison of perplexity and zero-shot dataset accuracy between sequential optimization and joint optimization on OPT models of different scales.</figDesc><table><row><cell>Model</cell><cell>Bits</cell><cell>Sparsity</cell><cell>Method</cell><cell cols="2">PPL ↓</cell><cell></cell><cell></cell><cell></cell><cell cols="2">Accuracy (%) ↑</cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell></cell><cell>WikiText2</cell><cell>C4</cell><cell>Avg.</cell><cell cols="6">PIQA HellaSwag WinoGrande ARC-c ARC-e Avg.</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>26.86</cell><cell>24.60</cell><cell>25.73</cell><cell>62.89</cell><cell>29.19</cell><cell>50.43</cell><cell>19.02</cell><cell>43.56</cell><cell>41.02</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>425.31</cell><cell cols="3">493.04 459.18 54.05</cell><cell>25.82</cell><cell>49.64</cell><cell>20.56</cell><cell>30.59</cell><cell>36.13</cell></row><row><cell>OPT-125M</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-Wanda-Affine</cell><cell>98.47</cell><cell cols="3">119.93 109.20 55.44</cell><cell>26.72</cell><cell>51.93</cell><cell>17.06</cell><cell>35.77</cell><cell>37.38</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>539.87</cell><cell cols="3">556.32 548.10 54.08</cell><cell>25.84</cell><cell>50.43</cell><cell>18.77</cell><cell>29.12</cell><cell>35.65</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-DSnoT-Affine</cell><cell>106.75</cell><cell cols="3">119.68 113.22 56.85</cell><cell>26.81</cell><cell>50.11</cell><cell>17.06</cell><cell>34.17</cell><cell>37.00</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>14.27</cell><cell>14.72</cell><cell>14.50</cell><cell>71.59</cell><cell>41.48</cell><cell>59.90</cell><cell>23.37</cell><cell>56.90</cell><cell>50.65</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>42.25</cell><cell>51.81</cell><cell>47.03</cell><cell>60.66</cell><cell>31.44</cell><cell>54.93</cell><cell>20.30</cell><cell>42.04</cell><cell>41.87</cell></row><row><cell>OPT-1.3B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-Wanda-Affine</cell><cell>28.65</cell><cell>41.19</cell><cell>34.92</cell><cell>60.60</cell><cell>31.69</cell><cell>53.03</cell><cell>20.98</cell><cell>43.39</cell><cell>41.94</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>48.25</cell><cell>57.53</cell><cell>52.89</cell><cell>60.39</cell><cell>30.66</cell><cell>51.85</cell><cell>20.81</cell><cell>40.78</cell><cell>40.90</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-DSnoT-Affine</cell><cell>29.23</cell><cell>41.30</cell><cell>35.27</cell><cell>60.99</cell><cell>31.97</cell><cell>53.11</cell><cell>21.92</cell><cell>43.56</cell><cell>42.31</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>12.18</cell><cell>13.16</cell><cell>12.67</cell><cell>73.77</cell><cell>45.85</cell><cell>60.77</cell><cell>26.79</cell><cell>60.77</cell><cell>53.59</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>429.37</cell><cell cols="3">860.91 645.14 58.05</cell><cell>26.68</cell><cell>50.67</cell><cell>18.00</cell><cell>34.34</cell><cell>37.55</cell></row><row><cell>OPT-2.7B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-Wanda-Affine</cell><cell>19.95</cell><cell>29.00</cell><cell>24.48</cell><cell>65.12</cell><cell>34.64</cell><cell>53.59</cell><cell>20.98</cell><cell>48.65</cell><cell>44.60</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>546.27</cell><cell cols="3">1263.97 905.12 56.36</cell><cell>26.59</cell><cell>49.17</cell><cell>19.45</cell><cell>31.10</cell><cell>36.53</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-DSnoT-Affine</cell><cell>20.28</cell><cell>28.83</cell><cell>24.56</cell><cell>64.85</cell><cell>34.58</cell><cell>56.11</cell><cell>20.05</cell><cell>46.92</cell><cell>44.50</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>10.63</cell><cell>11.74</cell><cell>11.19</cell><cell>76.27</cell><cell>50.50</cell><cell>65.19</cell><cell>30.46</cell><cell>65.57</cell><cell>57.60</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>17.59</cell><cell>21.64</cell><cell>19.62</cell><cell>68.66</cell><cell>39.70</cell><cell>58.72</cell><cell>25.93</cell><cell>56.90</cell><cell>49.98</cell></row><row><cell>OPT-6.7B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-Wanda-Affine</cell><cell>15.33</cell><cell>23.96</cell><cell>19.65</cell><cell>68.66</cell><cell>39.04</cell><cell>58.08</cell><cell>22.95</cell><cell>55.76</cell><cell>48.90</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>18.53</cell><cell>22.43</cell><cell>20.48</cell><cell>68.38</cell><cell>38.79</cell><cell>58.48</cell><cell>23.97</cell><cell>53.66</cell><cell>48.66</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-DSnoT-Affine</cell><cell>15.24</cell><cell>23.18</cell><cell>19.21</cell><cell>68.28</cell><cell>39.43</cell><cell>57.22</cell><cell>23.72</cell><cell>55.38</cell><cell>48.81</cell></row><row><cell></cell><cell>w16a16</cell><cell>-</cell><cell>-</cell><cell>9.85</cell><cell>11.19</cell><cell>10.52</cell><cell>75.84</cell><cell>52.42</cell><cell>65.04</cell><cell>32.93</cell><cell>67.12</cell><cell>58.67</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-Wanda</cell><cell>19.52</cell><cell>24.75</cell><cell>22.14</cell><cell>67.24</cell><cell>40.42</cell><cell>60.37</cell><cell>26.19</cell><cell>52.90</cell><cell>49.42</cell></row><row><cell>OPT-13B</cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-Wanda-Affine</cell><cell>13.86</cell><cell>21.27</cell><cell>17.57</cell><cell>68.38</cell><cell>41.94</cell><cell>58.72</cell><cell>25.08</cell><cell>58.16</cell><cell>50.46</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Sequential-DSnoT</cell><cell>19.97</cell><cell>24.78</cell><cell>22.38</cell><cell>68.44</cell><cell>39.95</cell><cell>61.80</cell><cell>25.93</cell><cell>51.34</cell><cell>49.49</cell></row><row><cell></cell><cell>w2a16g128</cell><cell>50%</cell><cell>Joint-DSnoT-Affine</cell><cell>13.87</cell><cell>21.21</cell><cell>17.54</cell><cell>68.71</cell><cell>41.52</cell><cell>60.22</cell><cell>25.42</cell><cell>56.10</cell><cell>50.39</cell></row><row><cell></cell><cell></cell><cell></cell><cell cols="2">//D0$%</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="2">//D0$%</cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell cols="2">237%</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="2">237%</cell><cell></cell></row><row><cell></cell><cell></cell><cell></cell><cell cols="2">//D0$%</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell cols="2">//D0$%</cell><cell></cell></row><row><cell>3HUSOH[LW\</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>3HUSOH[LW\</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell></row><row><cell></cell><cell></cell><cell cols="2">&amp;DOLEUDWLRQ6DPSOHV</cell><cell></cell><cell></cell><cell></cell><cell></cell><cell></cell><cell>(SRFKV</cell><cell></cell><cell></cell><cell></cell></row></table></figure>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Under review as a conference paper at ICLR 2025 OPT and LLaMA3 models show greater sensitivity to changes in the number of calibration samples and epochs, respectively.</p><p>Order of compression methods. Fig. <ref type="figure">4</ref> in the appendix illustrates why joint optimization does not apply sparsification first (Q(AM ⊙ W )). The zp introduced in Eq. 1 maps the zero elements of the sparse matrix M W to non-zero values, significantly reducing the sparsity. Therefore, to achieve the target sparsity rate, we adhere to the approach defined in Eq. 7 for joint optimization of combined compression.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">CONCLUSION</head><p>Post-training quantization and sparsification methods have shown considerable promise in the compression of large language models. However, previous combined compression approaches have relied on sequential optimization, separately minimizing quantization and sparsification errors. This practice has led to a significant increase in mean squared error (MSE) loss, especially in high compression rate configurations. Our combined compression approach mitigates this issue by simultaneously optimizing both quantization and sparsification errors. Additionally, learnable sparsification masks often fail to appropriately sparsify less important weights when dealing with dynamic weights. To overcome this, we propose a reordering method that prioritizes the sparsification of lower-importance weights in each iteration. This approach ensures stability and convergence in the optimization process, further reducing the MSE of the objective function. Our method consistently improves performance across various compression configurations and models. Notably, the combined compression method exhibits substantial potential for enhancing model performance, particularly in high compression rate scenarios. Future research could focus on developing more effective learning strategies for joint optimization to further advance this field.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6">LIMITATIONS</head><p>Due to limited resources, the experiments in this study were primarily conducted on a selected subset of natural language processing datasets and models. Conducting experiments on a broader range of datasets and models would provide a more comprehensive demonstration of the method's generalization and robustness.</p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<author>
+			<persName><forename type="first">Amirkeivan</forename><surname>Saleh Ashkboos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maximilian</forename><forename type="middle">L</forename><surname>Mohtashami</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Croci</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Martin</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Jaggi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Torsten</forename><surname>Alistarh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Hoefler</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Hensman</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.00456</idno>
+		<title level="m">Quarot: Outlier-free 4-bit inference in rotated llms</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<analytic>
+		<title level="a" type="main">Piqa: Reasoning about physical commonsense in natural language</title>
+		<author>
+			<persName><forename type="first">Yonatan</forename><surname>Bisk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rowan</forename><surname>Zellers</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Le</forename><surname>Ronan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianfeng</forename><surname>Bras</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yejin</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Choi</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Thirty-Fourth AAAI Conference on Artificial Intelligence</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Quantizable transformers: Removing outliers by helping attention heads do nothing</title>
+		<author>
+			<persName><forename type="first">Yelysei</forename><surname>Bondarenko</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Markus</forename><surname>Nagel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tijmen</forename><surname>Blankevoort</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Language models are few-shot learners</title>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Benjamin</forename><surname>Mann</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nick</forename><surname>Ryder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Melanie</forename><surname>Subbiah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><forename type="middle">D</forename><surname>Kaplan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prafulla</forename><surname>Dhariwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arvind</forename><surname>Neelakantan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pranav</forename><surname>Shyam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Girish</forename><surname>Sastry</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amanda</forename><surname>Askell</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in neural information processing systems</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="page" from="1877" to="1901" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<monogr>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kenton</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ming-Wei</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Kwiatkowski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Collins</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kristina</forename><surname>Toutanova</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Boolq</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1905.10044</idno>
+		<title level="m">Exploring the surprising difficulty of natural yes/no questions</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<monogr>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Clark</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Isaac</forename><surname>Cowhey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oren</forename><surname>Etzioni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tushar</forename><surname>Khot</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashish</forename><surname>Sabharwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carissa</forename><surname>Schoenick</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oyvind</forename><surname>Tafjord</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1803.05457</idno>
+		<title level="m">Think you have solved question answering? try arc, the ai2 reasoning challenge</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Sparsegpt: Massive language models can be accurately pruned in one-shot</title>
+		<author>
+			<persName><forename type="first">Elias</forename><surname>Frantar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Alistarh</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">GPTQ: Accurate post-training compression for generative pretrained transformers</title>
+		<author>
+			<persName><forename type="first">Elias</forename><surname>Frantar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Torsten</forename><surname>Saleh Ashkboos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Hoefler</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Alistarh</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<monogr>
+		<title level="m" type="main">A framework for few-shot language model evaluation</title>
+		<author>
+			<persName><forename type="first">Leo</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Tow</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stella</forename><surname>Biderman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sid</forename><surname>Black</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anthony</forename><surname>Dipofi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Charles</forename><surname>Foster</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laurence</forename><surname>Golding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Hsu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kyle</forename><surname>Mcdonell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Niklas</forename><surname>Muennighoff</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note>Version v0. 0.1. Sept</note>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">Optimal brain surgeon and general network pruning</title>
+		<author>
+			<persName><forename type="first">Babak</forename><surname>Hassibi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><forename type="middle">G</forename><surname>Stork</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gregory</forename><forename type="middle">J</forename><surname>Wolff</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">IEEE international conference on neural networks</title>
+		<imprint>
+			<publisher>IEEE</publisher>
+			<date type="published" when="1993">1993</date>
+			<biblScope unit="page" from="293" to="299" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<author>
+			<persName><forename type="first">Le</forename><surname>Teven</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Angela</forename><surname>Scao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ellie</forename><surname>Akiki</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Suzana</forename><surname>Pavlick</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Ilić</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roman</forename><surname>Hesslow</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexandra</forename><surname>Castagné</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Sasha Luccioni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthias</forename><surname>Franc ¸ois Yvon</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Gallé</surname></persName>
+		</author>
+		<title level="m">A 176bparameter open-access multilingual language model</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<monogr>
+		<title level="m" type="main">Brecq: Pushing the limit of post-training quantization by block reconstruction</title>
+		<author>
+			<persName><forename type="first">Yuhang</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruihao</forename><surname>Gong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xu</forename><surname>Tan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fengwei</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shi</forename><surname>Gu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2102.05426</idno>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<monogr>
+		<author>
+			<persName><forename type="first">Ji</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiaming</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haotian</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shang</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xingyu</forename><surname>Dang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Song</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Awq</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2306.00978</idno>
+		<title level="m">Activation-aware weight quantization for llm compression and acceleration</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<title level="m" type="main">Affinequant: Affine transformation quantization for large language models</title>
+		<author>
+			<persName><forename type="first">Yuexiao</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huixia</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiawu</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Feng</forename><surname>Ling</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuefeng</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shilei</forename><surname>Wen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fei</forename><surname>Chao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rongrong</forename><surname>Ji</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2403.12544</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<monogr>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Merity</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Caiming</forename><surname>Xiong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Bradbury</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Richard</forename><surname>Socher</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1609.07843</idno>
+		<title level="m">Pointer sentinel mixture models</title>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Up or down? adaptive rounding for post-training quantization</title>
+		<author>
+			<persName><forename type="first">Markus</forename><surname>Nagel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rana</forename><surname>Ali Amjad</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mart</forename><surname>Van Baalen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christos</forename><surname>Louizos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tijmen</forename><surname>Blankevoort</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="7197" to="7206" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">Pytorch: An imperative style, highperformance deep learning library</title>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Paszke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Gross</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Francisco</forename><surname>Massa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Lerer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Bradbury</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gregory</forename><surname>Chanan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Trevor</forename><surname>Killeen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeming</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Natalia</forename><surname>Gimelshein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luca</forename><surname>Antiga</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="page">32</biblScope>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">Exploring the limits of transfer learning with a unified text-to-text transformer</title>
+		<author>
+			<persName><forename type="first">Colin</forename><surname>Raffel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Roberts</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katherine</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sharan</forename><surname>Narang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Matena</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanqi</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><forename type="middle">J</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Journal of machine learning research</title>
+		<imprint>
+			<biblScope unit="volume">21</biblScope>
+			<biblScope unit="issue">140</biblScope>
+			<biblScope unit="page" from="1" to="67" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<monogr>
+		<title level="m" type="main">Winogrande: An adversarial winograd schema challenge at scale</title>
+		<author>
+			<persName><forename type="first">Keisuke</forename><surname>Sakaguchi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Le</forename><surname>Ronan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chandra</forename><surname>Bras</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yejin</forename><surname>Bhagavatula</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Choi</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1907.10641</idno>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<monogr>
+		<title level="m" type="main">Omniquant: Omnidirectionally calibrated quantization for large language models</title>
+		<author>
+			<persName><forename type="first">Wenqi</forename><surname>Shao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mengzhao</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhaoyang</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lirui</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiqian</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaipeng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Qiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ping</forename><surname>Luo</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2308.13137</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<monogr>
+		<title level="m" type="main">A simple and effective pruning approach for large language models</title>
+		<author>
+			<persName><forename type="first">Mingjie</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhuang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anna</forename><surname>Bair</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J Zico</forename><surname>Kolter</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2306.11695</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thibaut</forename><surname>Lavril</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gautier</forename><surname>Izacard</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xavier</forename><surname>Martinet</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marie-Anne</forename><surname>Lachaux</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Timothée</forename><surname>Lacroix</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baptiste</forename><surname>Rozière</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naman</forename><surname>Goyal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Eric</forename><surname>Hambro</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Faisal</forename><surname>Azhar</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2302.13971</idno>
+		<title level="m">Open and efficient foundation language models</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<monogr>
+		<title level="m" type="main">Llama 2: Open foundation and fine-tuned chat models</title>
+		<author>
+			<persName><forename type="first">Hugo</forename><surname>Touvron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Louis</forename><surname>Martin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevin</forename><surname>Stone</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Albert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amjad</forename><surname>Almahairi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yasmine</forename><surname>Babaei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikolay</forename><surname>Bashlykov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Soumya</forename><surname>Batra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Prajjwal</forename><surname>Bhargava</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shruti</forename><surname>Bhosale</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2307.09288</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<monogr>
+		<title level="m" type="main">Qdrop: Randomly dropping quantization for extremely low-bit post-training quantization</title>
+		<author>
+			<persName><forename type="first">Xiuying</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruihao</forename><surname>Gong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuhang</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xianglong</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fengwei</forename><surname>Yu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2203.05740</idno>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Outlier suppression: Pushing the limit of low-bit transformer language models</title>
+		<author>
+			<persName><forename type="first">Xiuying</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunchen</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiangguo</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruihao</forename><surname>Gong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shanghang</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fengwei</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xianglong</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<monogr>
+		<title level="m" type="main">Huggingface&apos;s transformers: State-of-the-art natural language processing</title>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Wolf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lysandre</forename><surname>Debut</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Victor</forename><surname>Sanh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Chaumond</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clement</forename><surname>Delangue</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anthony</forename><surname>Moi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierric</forename><surname>Cistac</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tim</forename><surname>Rault</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rémi</forename><surname>Louf</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Morgan</forename><surname>Funtowicz</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1910.03771</idno>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title level="a" type="main">Smoothquant: Accurate and efficient post-training quantization for large language models</title>
+		<author>
+			<persName><forename type="first">Guangxuan</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ji</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mickael</forename><surname>Seznec</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Demouth</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Song</forename><surname>Han</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<monogr>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenqi</forename><surname>Shao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mengzhao</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shitao</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaipeng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fengwei</forename><surname>An</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Qiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ping</forename><surname>Luo</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.16880</idno>
+		<title level="m">Pruning large language models with blockwise parameter-efficient sparsity allocation</title>
+		<meeting><address><addrLine>Besa</addrLine></address></meeting>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<monogr>
+		<title level="m" type="main">Rptq: Reorder-based post-training quantization for large language models</title>
+		<author>
+			<persName><forename type="first">Zhihang</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lin</forename><surname>Niu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiawei</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenyu</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinggang</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuzhang</forename><surname>Shang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guangyu</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiang</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiaxiang</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bingzhe</forename><surname>Wu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2304.01089</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<monogr>
+		<title level="m" type="main">Hellaswag: Can a machine really finish your sentence?</title>
+		<author>
+			<persName><forename type="first">Rowan</forename><surname>Zellers</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ari</forename><surname>Holtzman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yonatan</forename><surname>Bisk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ali</forename><surname>Farhadi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yejin</forename><surname>Choi</surname></persName>
+		</author>
+		<idno>CoRR, abs/1905.07830</idno>
+		<ptr target="http://arxiv.org/abs/1905.07830" />
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<title level="m" type="main">Opt: Open pre-trained transformer language models</title>
+		<author>
+			<persName><forename type="first">Susan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Roller</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Naman</forename><surname>Goyal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mikel</forename><surname>Artetxe</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Moya</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuohui</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Dewan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mona</forename><surname>Diab</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xian</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xi</forename><surname>Victoria Lin</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2205.01068</idno>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<monogr>
+		<title level="m" type="main">Dynamic sparse no training: Training-free fine-tuning for sparse llms</title>
+		<author>
+			<persName><forename type="first">Yuxin</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lirui</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mingbao</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunyun</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yiwu</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xingjia</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jared</forename><surname>Tanner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shiwei</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rongrong</forename><surname>Ji</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.08915</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

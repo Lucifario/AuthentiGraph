@@ -1,0 +1,1593 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">DECONSTRUCTING WHAT MAKES A GOOD OPTIMIZER FOR AUTOREGRESSIVE LANGUAGE MODELS</title>
+				<funder ref="#_7UyuqFf">
+					<orgName type="full">Chan Zuckerberg Initiative Foundation</orgName>
+				</funder>
+				<funder ref="#_8tMDXkd">
+					<orgName type="full">DOE</orgName>
+				</funder>
+				<funder>
+					<orgName type="full">Kempner Institute Graduate Research Fellowships</orgName>
+				</funder>
+				<funder ref="#_2BAEm2q">
+					<orgName type="full">Office of Naval Research</orgName>
+				</funder>
+				<funder ref="#_WMTSRQe">
+					<orgName type="full">DARPA</orgName>
+				</funder>
+				<funder ref="#_MRKFTTY #_fzaSSBr">
+					<orgName type="full">National Science Foundation</orgName>
+				</funder>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<author role="corresp">
+							<persName><forename type="first">Rosie</forename><surname>Zhao</surname></persName>
+							<email>rosiezhao@g.harvard.edu</email>
+						</author>
+						<author>
+							<persName><forename type="first">Depen</forename><surname>Morwani</surname></persName>
+						</author>
+						<author>
+							<persName><forename type="first">David</forename><surname>Brandfonbrener</surname></persName>
+						</author>
+						<author>
+							<persName><forename type="first">Nikhil</forename><surname>Vyas</surname></persName>
+						</author>
+						<author>
+							<persName><forename type="first">Sham</forename><surname>Kakade</surname></persName>
+						</author>
+						<author>
+							<affiliation key="aff0">
+								<orgName type="institution">Harvard University</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<affiliation key="aff1">
+								<orgName type="institution">Harvard University</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<affiliation key="aff2">
+								<orgName type="institution">Kempner Institute at Harvard University</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<affiliation key="aff3">
+								<orgName type="institution">Harvard University</orgName>
+							</affiliation>
+						</author>
+						<author>
+							<affiliation key="aff4">
+								<orgName type="institution">Kempner Institute at Harvard University</orgName>
+							</affiliation>
+						</author>
+						<title level="a" type="main">DECONSTRUCTING WHAT MAKES A GOOD OPTIMIZER FOR AUTOREGRESSIVE LANGUAGE MODELS</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">DA5858C65AE4D4515D10CE18CEFD8A41</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:11+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Training language models becomes increasingly expensive with scale, prompting numerous attempts to improve optimization efficiency. Despite these efforts, the Adam optimizer remains the most widely used, due to a prevailing view that it is the most effective approach. We aim to compare several optimization algorithms, including SGD, Adafactor, Adam, Lion, and Sophia in the context of autoregressive language modeling across a range of model sizes, hyperparameters, and architecture variants. Our findings indicate that, except for SGD, these algorithms all perform comparably both in their optimal performance and also in terms of how they fare across a wide range of hyperparameter choices. Our results suggest to practitioners that the choice of optimizer can be guided by practical considerations like memory constraints and ease of implementation, as no single algorithm emerged as a clear winner in terms of performance or stability to hyperparameter misspecification. Given our findings, we further dissect these approaches, examining two simplified versions of Adam: a) signed momentum (Signum) which we see recovers both the performance and hyperparameter stability of Adam and b) Adalayer, a layerwise variant of Adam which we introduce to study the impact on Adam's preconditioning for different layers of the network. Examining Adalayer leads us to the conclusion that, perhaps surprisingly, adaptivity on both the last layer and LayerNorm parameters in particular are necessary for retaining performance and stability to learning rate.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>As language model architectures increase in scale, pretraining becomes more expensive. In response, numerous efforts have been made to design efficient optimizers to mitigate these costs, and yet Adam <ref type="bibr" target="#b18">(Kingma &amp; Ba, 2015)</ref> remains the primary optimizer used for training language models. This persistent preference for Adam is rooted in an underlying belief that Adam generally outperforms alternative optimization algorithms. Although newly proposed optimizers run ablations to demonstrate superior performance to Adam for select architectures and tasks <ref type="bibr" target="#b22">(Liu et al., 2024;</ref><ref type="bibr" target="#b7">Chen et al., 2023)</ref>, there is no consensus among the literature about the relative performance of these optimizers. In fact, to the best of our knowledge, <ref type="bibr" target="#b17">Kaddour et al. (2024)</ref> is the only work comparing these optimizers but in the context of masked language modeling and at a single model scale.</p><p>In this work, we aim to rigorously evaluate whether the widespread reliance on Adam is justified and to further explore the characteristics that make adaptive optimizers particularly effective for training autoregressive language models. As such, we perform a comprehensive sweep across different optimizers, hyperparameters, architectures, and scale. Along with looking at optimal performance, we argue that due to the difficulty of hyperparameter tuning with increasing scale <ref type="bibr" target="#b23">(Yang et al., 2021)</ref>, the stability of performance with respect to hyperparameter choices is equally important. Prior work has explored the learning rate stability of Adam <ref type="bibr" target="#b40">(Wortsman et al., 2024)</ref>. We extend this investigation to include the stability of multiple optimizers with respect to various hyperparameter Figure <ref type="figure">1</ref>: Final validation loss when training language models with 150m, 300m, 600m, and 1.2b parameters, sweeping across learning rates for five standard optimizers (SGD, Adam, Adafactor<ref type="foot" target="#foot_0">1</ref> , Lion, and Signum). Plots have been shifted to align the optimal learning rates for each optimizer. Except for SGD, other optimizers seem comparable in their optimal performance and stability with respect to learning rate tuning. choices. Surprisingly, we find that multiple optimizers introduced in the literature after Adam-such as Lion <ref type="bibr" target="#b7">(Chen et al., 2023)</ref> and Adafactor (with momentum) <ref type="bibr" target="#b35">(Shazeer &amp; Stern, 2018;</ref><ref type="bibr" target="#b42">Zhai et al., 2022)</ref>-demonstrate robustness comparable to Adam and significantly superior to SGD. Figure <ref type="figure">1</ref> illustrates the remarkable similarity in performance and robustness of these optimizers across different learning rates and across multiple model scales (150m, 300m, 600m, and 1.2b parameters). This challenges the prevailing notion that Adam should be the default optimizer, where we see no single algorithm emerged as a clear winner in terms of performance or hyperparameter stability.</p><p>Following our initial ablations, we wish to identify the essential components of these optimizers that facilitate performance and stability. Thus, we conduct a series of investigations of simplified versions of these algorithms. We study signed momentum (Signum) <ref type="bibr" target="#b5">(Bernstein et al., 2018;</ref><ref type="bibr" target="#b39">2019)</ref>, a special case of Lion. Prior works have also studied its similarities to Adam <ref type="bibr" target="#b2">(Balles &amp; Hennig, 2018)</ref>. We find that Signum also recovers the stability and performance exhibited by Adam. This finding aligns with recent work <ref type="bibr" target="#b20">(Kunstner et al., 2023)</ref>, suggesting that the primary distinction between SGD and Adam is driven by Adam's resemblance to signSGD.</p><p>To further understand the role of preconditioning on various network parameters, we study Adalayer, which performs preconditioning on a per-layer basis. We empirically demonstrate that this variant nearly recovers the stability and performance of the other optimizers in previous ablations. Through empirical studies of Adalayer and its variants, we show that adapting the parameters of the last layer and LayerNorm parameters in a transformer is necessary to achieve stability and performance.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Main contributions</head><p>• We empirically study the stability to hyperparameters of various optimization algorithms including SGD, Adam, Lion and Adafactor, showing that with the exception of SGD, these optimizers are comparable in terms of both performance and hyperparameter stability. This holds across multiple scales (150m, 300m, 600m, 1.2b) and across two transformer architecture variants (Section 2).</p><p>• To dive into the reasons behind the stability and performance of these algorithms, we empirically examine signed momentum (Signum), and show that it recovers their stability and performance (Section 2.6).</p><p>• We study a coarser variant of Adam called Adalayer, that does per-layer preconditioning and recovers much of the stability and performance exhibited by Adam (Section 3.1).</p><p>• Through an empirical study of Adalayer and its variants, we study the importance of adaptivity with respect to different layers of the network. (Section 3.2).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">COMPARING OPTIMIZERS ACROSS HYPERPARAMETERS, ARCHITECTURES AND SCALE</head><p>2.1 METHODOLOGY To conduct our experiments, we start with hyperparameters recommended by previous work (e.g., β 1 = 0.9). We initially perform a learning rate sweep to identify the optimal learning rate. After determining the optimal learning rate for each algorithm, we conduct one-dimensional sweeps for each of the other hyperparameters.</p><p>A limitation of this methodology is the potential neglect of "higher-dimensional" interactions between hyperparameters. This is an important direction for future work, but beyond the computational budget of this project. For example, some parameters like batch size and learning rate indeed are likely to exhibit 2D interactions <ref type="bibr" target="#b34">(Shallue et al., 2019;</ref><ref type="bibr" target="#b28">Porian et al., 2024)</ref>. However, we argue that the 1D sweeps provide a tractable methodology that gives us useful signal about the hyperparameter stability of a variety of algorithms around the parameters that are common in practice.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.2">SETUP</head><p>We train decoder-only language models on C4 tokenized with the T5 tokenizer <ref type="bibr" target="#b29">(Raffel et al., 2020)</ref> and report results in terms of validation loss. Due to the computational resources required to sweep over numerous hyperparameters, optimizers, and scales, we restrict the scope of our work to autoregressive language models, leaving other domains and language model architectures as future work. As we discussed in the introduction, we argue that it is best to evaluate algorithms both in terms of the loss achieved by the best hyperparameters (performance) as well as the robustness across values of the hyperparameters (stability).</p><p>In this section we first present the results of sweeps across the two most sensitive hyperparameters: learning rate and momentum (β 1 ). We sweep across five algorithms: Adam, Adafactor, Lion, Signum, and SGD. Further ablations of weight decay, warmup, β 2 , and ϵ for the 150m standard model can be found in Section 2.5. Before diving into the results, we provide some more details about the setup.</p><p>Algorithms. We use the standard Pytorch implementation of AdamW <ref type="bibr" target="#b27">(Paszke et al., 2019)</ref>, the timm implementation of SGDW <ref type="bibr" target="#b39">(Wightman, 2019)</ref>, and the OLMo implementation of Lion <ref type="bibr" target="#b11">(Groeneveld et al., 2024)</ref>. Following <ref type="bibr" target="#b42">Zhai et al. (2022)</ref> we implement ourselves a modified version of Adafactor which maintains the factored estimates of second moments but has momentum i.e. it is equivalent to Adam with factored second moment estimates. Since Signum is equivalent to Lion with β 1 = β 2 we reuse the OLMo implementation of Lion <ref type="bibr" target="#b11">(Groeneveld et al., 2024)</ref> for it. We conducted experiments with the Sophia optimizer <ref type="bibr" target="#b22">(Liu et al., 2024)</ref> in Appendix G. However, since it does not outperform Signum (which can be achieved by setting ρ = 0 in Sophia), we did not include it in other plots.</p><p>Models. We start from the OLMo codebase <ref type="bibr" target="#b11">(Groeneveld et al., 2024)</ref> and train decoder-only transformer models of four sizes: 150m, 300m, 600m, and 1.2b, where the parameter count refers to non-embedding parameters. The models have widths of 1024, 1024, and 1408 and depths of 12, 24, 24. The MLP hidden dimension is 4x of the width. The activation function is GeLU <ref type="bibr" target="#b14">(Hendrycks &amp; Gimpel, 2016)</ref>. We use RoPE positional encodings <ref type="bibr" target="#b37">(Su et al., 2024)</ref>. Attention heads are always dimension 64. We use PyTorch default LayerNorm. Following <ref type="bibr" target="#b40">Wortsman et al. (2024)</ref> we do not learn biases for the linear layers or LayerNorms. We train in mixed precision with bfloat16.  Training variants. We note that <ref type="bibr" target="#b40">Wortsman et al. (2024)</ref> observe that QK LayerNorm <ref type="bibr" target="#b9">(Dehghani et al., 2023)</ref> and z-loss <ref type="bibr" target="#b8">(Chowdhery et al., 2023)</ref> can have substantial effects on the stability of model training. As such, we consider two variants in our experiments: standard which refers to a model with QK LayerNorms and z-loss with coefficient 1e-4, and no QK norm or z-loss which refers to the same model without the QK norm layers or the z-loss.</p><p>Token counts. For all models, we use a batch size of 256 and sequence length of 512 (as in <ref type="bibr" target="#b40">Wortsman et al. (2024)</ref>). We default to training models for the approximately "chinchilla optimal" number of tokens that is ≈20 times the number of parameters. Explicitly, this means for the 150m models we train for 25k steps or ≈3.3b tokens. The 300m models are trained for 50k steps, the 600m models are trained for 100k steps, the 1.2b models are trained for 200k steps, and the 150m-long models are also trained for 100k steps.</p><p>Other hyperparameters. We default to using 0 weight decay. We default to using a learning rate schedule with 10% of the training steps for warmup and then cosine decay with a minimum that is 10% of the maximum learning rate. We default to β 2 = 0.95 and ϵ = 1e-15 following <ref type="bibr" target="#b40">Wortsman et al. (2024)</ref>. These parameters are ablated in Section 2.5.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.3">SWEEPING LEARNING RATES</head><p>First, we sweep over the most important hyperparameter: learning rate. Note, in all of these sweeps over learning rate we set β 1 = 0.9 for all algorithms except for SGD, where we set β 1 = 0.98. As we will see in the following subsection, SGD is more sensitive to the momentum hyperparameters and requires more momentum to be competitive with the other optimizers.</p><p>Main results for our standard architecture across four scales are presented in Figure <ref type="figure">1</ref>. Note that the x-axis shifts the learning rates to align the optimal learning rates across algorithms. In terms of absolute learning rates, we sweep in multiples of √ 10 from 1e-4 to 1 for Adam and Adafactor, from 1e-5 to 1e-1 for Lion and Signum, and from 1e-3 to 10 for SGD. We report on the optimal learning rates for each optimizer in Appendix B.</p><p>The key takeaway is that not only do the algorithms achieve similar performance at the optimal learning rate, but the learning rate stability itself is similar across algorithms and scales. The one exception is SGD, which is worse both in terms of optimal performance and in terms of stability.</p><p>Further ablations are presented in Figure <ref type="figure" target="#fig_0">2</ref> and Figure <ref type="figure" target="#fig_1">3</ref> illustrating performance for models with no QK norm or z-loss and 4x longer training time respectively. While we find that the architecture choices can clearly impact the amount of stability to learning rate, the cross-algorithm comparisons remain the same: Adafactor and Lion are competitive with Adam, while SGD is worse both in terms of performance and stability to learning rate. Similarly, training for longer can improve performance and stability to learning rate, but does not change the high-level cross-algorithm comparisons.</p><p>Takeaway: performance and stability to learning rate are comparable across the non-SGD algorithms that we tested.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.4">SWEEPING MOMENTUM</head><p>Now we also sweep across momentum values (i.e. β 1 )<ref type="foot" target="#foot_2">2</ref> . To do this sweep we fix the per-algorithm learning rate to be the optimal learning rate from the corresponding learning rate sweep.</p><p>Results are presented in Figure <ref type="figure" target="#fig_2">4</ref>. We observe that across various settings, the robustness to β 1 is similar across the non-SGD algorithms when we stay in the range of momentums between 0.8 and 0.98. However, for high β 1 Lion is better and low β 1 Adam and Adafactor are better. Again we observe SGD being very sensitive to momentum.</p><p>Takeaway: performance and stability to momentum are comparable across the non-SGD algorithms that we tested if we stay within the usual range of momentum values.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.5">ADDITIONAL HYPERPARAMETER SWEEPS</head><p>We also sweep over a variety of other hyperparameters in Figure <ref type="figure" target="#fig_3">5</ref> using the best per-algorithm learning rate and momentum. We observe that SGD is less stable with respect to weight decay and Bottom: ϵ and β 2 . We generally find little effect for the non-SGD algorithms, however there are parameters that differ from our defaults that can offer up to 0.02 improvements in validation loss .</p><p>warmup length. And while it is possible to get small benefits from higher weight decay, longer warmup, and higher β 2 than our defaults, generally the algorithms are much more stable to these parameters than learning rate and momentum. We observe two exceptions: Lion shows poorer performance at extreme values of β 2 . However, it is important to note that the β 2 parameter in Lion functions more like a form of "momentum", whereas in Adam and Adafactor, β 2 regulates the moving average of the squared gradients. We also see that the performance across optimizers worsens at high batch size. This is expected as optimization algorithms are known to exhibit diminishing performance with increasing batch size <ref type="bibr" target="#b34">(Shallue et al., 2019;</ref><ref type="bibr">Zhang et al., 2024a)</ref>.</p><p>Takeaway: generally algorithms are more stable with respect to other hyperparameters-with the exception of batch size-and the possible gains in performance are relatively small compared to learning rate and momentum. In Figure <ref type="figure">1</ref> we observed that Adam and Signum have similar performance and stability for language modeling, even at scale. The following lemma from prior work <ref type="bibr" target="#b2">(Balles &amp; Hennig, 2018)</ref> shows that Adam performs variance-adjusted sign gradient descent.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.6">SIGNUM RECOVERS THE PERFORMANCE AND STABILITY OF ADAM</head><p>Lemma 1 <ref type="bibr" target="#b2">( Balles &amp; Hennig (2018)</ref>). Consider a parameter with a history of gradients g t , g t-1 , . . .. Let m be the random variable that is equal to g t-τ with probability (1 -β 1 )β τ 1 and v be the random variable that is equal to g t-τ with probability (1 -β 2 )β τ 2 . The Adam update δ Adam and the Signum update δ Signum are related by</p><formula xml:id="formula_0">δ Adam = δ Signum • |E[m]| E[v 2 ]</formula><p>If β 1 = β 2 then m = v in Lemma 1 and hence the parameter-wise ratio of Adam and Signum updates is equal to the ratio of the mean and the square root of second moment of m. Intuitively, this holds because when β 1 = β 2 , the first moment estimates of Signum and Adam, and second moment estimates of Adam, average the previous gradients with same coefficients ((1 -β)β τ ). This intuitively suggests that when β 1 = β 2 , Adam and Signum may behave similarly<ref type="foot" target="#foot_3">3</ref> . This motivates the conjecture that the main benefit of Adam over Signum is the fact that in Adam, β 2 can be varied independently of β 1 . In Figure <ref type="figure">1</ref> we have β 2 = 0.95 and β 1 = 0.9 which are close, and as pointed out earlier, both optimizers have similar performance and stability.</p><p>We examine this hypothesis further in Figure <ref type="figure" target="#fig_4">6</ref> by varying β 1 and setting β 2 = β 1 , and again find that Signum and Adam behave very similarly. However, we also note that when we vary β 1 for Adam while fixing β 2 we get more stability for β 1 as compared to Signum.</p><p>Takeaway: With β 2 = β 1 Adam and Signum behave similarly and the standard setting for training language models (β 2 = 0.95, β 1 = 0.9) is close to this.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">INVESTIGATING THE IMPACT OF ADAPTIVITY FOR OPTIMIZER STABILITY AND PERFORMANCE</head><p>Ablations in the previous section revealed the striking similarity in performance and stability across multiple optimizers compared to Adam. Adam and its other variants are designed to have a high degree of adaptivity at a fine granularity (per-parameter learning rates) throughout the training process. This adaptivity is often credited with the stability and robust performance observed in these optimizers. However, a critical question arises: to what extent is this adaptivity needed for different parameters of the network? By identifying the necessity of adaptivity for different network components to ensure both performance and stability, we aim to discern whether simpler optimizers like SGD can achieve similar benefits with minimal modifications. Since higher momentum can often play the same role as a better preconditioner and to have all algorithms on an equal footing, we will fix β 1 = 0.9 for all optimizers in this section.</p><p>The main optimizer we study in this section is a "layer-wise" variant of Adam, which we coin as 'Adalayer'. We use Adalayer for our investigations because it lends a greater ease of understanding compared to full-fledged Adam in identifying parts of the network which may be particularly critical for optimizer performance and stability. Note that this layerwise variant is a special case of a previously known optimizer called Blockwise Adaptive Gradient with Momentum (BAGM) <ref type="bibr" target="#b46">(Zheng &amp; Kwok, 2019)</ref>.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.1">ADALAYER</head><p>Algorithm 1: Adalayer Parameters: Learning rate η, exponential decay rates for the moment estimates β 1 , β 2 , number of steps T , ϵ while t ≤ T do for each layer l with p parameters do</p><formula xml:id="formula_1">g l t ← ∇ l L(w t ) ; v l t ← β 2 • v l t-1 + (1 -β 2 ) • p -1/2 • ∥g l t ∥ 2 2 ; m l t ← β 1 • m l t-1 + (1 -β 1 )g l t ; w l t+1 ← w l t -η • m l t √ v l t +ϵ ; end end</formula><p>To study the behavior of adaptive optimizers like Adam, we begin with describing a layer-wise version of Adam which we refer to as Adalayer. Adam, Adafactor and Adalayer all (approximately) store the diagonal second moment matrix, but with coarser and coarser granularity; for a layer of dimension m × n, Adam explicitly maintains the second moment matrix using mn parameters in the shape of a matrix. Adafactor stores row and column averages of the second moment matrix which serve as a rank-1 approximation to the second Figure <ref type="figure">7</ref>: Quantiles of effective learning rates (η t /( v l t + ϵ) for each layer l) for the last layer blocks (Left), the LayerNorm blocks (Right), and the other matrix blocks (Middle) for a 150m model trained using Adalayer*. Unlike the other matrix blocks and LayerNorm parameters, the effective learning rates across logits vary across multiple orders of magnitude, providing evidence for the need to precondition them separately. moment matrix. Finally, Adalayer stores a single scalar which is the average of the second moment matrix. We will later consider a generalization of Adalayer where instead of averaging second moment over a layer we will average it over a "block" of parameters which can be a subset of a layer. We note that similar algorithms have been studied before <ref type="bibr" target="#b10">(Ginsburg et al., 2019;</ref><ref type="bibr" target="#b0">Agarwal et al., 2020)</ref> but we choose to study this variant since it is a direct analogue of Adam and Adafactor. A simplified version of Adalayer optimizer is given in Algorithm 1; other details such as bias correction are kept same as that for Adam. In Appendix C, we provide more details about our Adalayer implementation and a correction we make to how Adalayer treats the last layer in order to achieve similar performance and stability to Adam. Specifically, Adalayer when naively applied for each layer is neither performant nor stable to learning rate (Figure <ref type="figure" target="#fig_8">10</ref>); however, if we additionally treat the set of weights in the last layer feeding into each logit as its own block, this recovers most of the performance and stability of Adam (see the dotted blue lines in Figure <ref type="figure" target="#fig_6">8</ref>). We henceforth refer to Adalayer with this correction as Adalayer*.</p><p>To study how Adalayer* preconditions the network, we plot effective learning rates used for different logits by Adalayer* in Figure <ref type="figure">7</ref> (Left). Here, the effective learning rate for a layer l in the network is η t /( v l t + ϵ). We find that Adalayer* indeed uses vastly different learning rates for different logits, supporting our hypothesis that preconditioning weight in different logits separately is important for performance and stability.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">BOTH THE LAST LAYER AND LAYERNORM PARAMETERS NEED ADAPTIVITY</head><p>The results using Adalayer* in the previous section suggest that all layers except the last layer only need a iteration-dependent scalar correction to their learning rate. We now ask a stronger question: do we need these scales at all? Or can we train the remaining layers with SGD? This hypothesis is supported by looking at Figure <ref type="figure">7</ref> (middle) where we observe that the learning rates for different matrix layers (except the last layer) assigned by Adalayer* are remarkably similar.</p><p>To test this, we train the last layer with Adalayer* (fixing a learning rate of 3.16e -3) and the rest of the layers with SGD, both with β 1 = 0.9. In Figure <ref type="figure" target="#fig_6">8</ref> (Left) we show the results while sweeping over SGD learning rates from 0.1 to 3160. While this improves upon the performance of SGD, we do not recover stability of the Adalayer* and Adam baselines. We trace this instability to LayerNorm blocks: Figure <ref type="figure">7</ref> (Left) shows that the effective learning rates for the LayerNorm blocks are much smaller, which suggests that they may destabilize at higher SGD learning rates. To ameliorate this, in Figure <ref type="figure" target="#fig_6">8</ref> (Right) we add LayerNorm parameters to those being trained with Adalayer* and find that this is sufficient to recover both performance and stability of Adalayer*. In Figure <ref type="figure" target="#fig_9">11</ref> in the Appendix, we see this trend continue to hold for 300m and 600m parameter models.</p><p>We conduct additional experiments investigating these 'hybrid' variants of SGD in the Appendix. Despite most language model parameters being in matrix layers, we show that if we only apply Adalayer* on the matrix layers and train the last layer and LayerNorm layers with SGD, this does not recover performance and stability. Another plausible remedy to address the small effective learning rates of the LayerNorm blocks is to simply not train these LayerNorm parameters. In Appendix D, Figure <ref type="figure" target="#fig_1">13</ref>, we show that this improves performance and stability relative to SGD but does not recover Adalayer* performance. Finally in Appendix E, we replace SGD with AdaSGD (Wang &amp; Wiens, 2020) which still uses a global learning rate but is now adaptive through training; in Figure <ref type="figure" target="#fig_4">16</ref> we show AdaSGD + Adalayer* can recover full Adalayer* performance, but a small gap remains to recover Adam performance.</p><p>We acknowledge that while adaptivity for the last layer and LayerNorm parameters seems necessary to retain optimizer performance and stability, there remains a small gap which is fulfilled by adaptivity on the other network parameters; in Figure <ref type="figure" target="#fig_2">14</ref> we also try training 150m and 300m models using SGD on the matrix blocks and Adafactor on the last layer and LayerNorm blocks; we find that performance and stability is comparable, but does not exceed that of Adafactor on the entire network.</p><p>Further, note that a caveat of the above results is that we have introduced an additional hyperparameter-SGD learning rate, which we are sweeping over-while keeping the Adalayer* learning rate in the last layer and layer norm layers fixed. While decoupling the learning rates here is needed (due to SGD's performant learning rates being orders of magnitude higher than that of Adalayer*), this may be responsible for the observed stability. To address this, we perform the following experiment: we train all the layers with Adalayer* (sweeping over learning rate η) but we stop updating the second moment estimates for all layers except the last layer and LayerNorm blocks after initialization. This implies that these layers are effectively being trained by SGD with a fixed learning rate, though unlike the above results, these learning rates are different for different layers.</p><p>We implement this by passing 1000 batches to initialized 150m and 300m models to obtain second moment estimates for all layers without letting the model take a gradient step, and then allowing the model to train as normal under the same settings as all of our ablations. As in our previous investigation, we fix other hyperparameters to be the same: β 1 = 0.9, β 2 = 0.95 and ϵ = 1e -15.</p><p>In Figure <ref type="figure" target="#fig_7">9</ref> we show the resulting learning rate sweep for freezing Adalayer* learning rate scales at initialization (with the exception of the last layer and LayerNorm). Surprisingly, we find for the 150m model that we can almost entirely recover the stability and performance of Adalayer*. For the 300m model we also match or exceed the performance of Adalayer*, and even nearly match the peak performance of Adam. Note again that this sweeps learning rate across all network parameters. This provides further evidence for the importance of adaptivity in the last layer and LayerNorm, where in contrast we could have used fixed ratios from initialization for all other parameters to recover the performance and stability of Adalayer*. In Appendix F we present additional experiments which include allowing Adalayer* to update for only one of the last layer or LayerNorm, or turning off LayerNorm training. None of these partial modifications fully recover performance and stability. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4">DISCUSSION AND LIMITATIONS</head><p>After a comprehensive comparison of a variety of optimizers for language modeling, we have found that many optimizers seem to be roughly equivalent both in terms of optimal performance and hyperparameter stability. The only differing axis for practitioners to consider is thus memory constraints, but based on our results, memory considerations for optimizer choice should not affect the performance of their training run, at least across the optimizers tested (i.e. optimizers using diagonal preconditioning). For tuning guidelines, we have reported the optimal learning rates in Appendix B found in our sweeps as a starting point for practitioners in tuning. We also observed that most other parameters are very stable for the optimal learning rate (with exception to momentum) and thus we believe tuning learning rate and momentum should be prioritized if one has a limited compute budget for hyperparameter sweeping.</p><p>Diving deeper, we have shown that the treatment of the last layer and LayerNorm parameters is crucial for realizing the benefits of adaptive optimizers. This highlights the following research directions as the most promising for developing optimizers for language model training. Firstly, our results suggest that within the realm of diagonal preconditioning optimizers, there may be room for more memory-efficient alternatives to AdamW to be designed beyond using factorization techniques (eg. Adafactor with momentum and Lion from our initial sweeps). We have provided one direction for cutting down on memory overhead, where we have shown that the need for adaptivity is distributed unevenly across different parameters of the network (with similar ideas already explored in concurrent work <ref type="bibr">(Zhang et al., 2024c)</ref>). Secondly, in terms of improving the performance of these models, our work suggests that optimizer choice is unlikely to be a promising approach-if we are limited to diagonal preconditioning optimizers. Thus, it is likely that we need to turn to non-diagonal methods to improve on our current methods; this is indeed where previous work has demonstrated improved performance to Adam <ref type="bibr">(Gupta et al., 2018a)</ref>.</p><p>Of course, there are several limitations to our study including the fact that due to computational constraints we only ablate a few architecture decisions, that we only consider one dimensional hyperparameter sweeps, we fix batch size, and that we limit our study to autoregressive language modeling with a single dataset. Despite these limitations, we believe that the study sheds new light on the fundamentals of optimization for language modeling.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>A RELATED WORK</head><p>One closely related work to ours is <ref type="bibr" target="#b40">Wortsman et al. (2024)</ref>, which explores the stability of Adam with respect to learning rate. We extend the comparison to other optimizers including SGD, Lion and Adafactor, as well as other hyperparameters including momentum and weight decay.</p><p>Optimizers: SGD <ref type="bibr" target="#b31">(Robbins &amp; Monro, 1951)</ref> had been the workhorse optimizer for deep learning until 2015, when Adam <ref type="bibr" target="#b18">(Kingma &amp; Ba, 2015)</ref> was introduced. Adam is a diagonal preconditioning algorithm that maintains a per-parameter learning rate. Over time, coarser variants of Adam have been proposed, which do not explicitly maintain a learning rate per parameter. Adafactor <ref type="bibr" target="#b35">(Shazeer &amp; Stern, 2018;</ref><ref type="bibr" target="#b42">Zhai et al., 2022</ref>) maintains a rank-1 approximation of the preconditioner matrix of Adam. Previous works have also explored Signum <ref type="bibr" target="#b5">(Bernstein et al., 2018;</ref><ref type="bibr" target="#b39">2019)</ref> and have observed its benefits in terms of communication efficiency and fault tolerance. Other works have also explored the similarity of Adam with variants of Signum <ref type="bibr" target="#b2">(Balles &amp; Hennig, 2018)</ref>, and recently, a close variant of Signum, called Lion <ref type="bibr" target="#b7">(Chen et al., 2023)</ref>, was discovered using symbolic search over algorithms. Some other optimizers that have recently gained increasing attention from the community include Shampoo <ref type="bibr">(Gupta et al., 2018b)</ref> and Sophia <ref type="bibr" target="#b22">(Liu et al., 2024)</ref>. Similar to us, prior work has explicitly studied optimizers comparisons across different domains and architectures. For instance, <ref type="bibr" target="#b32">Schmidt et al. (2021)</ref> performs a sweep over optimizers, schedulers, and seeds over various vision tasks. As mentioned in the introduction, <ref type="bibr" target="#b17">Kaddour et al. (2024)</ref> compares optimizers for masked language modeling and at a fixed model scale. Other works have called to attention better benchmarking practices for optimizers <ref type="bibr" target="#b33">(Schneider et al., 2019;</ref><ref type="bibr" target="#b36">Sivaprasad et al., 2020;</ref><ref type="bibr" target="#b4">Bartz-Beielstein et al., 2020)</ref>.</p><p>Adam and Signum: Many works have explored the relationship between Adam and variants of Signum <ref type="bibr" target="#b2">(Balles &amp; Hennig, 2018;</ref><ref type="bibr" target="#b3">Balles et al., 2020;</ref><ref type="bibr" target="#b20">Kunstner et al., 2023)</ref> and empirically demonstrated that Signum (or its close variants) generally performs comparably to Adam. <ref type="bibr" target="#b3">Balles et al. (2020)</ref> also argued that signSGD generally performs better when the Hessian is close to diagonal, however, it is unclear if this holds for practical settings. <ref type="bibr" target="#b20">Kunstner et al. (2023)</ref> recently demonstrated that Adam and a close variant of Signum exhibit similar performance on a variety of datasets including WikiText-2 <ref type="bibr" target="#b24">(Merity et al., 2017)</ref> and SQuAD <ref type="bibr" target="#b30">(Rajpurkar et al., 2016)</ref>. However, in contrast with our work, all of these are restricted to the setting of vision or masked language modeling, and generally do not sweep over multiple hyperparameters.</p><p>Layerwise or blockwise Adam: We study Adalayer, a layerwise version of Adam. This is a special case of the BAGM optimizer <ref type="bibr" target="#b46">(Zheng &amp; Kwok, 2019)</ref>, specifically BAGM B.1. Similar algorithms have also been studied by previous works <ref type="bibr" target="#b10">(Ginsburg et al., 2019;</ref><ref type="bibr" target="#b0">Agarwal et al., 2020;</ref><ref type="bibr" target="#b23">Liu et al., 2021;</ref><ref type="bibr">Zhang et al., 2024c)</ref>. In particular, concurrent to our work, <ref type="bibr">Zhang et al. (2024c)</ref> propose an algorithm termed Adam-mini, which closely tracks a modified version of Adalayer (called Adalayer*), and demonstrate comparable performance to AdamW. Note that, in our work, Adalayer* is introduced to understand the role played by preconditioning in Adam, and we do not specifically focus on the final performance. <ref type="bibr">Zhang et al. (2024b)</ref> empirically study the Hessian spectrum of transformers at initialization and find it to be more heterogeneous across layers as compared to ResNets. They argue that this heterogeneity is evidence towards the importance of Adam in training transformers. In contrast our results (Section 3.2) show that Adam's preconditioning is particularly important for the last layer and LayerNorm parameters to achieve performance and learning rate stability.</p><p>Other related works: For vision transformers, in the fine-tuning phase, <ref type="bibr" target="#b19">Kumar et al. (2024)</ref> show that using SGD with frozen embedding parameters leads to competitive performance with Adam. <ref type="bibr" target="#b15">Jelassi et al. (2022)</ref> explore the similarity between Adam and normalized gradient descent <ref type="bibr" target="#b25">(Nesterov, 2004)</ref> and show that normalized gradient descent on GANs does not suffer from mode collapse, while SGD does. <ref type="bibr" target="#b16">Jiang et al. (2023)</ref> empirically demonstrate that Adam steers the parameter trajectory towards better-conditioned regions than SGD. <ref type="bibr" target="#b26">Pan &amp; Li (2022)</ref> also show that the parameter trajectory of Adam exhibits much higher directional smoothness than that of SGD. <ref type="bibr" target="#b1">Ahn et al. (2024)</ref> show that the performance gap between Adam and SGD exacerbates with depth of the network. In a similar vein to us, <ref type="bibr" target="#b21">Kunstner et al. (2024)</ref> show that Adam is less sensitive than gradient descent to class-imbalance present in language tasks; we provide further evidence for the importance of preconditioning the last layer, as well as the LayerNorm parameters.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B ADDITIONAL MAIN SWEEP RESULTS</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Optimizer</head><p>Optimal Learning Rate Adam 3.16e-3 (150m), 1e-3 (300m), 1e-3 (600m), 1e-3 (1.2b) Adafactor 3.16e-3 (150m), 1e-3 (300m), 1e-3 (600m), 1e-3 (1.2b) Lion 3.16e-4 (150m), 3.16e-4 (300m), 3.16e-4 (600m), 1e-4 (1.2b) Signum 3.16e-4 (150m), 3.16e-4 (300m), 3.16e-4 (600m), 3.16e-4 (1.2b)</p><p>Table <ref type="table">1</ref>: Optimal learning rates for various optimizers from Figure <ref type="figure">1</ref>.</p><p>For our ablations in Figure <ref type="figure">1</ref>, we report on the optimal learning rate found for each optimizer in Table <ref type="table">1</ref>. In general, we find that the optimal learning rate for Adam and Adafactor are similar, with the optimal learning rate of Lion and Signum an order of magnitude smaller.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C ADALAYER</head><p>As mentioned in Section 3, to investigate the role of preconditioning on language models for optimizers like Adam, we introduce the Adalayer optimizer for ease of analysis. In this section, we first establish the performance and stability of Adalayer as a reasonable proxy for Adam by making a modification to how Adalayer treats the last layer of the network.</p><p>In Figure <ref type="figure" target="#fig_8">10</ref> we study the behavior of Adalayer across learning rates. To preserve the correspondence with Adam we fix other hyperparameters to be the same: β 1 = 0.9, β 2 = 0.95 and ϵ = 1e -15. We find that Adalayer has better performance than SGD, but it performs worse than Adam and also lacks Adam's stability across learning rates. The major difference between Adam and Adalayer is the preconditioning done by Adam within a layer. Intuitively, this preconditioning will have large effects in layers where we expect different weights within a layer to have different gradient scales.</p><p>The first candidate for such a layer is the last layer, since different tokens have widely different frequencies leading to different gradient scales. To test this hypothesis, we run a corrected version<ref type="foot" target="#foot_4">4</ref> of Adalayer where we treat the set of weights feeding into a logit as a separate block. We henceforth refer to Adalayer with this correction as Adalayer*. This is plotted in Figure <ref type="figure" target="#fig_8">10</ref> and we observe that Adalayer* almost recovers the performance as well as a large fraction of the stability of Adam. In this section, we report additional experiments involving training language models with SGD on a fraction of the models' parameters and an adaptive optimizer on the remaining parameters. Firstly, we show that our results from Section 3.2 hold even when training 600m parameter models with Adalayer* applied only on the last layer and LayerNorm parameters in Figure <ref type="figure" target="#fig_9">11</ref>. We also provide further ablations supporting our claim that the largest impact of the adaptivity of Adalayer* is concentrated on the last layer and LayerNorm parameters. Firstly, we train 150m models using Adalayer* on only the matrix parameters, while training the last layer and LayerNorm parameters with SGD. In Figure <ref type="figure" target="#fig_0">12</ref>, we see performance improves relative to SGD but we see similar instability at larger learning rates.</p><p>Secondly, given that the effective learning rates of the LayerNorm blocks were observed to be small in Figure <ref type="figure">7</ref> (Right), it is reasonable to ask whether training the LayerNorm parameters is necessary at all; in Figure <ref type="figure" target="#fig_1">13</ref>, we show results for training 150m and 300m models using Adalayer* only on the last layer, using SGD on all other matrix blocks, and turning off training for the LayerNorm parameters. This indeed yields greater stability in comparison to Figure <ref type="figure" target="#fig_6">8</ref> (Left) but does not fully recover the performance of Adalayer*, indicating that training LayerNorm parameters helps with performance, which seems more pronounced in the larger model. Figure <ref type="figure" target="#fig_0">12</ref>: We train 150m models using Adalayer* on the matrix layers with a fixed learning rate of 1e -3 and using SGD on the last layer and LayerNorm parameters. Compared to the results in Figure <ref type="figure" target="#fig_6">8</ref>, we do not recover the same stability nor do we reach the optimal performance of Adalayer*. Figure <ref type="figure" target="#fig_1">13</ref>: Training 150m (Left) and 300m (Right) models using Adalayer* on the last layer with a fixed learning rate of 3.16e -3 and using SGD on other matrix blocks, while turning off the option to train LayerNorm parameters. We see that while the performance and stability is improved compared to SGD, it is still not as performant as Adalayer*. This indicates a degree of importance of training LayerNorm parameters for these models.</p><p>We saw in Figure <ref type="figure" target="#fig_6">8</ref> (Middle, Right) that using Adalayer* on only the last layer and LayerNorm parameters sufficed to recover or exceed the performance of Adalayer*. In Figure <ref type="figure" target="#fig_2">14</ref>, we report a learning rate sweep over the analogous experiment but using Adafactor on the last layer and LayerNorm parameters with a fixed learning rate. For the 150m model, using a learning rate of 3.16e -3 with Adafactor yielded better performance than Adafactor for low learning rates, and is comparable in terms of performance and stability. For the 300m model, the difference between Adafactor and our 'hybrid' optimizer is more distinct at higher learning rates for fixed Adafactor learning rate 1.0e -3 and 3.16e -3, but is comparable until the peak validation loss. Figure <ref type="figure" target="#fig_2">14</ref>: Training 150m (Left) and 300m (Right) models using Adafactor on the last layer with a fixed learning rate and using SGD on other matrix blocks. We see that performance and stability is comparable to Adafactor, but does not exceed it, particularly at higher learning rates.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>E ADDITIONAL EXPERIMENTS: ADASGD + ADALAYER*</head><p>The previous experiments on SGD + Adalayer* show that although using a fixed learning rate for the matrix parameters largely recovers performance of full Adalayer*, there remains a small gap to full Adalayer* or Adam performance. Can we recover what is remaining? We further investigate the importance of adaptivity at different levels of granularity by training the matrix parameters with AdaSGD <ref type="bibr" target="#b38">(Wang &amp; Wiens, 2020</ref>) instead of SGD. AdaSGD still uses a global learning rate but allows this scalar to be adaptive across training-in other words, this is a "global" version of Adalayer* where all matrix parameters are treated as one block.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>F ADDITIONAL EXPERIMENTS: FREEZING ADALAYER LEARNING RATE</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>RATIOS</head><p>In this section, we report additional experiments exploring whether the results involving frozen Adalayer* in Section 3.2 need both last layer and LayerNorm adaptivity. We show that this is indeed the case by conducting the same sweep for frozen Adalayer* while trying to also freeze the learning rate ratios for last layer or LayerNorm parameters as well. In Figure <ref type="figure" target="#fig_13">17</ref>, we show that fixing initialized learning rate ratios for all layers does not reach peak performance of Adalayer*, nor does it exhibit stability. In Figure <ref type="figure" target="#fig_6">18</ref>, we show that either continuing to update the LayerNorm parameters or the last layer parameters can achieve the peak performance of Adalayer* but is still unstable. Finally, we show results for turning off LayerNorm training while fixing learning rate ratios (with the exception of the last layer) in Figure <ref type="figure" target="#fig_16">19</ref>. We conclude that it is necessary to maintain adaptivity for both the last layer and LayerNorm parameters, but understanding why the fixed ratios do not suffice would be an interesting question for future work.   Frozen Adalayer* (all but LN parameters) AdaLayer* Figure <ref type="figure" target="#fig_6">18</ref>: Training 150m models using fixed Adalayer* learning rate ratios from initialization while either excluding only the last layer (Left) or excluding only the LayerNorm parameters (Right). We observe both modifications reach peak performance but fails to be stable at higher learning rates. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>G SOPHIA</head><p>In this section, we compare Sophia <ref type="bibr" target="#b22">(Liu et al., 2024)</ref> to Signum. Note that Signum is a special case of Sophia, achieved by setting ρ = 0. We find that Sophia does not outperform Signum. No significant change in performance was observed when transferring the hyperparameters suggested by  </p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Figure 2 :</head><label>2</label><figDesc>Figure 2: Sweeping learning rate without QK norm or z-loss for (Left) the 150m model, and (Right) the 300m model. These models are less stable than the standard model, but the same general trend across algorithms hold here.</figDesc><graphic coords="4,147.60,81.86,316.80,129.92" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: Sweeping learning rate on 150m models trained for 4x longer (100k steps) than in the base runs for (Left) the standard model, and (Right) the model without QK norm or z-loss. Compared to the shorter runs, these models achieve better performance and increased stability across learning rates.</figDesc><graphic coords="4,147.60,269.04,316.80,129.92" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Figure 4 :</head><label>4</label><figDesc>Figure 4: Sweeping momentum for fixed learning rate across three settings: (Left) 150m standard, (Middle) 150m with no QK norm or z-loss, (Right) 300m standard. Adam and Adafactor are similarly robust to β 1 , while Lion and Signum are slightly more sensitive to low values and SGD is substantially more sensitive.</figDesc><graphic coords="5,108.00,81.86,396.00,110.67" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Figure 5 :</head><label>5</label><figDesc>Figure 5: Sweeps over other hyperparameters. Top: weight decay, warmup duration, and batch size.Bottom: ϵ and β 2 . We generally find little effect for the non-SGD algorithms, however there are parameters that differ from our defaults that can offer up to 0.02 improvements in validation loss .</figDesc><graphic coords="6,108.00,81.86,395.99,170.63" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Figure 6 :</head><label>6</label><figDesc>Figure 6: Sweeping momentum with β 1 = β 2 tied together for Adam (dashed) and compared to Signum and Adam with fixed β 2 = 0.95 (solid) across three settings: (Left) 150m standard, (Middle) 150m with no QK norm or z-loss, (Right) 300m standard. When β 1 = β 2 , Adam behaves very similarly to Signum.</figDesc><graphic coords="6,108.00,495.14,396.00,110.67" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_6"><head>Figure 8 :</head><label>8</label><figDesc>Figure 8: (Left): Training the last layer using Adalayer* with a fixed learning rate of 3.16e -3 and other LayerNorm and matrix blocks using SGD achieves better performance than SGD, but does not recover stability. (Right): Training both the last layer and LayerNorm blocks using Adalayer* and the other matrix blocks using SGD nearly recovers or exceeds performance of Adalayer*, and achieves stability across learning rates. Dotted lines are baselines from optimizers previously given in Sections 2 and 3.1.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_7"><head>Figure 9 :</head><label>9</label><figDesc>Figure9: Training 150m (Left) and 300m (Right) models using fixed Adalayer* learning rate ratios from initialization, with the exception of last layer and LayerNorm parameters. This almost entirely matches the performance and stability of Adalayer* in the 150m model, and exceeds Adalayer*'s peak performance to be comparable with Adam.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_8"><head>Figure 10 :</head><label>10</label><figDesc>Figure 10: Modifying Adalayer with the last layer correction improves performance and stability across learning rates.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_9"><head>Figure 11 :</head><label>11</label><figDesc>Figure11: As in Section 3.2, we train 300m (Left) and 600m models (Right) with Adalayer* on the last layer and LayerNorm parameters, and train the remaining model parameters with SGD. We see that performance and stability continues to match that of Adalayer* or outperform Adalayer* even at these larger scales..</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_10"><head></head><label></label><figDesc>Matrix, 1.0e-3) + SGD (LL + LN)</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_11"><head></head><label></label><figDesc>LL, 3.16e-3) + SGD (Matrix)+ LN training off</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_12"><head></head><label></label><figDesc>+ LN, 3.16e-3) + SGD (Matrix) AdaFactor (LL + LN, 1.0e-3) + SGD (Matrix)</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_13"><head>Figure 17 :</head><label>17</label><figDesc>Figure17: Training 150m (Left) and 300m (Right) models using fixed Adalayer* learning rate ratios from initialization for all layers. We observe this quickly diverges, achieving neither peak performance nor stability.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_15"><head></head><label></label><figDesc>150m</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_16"><head>Figure 19 :</head><label>19</label><figDesc>Figure19: Training 150m (Left) and 300m (Right) models using fixed Adalayer* learning rate ratios from initialization, while letting the last layer continue to update, and turning LayerNorm training off. Stability across learning rates has improved but is less performant; for the 150m model we also plot the sweep for regular Adalayer* with LayerNorm training off, and we see that it is worse in performance compared to Adalayer* with LayerNorm training.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_17"><head></head><label></label><figDesc><ref type="bibr" target="#b22">Liu et al. (2024)</ref> (eg. β 1 , β 2 , ε, weight decay), nor when additionally scaling attention by the inverse of layer index which was used in the original Sophia implementation.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_18"><head>Figure 20 :</head><label>20</label><figDesc>Figure 20: Comparing Sophia (Liu et al., 2024) and Signum for the 150M model in our default setup.</figDesc><graphic coords="21,177.30,414.92,257.40,157.03" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0"><head></head><label></label><figDesc></figDesc><graphic coords="2,137.70,81.86,336.61,232.33" type="bitmap" /></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="1" xml:id="foot_0"><p>Our implementation of Adafactor adds back momentum as described in Section</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" xml:id="foot_1"><p>2.2.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="2" xml:id="foot_2"><p>Note that in Lion, both β1 and β2 can be thought of as different types of "momentum" with β1 being the "one-step" momentum and β2 the "long-term" momentum. For consistency, we only sweep β1 here and sweep β2 in Section 2.5.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="3" xml:id="foot_3"><p>This is not true in theory, as the ratio can vary across parameters.</p></note>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" n="4" xml:id="foot_4"><p>We note that this reasoning also applies to the first layer, but in our ablations applying this correction the first layer did not make a significant difference.</p></note>
+		</body>
+		<back>
+
+			<div type="acknowledgement">
+<div><p>ACKNOWLEDGMENTS SK, DM and RZ acknowledges support from the <rs type="funder">Office of Naval Research</rs> under award <rs type="grantNumber">N00014-22-1-2377</rs> and the <rs type="funder">National Science Foundation</rs> Grant under award #<rs type="grantNumber">IIS 2229881</rs>. This work has been made possible in part by a gift from the <rs type="funder">Chan Zuckerberg Initiative Foundation</rs> to establish the <rs type="projectName">Kempner Institute for the Study of Natural and Artificial Intelligence</rs>. NV, DM and RZ are supported by a <rs type="grantName">Simons Investigator Fellowship</rs>, <rs type="funder">NSF</rs> grant <rs type="grantNumber">DMS-2134157</rs>, <rs type="funder">DARPA</rs> grant <rs type="grantNumber">W911NF2010021</rs>,and <rs type="funder">DOE</rs> grant <rs type="grantNumber">DE-SC0022199</rs>. RZ and DM are supported by <rs type="funder">Kempner Institute Graduate Research Fellowships</rs>.</p></div>
+			</div>
+			<listOrg type="funding">
+				<org type="funding" xml:id="_2BAEm2q">
+					<idno type="grant-number">N00014-22-1-2377</idno>
+				</org>
+				<org type="funding" xml:id="_MRKFTTY">
+					<idno type="grant-number">IIS 2229881</idno>
+				</org>
+				<org type="funded-project" xml:id="_7UyuqFf">
+					<orgName type="grant-name">Simons Investigator Fellowship</orgName>
+					<orgName type="project" subtype="full">Kempner Institute for the Study of Natural and Artificial Intelligence</orgName>
+				</org>
+				<org type="funding" xml:id="_fzaSSBr">
+					<idno type="grant-number">DMS-2134157</idno>
+				</org>
+				<org type="funding" xml:id="_WMTSRQe">
+					<idno type="grant-number">W911NF2010021</idno>
+				</org>
+				<org type="funding" xml:id="_8tMDXkd">
+					<idno type="grant-number">DE-SC0022199</idno>
+				</org>
+			</listOrg>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Published as a conference paper at ICLR 2025</p><p>In Figure <ref type="figure">15</ref> we conduct an analogous learning rate sweep for AdaSGD for β 0 ∈ {0.9, 0.98} as we did in Section 2. The performance of AdaSGD is marginally better than SGD, but still suffers from learning rate instability; this is consistent with our previous findings in Figure <ref type="figure">7</ref>, where we saw that certain parameters had effective learning rates which were multiple orders of magnitude different from other parameters, and thus a single adaptive learning rate across all parameters likely would not suffice for achieving performance and stability.</p><p>In Figure <ref type="figure">16</ref> we replace SGD with AdaSGD on the matrix parameters and use Adalayer* to train the last layer and LayerNorm parameters. The performance now essentially matches that of full Adalayer* compared to SGD + Adalayer*, showing that the single adaptive learning rate on matrix parameters is largely sufficient to recover Adalayer* performance. However, a gap still remains between Adam performance even with an adaptive learning rate across matrix parameters; it is likely that this small gap is attributed to the need for increased adaptivity granularity for certain matrix parameters.</p><p>Figure <ref type="figure">15</ref>: Learning rate sweep for AdaSGD with two β 0 values. We observe that AdaSGD performs marginally better than SGD but still lacks learning rate stability.</p><p>Figure <ref type="figure">16</ref>: When replacing SGD with AdaSGD on the matrix parameters and using Adalayer* to train the last layer and LayerNorm parameters, the performance and stability has improved to match that of Adalayer*, but a gap still remains between Adam performance even with an adaptive learning rate across matrix parameters.</p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<title level="m" type="main">Disentangling adaptive gradient methods from learning rates</title>
+		<author>
+			<persName><forename type="first">Naman</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rohan</forename><surname>Anil</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Elad</forename><surname>Hazan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomer</forename><surname>Koren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cyril</forename><surname>Zhang</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2002.11803" />
+		<imprint>
+			<date type="published" when="2002">2002.11803. 2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<analytic>
+		<title level="a" type="main">Linear attention is (maybe) all you need (to understand transformer optimization)</title>
+		<author>
+			<persName><forename type="first">Kwangjun</forename><surname>Ahn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiang</forename><surname>Cheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Minhak</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chulhee</forename><surname>Yun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ali</forename><surname>Jadbabaie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Suvrit</forename><surname>Sra</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum" />
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note>id=0uI5415ry7</note>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<monogr>
+		<title level="m" type="main">Dissecting adam: The sign, magnitude and variance of stochastic gradients</title>
+		<author>
+			<persName><forename type="first">Lukas</forename><surname>Balles</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Philipp</forename><surname>Hennig</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=S1EwLkW0W" />
+		<imprint>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<monogr>
+		<title level="m" type="main">The geometry of sign gradient descent</title>
+		<author>
+			<persName><forename type="first">Lukas</forename><surname>Balles</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fabian</forename><surname>Pedregosa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nicolas</forename><forename type="middle">Le</forename><surname>Roux</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<monogr>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Bartz-Beielstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Carola</forename><surname>Doerr</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daan</forename><surname>Van Den</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakob</forename><surname>Berg</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sowmya</forename><surname>Bossek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tome</forename><surname>Chandrasekaran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andreas</forename><surname>Eftimov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pascal</forename><surname>Fischbach</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Kerschke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">La</forename><surname>William</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Manuel</forename><surname>Cava</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Lopez-Ibanez</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2007.03488</idno>
+		<title level="m">Benchmarking in optimization: Best practice and open issues</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title level="a" type="main">signSGD: Compressed optimisation for non-convex problems</title>
+		<author>
+			<persName><forename type="first">Jeremy</forename><surname>Bernstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu-Xiang</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kamyar</forename><surname>Azizzadenesheli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Animashree</forename><surname>Anandkumar</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+		<ptr target="https://proceedings.mlr.press/v80/bernstein18a.html" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 35th International Conference on Machine Learning</title>
+		<editor>
+			<persName><forename type="first">Jennifer</forename><surname>Dy</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Andreas</forename><surname>Krause</surname></persName>
+		</editor>
+		<meeting>the 35th International Conference on Machine Learning</meeting>
+		<imprint>
+			<date type="published" when="2018-07">Jul 2018</date>
+			<biblScope unit="volume">80</biblScope>
+			<biblScope unit="page" from="10" to="15" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Kamyar Azizzadenesheli, and Anima Anandkumar. signSGD with majority vote is communication efficient and fault tolerant</title>
+		<author>
+			<persName><forename type="first">Jeremy</forename><surname>Bernstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiawei</forename><surname>Zhao</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=BJxhijAcY7" />
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Symbolic discovery of optimization algorithms</title>
+		<author>
+			<persName><forename type="first">Xiangning</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chen</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Da</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Esteban</forename><surname>Real</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaiyuan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hieu</forename><surname>Pham</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuanyi</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thang</forename><surname>Luong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Cho-Jui</forename><surname>Hsieh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yifeng</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quoc V</forename><surname>Le</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=ne6zeqLFCZ" />
+	</analytic>
+	<monogr>
+		<title level="m">Thirty-seventh Conference on Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">Palm: Scaling language modeling with pathways</title>
+		<author>
+			<persName><forename type="first">Aakanksha</forename><surname>Chowdhery</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sharan</forename><surname>Narang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacob</forename><surname>Devlin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maarten</forename><surname>Bosma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gaurav</forename><surname>Mishra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Roberts</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Paul</forename><surname>Barham</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hyung</forename><forename type="middle">Won</forename><surname>Chung</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Charles</forename><surname>Sutton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sebastian</forename><surname>Gehrmann</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Journal of Machine Learning Research</title>
+		<imprint>
+			<biblScope unit="volume">24</biblScope>
+			<biblScope unit="issue">240</biblScope>
+			<biblScope unit="page" from="1" to="113" />
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">Scaling vision transformers to 22 billion parameters</title>
+		<author>
+			<persName><forename type="first">Mostafa</forename><surname>Dehghani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Josip</forename><surname>Djolonga</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Basil</forename><surname>Mustafa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piotr</forename><surname>Padlewski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Heek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Justin</forename><surname>Gilmer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andreas</forename><forename type="middle">Peter</forename><surname>Steiner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mathilde</forename><surname>Caron</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Robert</forename><surname>Geirhos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ibrahim</forename><surname>Alabdulmohsin</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<publisher>PMLR</publisher>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="page" from="7480" to="7512" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<author>
+			<persName><forename type="first">Boris</forename><surname>Ginsburg</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Patrice</forename><surname>Castonguay</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oleksii</forename><surname>Hrinchuk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oleksii</forename><surname>Kuchaiev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vitaly</forename><surname>Lavrukhin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ryan</forename><surname>Leary</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huyen</forename><surname>Nguyen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><forename type="middle">M</forename><surname>Cohen</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1905.11286</idno>
+		<title level="m">Stochastic gradient methods with layer-wise adaptive moments for training of deep networks</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<monogr>
+		<author>
+			<persName><forename type="first">Dirk</forename><surname>Groeneveld</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Iz</forename><surname>Beltagy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pete</forename><surname>Walsh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Akshita</forename><surname>Bhagia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rodney</forename><surname>Kinney</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oyvind</forename><surname>Tafjord</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ananya</forename><surname>Harsh Jha</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hamish</forename><surname>Ivison</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ian</forename><surname>Magnusson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yizhong</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.00838</idno>
+		<title level="m">Accelerating the science of language models</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">Shampoo: Preconditioned stochastic tensor optimization</title>
+		<author>
+			<persName><forename type="first">Vineet</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomer</forename><surname>Koren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yoram</forename><surname>Singer</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2018">2018</date>
+			<biblScope unit="page" from="1842" to="1850" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<analytic>
+		<title level="a" type="main">Shampoo: Preconditioned stochastic tensor optimization</title>
+		<author>
+			<persName><forename type="first">Vineet</forename><surname>Gupta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tomer</forename><surname>Koren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yoram</forename><surname>Singer</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+		<ptr target="http://proceedings.mlr.press/v80/gupta18a.html" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 35th International Conference on Machine Learning, ICML 2018</title>
+		<editor>
+			<persName><forename type="first">Jennifer</forename><forename type="middle">G</forename><surname>Dy</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Andreas</forename><surname>Krause</surname></persName>
+		</editor>
+		<meeting>the 35th International Conference on Machine Learning, ICML 2018<address><addrLine>Stockholmsmässan, Stockholm, Sweden</addrLine></address></meeting>
+		<imprint>
+			<date type="published" when="2018">July 10-15, 2018. 2018</date>
+			<biblScope unit="volume">80</biblScope>
+			<biblScope unit="page" from="1837" to="1845" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<monogr>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Hendrycks</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kevin</forename><surname>Gimpel</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1606.08415</idno>
+		<title level="m">Gaussian error linear units (gelus)</title>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<monogr>
+		<author>
+			<persName><forename type="first">Samy</forename><surname>Jelassi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Dobre</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arthur</forename><surname>Mensch</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gauthier</forename><surname>Gidel</surname></persName>
+		</author>
+		<title level="m">Dissecting adaptive methods in gans</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">How does adaptive optimization impact local neural network geometry?</title>
+		<author>
+			<persName><forename type="first">Kaiqi</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dhruv</forename><surname>Malik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=gIG8LvTLuc" />
+	</analytic>
+	<monogr>
+		<title level="m">Thirty-seventh Conference on Neural Information Processing Systems</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">No train no gain: Revisiting efficient training algorithms for transformer-based language models</title>
+		<author>
+			<persName><forename type="first">Jean</forename><surname>Kaddour</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Oscar</forename><surname>Key</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Piotr</forename><surname>Nawrot</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pasquale</forename><surname>Minervini</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matt</forename><forename type="middle">J</forename><surname>Kusner</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">Adam: A method for stochastic optimization</title>
+		<author>
+			<persName><forename type="first">P</forename><surname>Diederik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jimmy</forename><surname>Kingma</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Ba</surname></persName>
+		</author>
+		<ptr target="http://arxiv.org/abs/1412.6980" />
+	</analytic>
+	<monogr>
+		<title level="m">3rd International Conference on Learning Representations, ICLR 2015</title>
+		<editor>
+			<persName><forename type="first">Yoshua</forename><surname>Bengio</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Yann</forename><surname>Lecun</surname></persName>
+		</editor>
+		<meeting><address><addrLine>San Diego, CA, USA</addrLine></address></meeting>
+		<imprint>
+			<date type="published" when="2015">May 7-9, 2015. 2015</date>
+		</imprint>
+	</monogr>
+	<note>Conference Track Proceedings</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">How to fine-tune vision models with SGD</title>
+		<author>
+			<persName><forename type="first">Ananya</forename><surname>Kumar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruoqi</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sebastien</forename><surname>Bubeck</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Suriya</forename><surname>Gunasekar</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=ZTssMmhC2X" />
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">Noise is not the main factor behind the gap between sgd and adam on transformers, but sign descent might be</title>
+		<author>
+			<persName><forename type="first">Frederik</forename><surname>Kunstner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jacques</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Wilder Lavington</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Schmidt</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=a65YK0cqH8g" />
+	</analytic>
+	<monogr>
+		<title level="m">The Eleventh International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<title level="m" type="main">Heavy-tailed class imbalance and why adam outperforms gradient descent on language models</title>
+		<author>
+			<persName><forename type="first">Frederik</forename><surname>Kunstner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Robin</forename><surname>Yadav</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alan</forename><surname>Milligan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Schmidt</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alberto</forename><surname>Bietti</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<publisher>CoRR</publisher>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Sophia: A scalable stochastic second-order optimizer for language model pre-training</title>
+		<author>
+			<persName><forename type="first">Hong</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiyuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Leo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wright</forename><surname>Hall</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Percy</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tengyu</forename><surname>Ma</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=3xHDeA8Noi" />
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">Learning by turning: Neural architecture aware optimisation</title>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeremy</forename><surname>Bernstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Markus</forename><surname>Meister</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yisong</forename><surname>Yue</surname></persName>
+		</author>
+		<ptr target="https://proceedings.mlr.press/v139/liu21c.html" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 38th International Conference on Machine Learning</title>
+		<editor>
+			<persName><forename type="first">Marina</forename><surname>Meila</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Tong</forename><surname>Zhang</surname></persName>
+		</editor>
+		<meeting>the 38th International Conference on Machine Learning</meeting>
+		<imprint>
+			<date type="published" when="2021-07">Jul 2021</date>
+			<biblScope unit="volume">139</biblScope>
+			<biblScope unit="page" from="18" to="24" />
+		</imprint>
+	</monogr>
+	<note>PMLR</note>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Pointer sentinel mixture models</title>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Merity</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Caiming</forename><surname>Xiong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Bradbury</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Richard</forename><surname>Socher</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=Byj72udxe" />
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<monogr>
+		<author>
+			<persName><forename type="first">I</forename><forename type="middle">U E</forename><surname>Nesterov</surname></persName>
+		</author>
+		<ptr target="https://books.google.com/books?id=klv2PwAACAAJ" />
+		<title level="m">Introductory Lectures on Convex Optimization: A Basic Course. Mathematics and its applications</title>
+		<imprint>
+			<publisher>Kluwer Academic Publishers</publisher>
+			<date type="published" when="2004">2004</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title level="a" type="main">Toward understanding why adam converges faster than SGD for transformers</title>
+		<author>
+			<persName><forename type="first">Yan</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Li</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=Sf1NlV2r6PO" />
+	</analytic>
+	<monogr>
+		<title level="m">OPT 2022: Optimization for Machine Learning (NeurIPS 2022 Workshop)</title>
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<analytic>
+		<title level="a" type="main">Pytorch: An imperative style, high-performance deep learning library</title>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Paszke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Gross</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Francisco</forename><surname>Massa</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Lerer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Bradbury</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gregory</forename><surname>Chanan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Trevor</forename><surname>Killeen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zeming</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Natalia</forename><surname>Gimelshein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Luca</forename><surname>Antiga</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="page">32</biblScope>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<monogr>
+		<title level="m" type="main">Resolving discrepancies in compute-optimal scaling of language models</title>
+		<author>
+			<persName><forename type="first">Mitchell</forename><surname>Tomer Porian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jenia</forename><surname>Wortsman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ludwig</forename><surname>Jitsev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yair</forename><surname>Schmidt</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Carmon</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2406.19146</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Exploring the limits of transfer learning with a unified text-to-text transformer</title>
+		<author>
+			<persName><forename type="first">Colin</forename><surname>Raffel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Roberts</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katherine</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sharan</forename><surname>Narang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Matena</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanqi</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><forename type="middle">J</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Journal of machine learning research</title>
+		<imprint>
+			<biblScope unit="volume">21</biblScope>
+			<biblScope unit="issue">140</biblScope>
+			<biblScope unit="page" from="1" to="67" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<monogr>
+		<title level="m" type="main">Squad: 100,000+ questions for machine comprehension of text</title>
+		<author>
+			<persName><forename type="first">Pranav</forename><surname>Rajpurkar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Konstantin</forename><surname>Lopyrev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Percy</forename><surname>Liang</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">A Stochastic Approximation Method</title>
+		<author>
+			<persName><forename type="first">Herbert</forename><surname>Robbins</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sutton</forename><surname>Monro</surname></persName>
+		</author>
+		<idno type="DOI">10.1214/aoms/1177729586</idno>
+		<ptr target="https://doi.org/10.1214/aoms/1177729586" />
+	</analytic>
+	<monogr>
+		<title level="j">The Annals of Mathematical Statistics</title>
+		<imprint>
+			<biblScope unit="volume">22</biblScope>
+			<biblScope unit="issue">3</biblScope>
+			<biblScope unit="page" from="400" to="407" />
+			<date type="published" when="1951">1951</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<analytic>
+		<title level="a" type="main">Descending through a crowded valleybenchmarking deep learning optimizers</title>
+		<author>
+			<persName><forename type="first">Robin</forename><forename type="middle">M</forename><surname>Schmidt</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Frank</forename><surname>Schneider</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Philipp</forename><surname>Hennig</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="page" from="9367" to="9376" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<analytic>
+		<title level="a" type="main">Deepobs: A deep learning optimizer benchmark suite</title>
+		<author>
+			<persName><forename type="first">Frank</forename><surname>Schneider</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lukas</forename><surname>Balles</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Philipp</forename><surname>Hennig</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">Measuring the effects of data parallelism on neural network training</title>
+		<author>
+			<persName><forename type="first">Christopher</forename><forename type="middle">J</forename><surname>Shallue</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jaehoon</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joseph</forename><surname>Antognini</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jascha</forename><surname>Sohl-Dickstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roy</forename><surname>Frostig</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">George</forename><forename type="middle">E</forename><surname>Dahl</surname></persName>
+		</author>
+		<ptr target="http://jmlr.org/papers/v20/18-789.html" />
+	</analytic>
+	<monogr>
+		<title level="j">Journal of Machine Learning Research</title>
+		<imprint>
+			<biblScope unit="volume">20</biblScope>
+			<biblScope unit="issue">112</biblScope>
+			<biblScope unit="page" from="1" to="49" />
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Adafactor: Adaptive learning rates with sublinear memory cost</title>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Shazeer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mitchell</forename><surname>Stern</surname></persName>
+		</author>
+		<ptr target="http://proceedings.mlr.press/v80/shazeer18a.html" />
+	</analytic>
+	<monogr>
+		<title level="m">Proceedings of the 35th International Conference on Machine Learning, ICML 2018</title>
+		<editor>
+			<persName><forename type="first">Jennifer</forename><forename type="middle">G</forename><surname>Dy</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Andreas</forename><surname>Krause</surname></persName>
+		</editor>
+		<meeting>the 35th International Conference on Machine Learning, ICML 2018<address><addrLine>Stockholmsmässan, Stockholm, Sweden</addrLine></address></meeting>
+		<imprint>
+			<date type="published" when="2018">July 10-15, 2018. 2018</date>
+			<biblScope unit="volume">80</biblScope>
+			<biblScope unit="page" from="4603" to="4611" />
+		</imprint>
+	</monogr>
+	<note>PMLR</note>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">Optimizer benchmarking needs to account for hyperparameter tuning</title>
+		<author>
+			<persName><forename type="first">Teja</forename><surname>Prabhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Florian</forename><surname>Sivaprasad</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thijs</forename><surname>Mai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Martin</forename><surname>Vogels</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">François</forename><surname>Jaggi</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Fleuret</surname></persName>
+		</author>
+		<idno>PMLR</idno>
+	</analytic>
+	<monogr>
+		<title level="m">International conference on machine learning</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+			<biblScope unit="page" from="9036" to="9045" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<analytic>
+		<title level="a" type="main">Roformer: Enhanced transformer with rotary position embedding</title>
+		<author>
+			<persName><forename type="first">Jianlin</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Murtadha</forename><surname>Ahmed</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengfeng</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wen</forename><surname>Bo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunfeng</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Neurocomputing</title>
+		<imprint>
+			<biblScope unit="volume">568</biblScope>
+			<biblScope unit="page">127063</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<monogr>
+		<author>
+			<persName><forename type="first">Jiaxuan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jenna</forename><surname>Wiens</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2006.16541</idno>
+		<title level="m">Adasgd: Bridging the gap between sgd and adam</title>
+		<imprint>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<monogr>
+		<author>
+			<persName><forename type="first">Ross</forename><surname>Wightman</surname></persName>
+		</author>
+		<ptr target="https://github.com/rwightman/pytorch-image-models" />
+		<title level="m">Pytorch image models</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<analytic>
+		<title level="a" type="main">Small-scale proxies for large-scale transformer training instabilities</title>
+		<author>
+			<persName><forename type="first">Mitchell</forename><surname>Wortsman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Peter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lechao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katie</forename><forename type="middle">E</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><forename type="middle">A</forename><surname>Everett</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ben</forename><surname>Alemi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><forename type="middle">D</forename><surname>Adlam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Izzeddin</forename><surname>Co-Reyes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abhishek</forename><surname>Gur</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roman</forename><surname>Kumar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Novak</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jascha</forename><surname>Pennington</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kelvin</forename><surname>Sohl-Dickstein</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jaehoon</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Justin</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Simon</forename><surname>Gilmer</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Kornblith</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=d8w0pmvXbZ" />
+	</analytic>
+	<monogr>
+		<title level="m">The Twelfth International Conference on Learning Representations</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<analytic>
+		<title level="a" type="main">Tuning large neural networks via zero-shot hyperparameter transfer</title>
+		<author>
+			<persName><forename type="first">Ge</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Edward</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Igor</forename><surname>Babuschkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Szymon</forename><surname>Sidor</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaodong</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Farhi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nick</forename><surname>Ryder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jakub</forename><surname>Pachocki</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weizhu</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianfeng</forename><surname>Gao</surname></persName>
+		</author>
+		<ptr target="https://proceedings.neurips.cc/paper_files/paper/2021/file/" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<editor>
+			<persName><forename type="first">M</forename><surname>Ranzato</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">A</forename><surname>Beygelzimer</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">Y</forename><surname>Dauphin</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">P</forename><forename type="middle">S</forename><surname>Liang</surname></persName>
+		</editor>
+		<editor>
+			<persName><forename type="first">J</forename><forename type="middle">Wortman</forename><surname>Vaughan</surname></persName>
+		</editor>
+		<imprint>
+			<publisher>Curran Associates, Inc</publisher>
+			<date type="published" when="2021">2021</date>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="page" from="17084" to="17097" />
+		</imprint>
+	</monogr>
+	<note>be098ef7b382bd2c37ba-Paper.pdf</note>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<analytic>
+		<title level="a" type="main">Scaling vision transformers</title>
+		<author>
+			<persName><forename type="first">Xiaohua</forename><surname>Zhai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Kolesnikov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Neil</forename><surname>Houlsby</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lucas</forename><surname>Beyer</surname></persName>
+		</author>
+		<idno type="DOI">10.1109/CVPR52688.2022.01179</idno>
+		<ptr target="https://doi.org/10.1109/CVPR52688.2022.01179" />
+	</analytic>
+	<monogr>
+		<title level="m">IEEE/CVF Conference on Computer Vision and Pattern Recognition</title>
+		<meeting><address><addrLine>New Orleans, LA, USA</addrLine></address></meeting>
+		<imprint>
+			<publisher>IEEE</publisher>
+			<date type="published" when="2022">June 18-24, 2022</date>
+			<biblScope unit="page">2022</biblScope>
+		</imprint>
+	</monogr>
+	<note>CVPR 2022</note>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<monogr>
+		<title level="m" type="main">How does critical batch size scale in pre-training?</title>
+		<author>
+			<persName><forename type="first">Hanlin</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Depen</forename><surname>Morwani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikhil</forename><surname>Vyas</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jingfeng</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Difan</forename><surname>Zou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Udaya</forename><surname>Ghai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dean</forename><surname>Foster</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sham</forename><surname>Kakade</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2410.21676" />
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<monogr>
+		<title/>
+		<author>
+			<persName><forename type="first">Yushun</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Congliang</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tian</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ziniu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruoyu</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhi-Quan</forename><surname>Luo</surname></persName>
+		</author>
+		<imprint/>
+	</monogr>
+	<note>Why transformers need adam: A hessian perspective, 2024b</note>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<monogr>
+		<title level="m" type="main">Adam-mini: Use fewer learning rates to gain more</title>
+		<author>
+			<persName><forename type="first">Yushun</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Congliang</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ziniu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tian</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenwei</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yinyu</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zhi-Quan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruoyu</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Sun</surname></persName>
+		</author>
+		<ptr target="https://arxiv.org/abs/2406.16793" />
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<monogr>
+		<title level="m" type="main">Blockwise adaptivity: Faster training and better generalization in deep learning</title>
+		<author>
+			<persName><forename type="first">Shuai</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><forename type="middle">T</forename><surname>Kwok</surname></persName>
+		</author>
+		<idno>CoRR, abs/1905.09899</idno>
+		<ptr target="http://arxiv.org/abs/1905.09899" />
+		<imprint>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

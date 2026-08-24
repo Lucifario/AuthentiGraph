@@ -1,0 +1,1548 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Under review as a conference paper at ICLR 2025 PO K ÉCH A M P : AN EXPERT-LEVEL MINIMAX LANGUAGE AGENT FOR COMPETITIVE POKÉMON</title>
+			</titleStmt>
+			<publicationStmt>
+				<publisher/>
+				<availability status="unknown"><licence/></availability>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<author>
+							<affiliation key="aff0">
+								<address>
+									<postBox>811 812 813 814 815 816 817 818 819 820 821 822 823 824 825 826 827 828 829 830 831 832 833 834 835 836 837 838 839 840 841 842 843 844 845 846 847 848 849 850 851 852 853 854 855 856 857 858 859 860 861</postBox>
+									<postCode>862 863</postCode>
+								</address>
+							</affiliation>
+						</author>
+						<title level="a" type="main">Under review as a conference paper at ICLR 2025 PO K ÉCH A M P : AN EXPERT-LEVEL MINIMAX LANGUAGE AGENT FOR COMPETITIVE POKÉMON</title>
+					</analytic>
+					<monogr>
+						<imprint>
+							<date/>
+						</imprint>
+					</monogr>
+					<idno type="MD5">31257628D4607C64AD3000C9145AF803</idno>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.0" ident="GROBID" when="2026-08-10T20:10+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>We introduce PokéChamp, a Large Language Model (LLM) powered gametheoretic aware agent for two-player competitive Pokémon battles, that uses an LLM prior and collected high-Elo human data to model minimax search without any additional neural network training. PokéChamp uses a depth-limited minimax search online where the LLM replaces three key components: 1) action sampling from the LLM guided by prompts (including from a damage calculation tool), 2) opponent-modeling via the historical likelihood of actions from our dataset to model the effect of LLM-predicted opponent actions, and 3) state value calculation for the LLM to reflect on each intrinsic state. PokéChamp outperforms all existing LLM-based (76%) and rule-based bots (84%) by an enormous margin, including winning consistently (64%) against prior human-parity work run with a frontier model, GPT 4-o, while using an open-source 8 billion parameter Llama 3.1 model. PokéChamp achieves expert performance in the top 10% of players on the online ladder against competitive human players at an Elo of 1500. Finally, we collect the largest Pokémon battling dataset, including 1 mil-lion+ games with 150k+ high Elo games, prepare a series of battling benchmarks based on real player data and puzzles to analyze specific battling abilities, and provide crucial updates to the local game engine. Our code is available online.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Figure <ref type="figure">1</ref>: PokéChamp achieves the 90% percentile of players and a 1500 Elo rating against real players. Higher Elo and percentile denote better performance.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1">INTRODUCTION</head><p>A desirable element of a language agent is to be able to approach Nash solutions for competitive tasks. Previous work in reinforcement learning <ref type="bibr" target="#b5">Campbell et al. (2002)</ref>; <ref type="bibr" target="#b27">Silver et al. (2017;</ref><ref type="bibr" target="#b26">2016)</ref>; <ref type="bibr" target="#b3">Brown &amp; Sandholm (2019;</ref><ref type="bibr" target="#b2">2018)</ref>; <ref type="bibr" target="#b31">Vinyals et al. (2019)</ref>; <ref type="bibr" target="#b1">Berner et al. (2019)</ref> finds the best performance through tabula rasa self-play or train large language models via imitation learning and human-regularized self-play (FAIR). Language agents have the ability to leverage prior information about background and task strategies and apply it to new situations. Recent advances in these text agents have shown that they lack basic planning capabilities <ref type="bibr" target="#b30">Topsakal &amp; Harper (2024)</ref>, perform worse than hardcoded heuristic bots for games <ref type="bibr" target="#b19">Küttler et al. (2020)</ref>, and have issues understanding the basic game mechanics <ref type="bibr" target="#b13">Hu et al. (2024b)</ref>.</p><p>Let us consider competitive Pokémon as an example. With a vast number of Pokémon species that each have their own unique abilities, moves, typing, special mechanics, and range of stats, the total number of possible states is on the order of 10 354 The-Third-Build (2022) and this is only for turn 1. Information about the opponent's team is only partially observable, which keeps the search space from shrinking once the opponent's team is revealed. Pokémon battles can last anywhere from 6 to over 100 turns, meaning exhaustive self-play can be quite computationally intractable. We argue that an informative prior can help limit minimax search to the space of human strategies. Large language models (LLMs) have the potential to be trained on text datasets that include information about Pokémon, but are not exhaustive since they are not the focus of training. Thus, we want an agent that can harness the prior of large language models to: (1) propose optimal actions to provide highly likely, diverse actions for potential strategies, <ref type="bibr" target="#b42">(2)</ref> accurately model the opponent based on their move history, team, and strategy based on their skill-level, and (3) reflect on an internally planned game trajectory without requiring a terminal win/lose state.</p><p>Thus, to achieve these mechanisms, we introduce PokéChamp, a competitive language agent that achieves human-expert level performance in the two-player turn-based battles in Pokémon.</p><p>PokéChamp uses a large language model to power generative minimax tree search through the following elements: (1) action branching from tool-use and LLM sampling; (2) LLM-based opponent-modeling via information from our collected historical data of real Pokémon battles to provide likely team compositions, which is prompted to the LLM to provide opponent actions; and (3) using a score rating guide prompt and the internally predicted state from our world model engine, provide an LLM-generated value calculation of leaf nodes. Based on the depth of our tree, the sum of the values of the leaf nodes is backpropagated up through the tree to output the most likely action. The LLM acts as a black box, in which it can be switched out based on one's compute availability and used with better frontier LLMs as they are developed. Our approach prevents the need for additional training or fine-tuning on Pokémon-specific data.</p><p>In order to successfully plan k steps into the future battle, our agent needs a proper world model. Due to partial observability, we cannot just use the game engine as the world model. Rather, we developed our own local game engine in order to adequately address the intrinsic planning capabilities. We developed a tool, which we simply call the damage calculator (dmg calc), that mathematically calculates the core game engine capabilities in combination with loading historical data from real player games in order to load likely stats for the opponent's team. The historical data comes from our Pokémon battling dataset, which, as of this writing, contains over 1 million games from various Elos and game modes. We use our dataset, which is the first and largest Pokémon battling dataset, to establish a set of benchmark puzzles to understand key mechanics and strategies commonly found in battles. We establish a move prediction and opponent modeling benchmark based on high-elo human data to show the limitations of prompting LLMs. Our 1v1 benchmark provides an opportunity to evaluate the competency of our bot to choose the best moves for individual matchups.</p><p>Empirically, PokéChamp demonstrates expert-level performance in Pokémon battles. Our agent is able to choose optimal actions with a short minimax planning lookahead. We evaluate PokéChamp in an arena setup against other competitive Pokémon bots, including heuristic bots and an LLMbased agent PokéLLMon <ref type="bibr" target="#b13">Hu et al. (2024b)</ref>, in two highly played game modes: Generation 8 Random Battles (gen8randombattles) and Generation 9 OverUsed Meta (gen9ou). PokéChamp outperforms all other bots and AI agents, with the largest margin being in gen9ou with a 76% winrate against the strongest LLM-based bot and an 84% winrate against the strongest heuristic bot. Our method is also able to bootstrap smaller language models such as Llama3.1:8b to win consistently (64%) against prior LLM-based bots with GPT-4o. In online ladder battles, we find that our language agent, PokéChamp, achieves an expert rating on 1500 Elo, which is just shy of the top 500 players.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2">MATHEMATICAL FORMALIZATION</head><p>Partially observable Markov games: We consider finite-horizon, two-player zero-sum Markov Games with partial observability, which can be described as a tuple POMG(H, S, X , Y, A, B, P, r), where</p><p>• H is the horizon length; </p><formula xml:id="formula_0">• S = h∈[H] S h is the (underlying) state space with |S h | = S h and H h=1 S h = S; • X = h∈[H] X h is the space of information sets (henceforth infosets) for the max-player with |X h | = X h and X = H h=1 X h . At any state s h ∈ S h , the max-player only observes the infoset x h = x(s h ) ∈ X h ,</formula><formula xml:id="formula_1">P = {p 0 (•) ∈ ∆(S 1 )} ∪ {p h (•|s h , a h , b h ) ∈ ∆(S h+1 )} (s h ,a h ,b h )∈S h ×A×B, h∈[H-1] are</formula><p>the transition probabilities, where p 1 (s 1 ) is the probability of the initial state being s 1 , and</p><formula xml:id="formula_2">p h (s h+1 |s h , a h , b h ) is the probability of transitting to s h+1 given state-action (s h , a h , b h ) at step h; • r = {r h (s h , a h , b h ) ∈ [0, 1]} (s h ,a h ,b h )∈S h ×A×B</formula><p>is the binary reward for winning a game.</p><p>Policies, value functions: As we consider partially observability, each player's policy can only depend on the infoset rather than the underlying state. A policy for the max-player is denoted by µ = {µ h (•|x h ) ∈ ∆(A)} h∈[H],x h ∈X h , where µ h (a h |x h ) is the probability of taking action a h ∈ A at infoset x h ∈ X h . Similarly, a policy for the min-player is denoted by ν = {ν h (•|y h ) ∈ ∆(B)} h∈[H],y h ∈Y h . A trajectory for the max player takes the form (x 1 , a 1 , r 1 , x 2 , . . . , x H , a H , r H ), where a h ∼ µ h (•|x h ), and the rewards and infoset transitions depend on the (unseen) opponent's actions and underlying state transition. The overall game value for any (product) policy (µ, ν) is denoted by</p><formula xml:id="formula_3">V µ,ν = E µ,ν [ H h=1 r h (s h , a h , b h )].</formula><p>The max-player aims to maximize the value, whereas the min-player aims to minimize the value.</p><p>Tree structure and perfect recall: We use a POMG with tree structure and the perfect recall assumption as our formulation for IIEFGs, following <ref type="bibr" target="#b17">(Kozuno et al., 2021)</ref>. We assume that our POMG has a tree structure: For any h and s h ∈ S h , there exists a unique history</p><formula xml:id="formula_4">(s 1 , a 1 , b 1 , . . . , s h-1 , a h-1 , b h-1</formula><p>) of past states and actions that leads to s h . We also assume that both players have perfect recall: For any h and any infoset x h ∈ X h for the max-player, there exists a unique history (x 1 , a 1 , . . . , x h-1 , a h-1 ) of past infosets and max-player actions that leads to x h (and similarly for the min-player).</p><p>Best response and Nash equilibrium: For a two-player game, for a max-player's policy µ, there exists a best response policy ν † (µ) by the min player, which satisfies V µ,ν † (µ) (s) = inf ν V µ,ν (s) for any s ∈ S and similarly for the min-player's best response ν for µ † (ν) satisfying V †,ν = sup µ V µ,ν .</p><p>Definition: (Nash equilibrium). The Nash equilibrium is defined as a pair of policies (µ * , ν * ) that provide the optimal action choice when the opponent's chooses the best response, which implies,</p><formula xml:id="formula_5">V µ * , † (s) = sup µ V µ, † (s), V †,ν (s) = inf ν V µ,ν (s), for all s ∈ S.</formula><p>Nash equilibrium strategies satisfy the minimax equation, given by, </p><formula xml:id="formula_6">sup µ inf ν V µ,ν (s) = V µ * ,ν * (s) = inf ν sup µ V µ,ν (s).<label>(1)</label></formula></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3">POKÉCHAMP</head><p>PokéChamp consists of three novel components that perform a minimax tree search: (1) policy sampling via a combination of LLM and tool-use, (2) opponent modeling via historical data and LLM generation, and (3) an LLM-generated value function. To output the best action, the value is recursed through the tree to choose the action with the maximum value for player moves and the minimum value for opponent moves. Full prompts are available in the Appendix. See figure 2.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.1">ACTION SAMPLING</head><p>Using the input prompt, PokéChamp generates an edge for both action types: move and switch. The top move choice by the damage calculator are top switch choice from the Abyssal bot, which rates matchups based on a fixed set of rules, is also used as a branch of the search tree. The edges of the minimax search tree are made of action samples from the LLM. The input prompt consists of the following features:</p><p>• LLM Team strategy: The LLM is asked to generate an overall team strategy based on the summary of the player's team and the opponent's team; • State: This includes the available team, items, opponent's visible team, etc; • Battle history: This includes the information from the last N turns.; • Damage calculation: For each of the current Pokémon's damaging and stat raising moves, the number of turns to KO the opponent's Pokémon is calculated. Additionally, the number of turns including switching to another Pokémon and then KO'ing the opponent's current Pokémon is calculated. This can be thought of as a depth-first search heuristic with a cutoff at KO; • Available actions: The current pokémon has up to 4 available moves, up to 5 available switch options, and a special mechanic such as dynamax or terastallize, if available.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Damage Calculator</head><p>The damage calculator provides a feature for individual Pokémon matchups.</p><p>For each matchup, the damage calculator predicts how many times it takes each damaging move to KO the opponent's Pokémon. If the Pokémon has a status move, we advance a local simulation of the world to update the state and then try each move with the damage calculator. This solves an abridged tree search to output the best move. We create our own damage calculator that uses the following equation Bulbapedia ( <ref type="formula">2024</ref>),</p><formula xml:id="formula_7">Damage = 1 50 2 5 • Level + 2 • Power • A D + 2 • Other Mechanics (2)</formula><p>A is the attack or special attack stat. D is the defense or special defense stat. These stats our known for our own team. The other items are special stats and mechanics that need to be tracked by our clientside game engine. Please see the appendix for the list of all other mechanics calculated in equation 3 and figure <ref type="figure" target="#fig_2">3</ref> for an example damage calculator prompt output. A full prompt output is available in the appendix in listing 1.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.2">OPPONENT MODELING</head><p>Unlike with the agent's team, the opponent's A attack and D defense is unknown. Using historical data, we can estimate the likelihood of each set of stats the opponent may choose for their EV/IVs. We can either choose the most likely option or sample from the set with probability equal to their likelihood. The prompt for generating the likely opponent actions from the LLM is similar to the action sampling. Afterwards, we can use our proprietary damage calculator to predict next turn state given the edges from the player action and opponent action. Perfect prediction is not possible to be perfect due to stochastic transition function that includes the random element of move damage and accuracy and moves. We choose to be optimistic and choose the best option assuming maximum damage, which means the high end of the random spectrum and 100% accuracy.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="3.3">VALUE FUNCTION</head><p>Live games provide each player with 150 seconds for the entire match. An additional up to 15 seconds is added to each player's clock after their turn. Due to time limitations, we are unable to perform exhaustive minimax tree search across all player and opponent action possibilities. Thus, we must perform a value calculation at leaf nodes to estimate the utility of a state. We ask the LLM to provide a score for the internal state based on the following prompt features:</p><p>• Add points: based on the effectiveness of current moves, number of player's Pokémon remaining, and overall player's likelihood to win.</p><p>• Subtract points: based on excessive switching, effectiveness of opponent's current moves, faster opponent speed, number of opponent's remaining Pokémon, and the strength of the remaining Pokémon.</p><p>After the value is generated by the LLM, the value is propagated up the tree to the root, which chooses the player actions with the highest score and the opponent actions that correspond to the lowest scores , which satisfy equation 1.  </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.2">HUMAN ACTION PREDICTION</head><p>The replay data provides information about battles from the perspective of the opponent. This means that not all stats are available. Thus, in order to perform prediction, we must first reverse engineer the moves, team, and stats from the replay data. Afterwards, we can fill in additional switching and move options from what is historically likely. Feeding this information into our prompt generator will give our bot the ability to predict player and opponent actions.</p><p>We compare the accuracy of these actions with the historical data across various Elos. Our results are shown in table <ref type="table" target="#tab_2">3</ref>.3. The player prediction accuracy for PokéChamp varies between 26% and 30% as Elo increases while the opponent prediction accuracy is lower, between 13% and 16%. This shows that predicting opponent actions is more difficult given our state information. The opponent prediction performs a little better than random, while the player prediction performs much better than random. However, there is still quite an improvement to be made. There may also be more than one correct action possible. Many strategies may be equally optimal option. Rather, the performance may simply have to do with player preference.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.3">BENCHMARK PUZZLES</head><p>We set up a series of benchmark puzzles to determine whether the agent is able to correctly approach each of the battle mechanics: choosing the best move in individual matchups and using special  </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="4.3.1">ONE VERSUS ONE</head><p>In order to understand if our agent is able to choose the the correct sequence of moves to KO the opponent's Pokémon before they can KO the player's Pokémon, we create a 1v1 benchmark. We select matchups from the gen8randombattles meta. Each matchup consists of one Pokémon on each team. In order to ensure that there is a feasible win condition, we reject samples that are not able to be won by the Abyssal bot. Though, we note due to the stochasticity of move damage, this does not ensure 100% is possible every time. We sample 1000 1v1 configurations and report the performance in table 4.3.2. Our method is able to win 10% more consistently due to the use of the damage calculator in the lookahead. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5">EVALUATION</head><p>In this section, we compare PokéChamp with baseline algorithms in the Gen 9 OU format. Then we evaluate experiments on the online ladder. We provide additional experiments in the appendix E for the Gen 8 Random Battles format.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.1">BASELINES</head><p>We compare with the best open source bots and a SOTA LLM-based agent. We perform each experiment with at least 25 matches between any two individual methods per experiment. Thus, each method is run in at least 100 games when computing the Elo. The LLM agents use either Llama3.1:8b <ref type="bibr" target="#b7">Dubey et al. (2024)</ref> or GPT-4o-2024-05-13 <ref type="bibr" target="#b0">Achiam et al. (2023)</ref>.</p><p>PokéLLMon Hu et al. ( <ref type="formula">2024b</ref>) is a prompting-based language agent that provide state features and a battle history to the LLM to produce an action. It uses the self-consistency <ref type="bibr" target="#b33">Wang et al. (2022)</ref> prompting method to output the most likely action.</p><p>Under review as a conference paper at ICLR 2025 Abyssal Bot is a heuristic bot used as the most challenging game intelligence in the Pokémon video games. The bot has rules to setup stat-boosting moves and select the highest damage actions, taking into consideration typing advantages and other mechanics. It also rates matchups so that they try to switch to the best matchups to defeat the opponent.</p><p>Dmg Calc Bot is a planning-based bot that we created to output the action that provides the greatest damage to the current enemy Pokémon based on our proprietary game engine.</p><p>Max Power Bot selects the move with the highest power level regardless of the typing advantage or disadvantage.</p><p>Random selects randomly generated actions.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.2">FIXED BATTLE AND META</head><p>Our main experiments focus on using a fixed battle, which means teams are decided by the players in advance, and meta, which is the allowed Pokémon and special game mechanics. We choose the most popular fixed battle meta, the Gen 9 OU (OverUsed) format with the special terastallizing mechanic, which allows Pokémon to change their typing. The tier is based on usage statistics and changes over time. Pokémon that are too powerful for OU are banned to Ubers, and those rarely used are placed in lower tiers.</p><p>In table <ref type="table" target="#tab_4">5</ref>.1, we present the results of the Gen 9 OU battles. Each battle, the player and opponent battle with one of five available Pokémon Showdown-approved teams. PokéChamp-GPT performs the strongest out of any method with an 84% winrate over the Abyssal bot and an overall Elo of 1268. Notably, PokéChamp-Llama outperforms PokéLLMon, which is powered by GPT-4o. This shows that even an 8 billion parameter model can outperform a frontier model if provided with planning algorithms and tools. While the performance against the Abyssal bot looks increasing with the complexity of the method, individual matchups show interesting behavior. In the left figure <ref type="figure" target="#fig_6">6</ref>, we present the individual winrates between any two methods. For instance, the PokéChamp-GPT has a higher winrate over the Abyssal bot than the Llama version, but the Llama version has a higher winrate over PokéLLMon. The average number of turns correlates slightly with the overall winrate against the Abyssal bot and performance of the bot.</p><p>In order to analyze the effect of team composition on the winrate of the method, we analyze the In the right figure <ref type="figure" target="#fig_6">6</ref>, we see that the selected team can change the winrate up to 8%. In our custom team setup, we ensure the same number of each matchup to ensure balance. Additionally, the terrastallize mechanic may have a strong effect against heuristic bot performance since they do not have rules setup to invoke them. In order to further study these effects, we explore battles with mirror matchups without the special terastallize mechanic. Mirror matchup simply means that both the player and the opponent have the same team. In table <ref type="table" target="#tab_4">5</ref>.1, we analyze the results of Gen 9 OU battles with a mirror  matchup team composition. The agents perform better against the heuristic bot on average. This implies that the team composition has a large role on the performance. Additionally, the terastallize effect has a less noticeable change on the winrate than the effect of the composition. PokéChamp achieves a 90% winrate over the Abyssal bot in this mode.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="5.3">ONLINE LADDER</head><p>Competitive Pokémon is available to play online at Pokémon Showdown, where 10,000+ players and over 2000 games are active at any given time. Each battle has a time limit of 2 minutes and 30 seconds with an additional 15 seconds gained each turn. Each season, players have their Elo reset to 1000, the default rating, ensuring that each player's Elo corresponds to an accurate skill level.</p><p>PokéChamp battles real opponents on the ladder for a total of 50 games in the Gen 9 OU meta. The fastest turns of our method take under 10 seconds to run. However, when there are full actions our available for the player and opponent, our method can take as long as one minute (depending on the speed of the LLM calls). Thus, 33% of the total games were lost due to running out of time on the clock. In table <ref type="table" target="#tab_4">5</ref>, we show the results of the battles. Of the finished games, PokéChamp achieves a 76% winrate against real human opponents. With the opponent's average rating of 1300, we have an estimated Elo rating of 1500, which is in the top 10% of all players.</p><p>PokéChamp performs particularly poorly against two key strategies: stall and excessive switching. We provide additional discussion regarding these strategies in the appendix and in figure <ref type="figure" target="#fig_8">7</ref>. See more details in sections D.1 and D.2. This is most likely due to the limited lookahead in order to satisfy clock constraints and the accuracy of opponent modeling in-context.</p><p>6 RELATED WORK Under review as a conference paper at ICLR 2025 Sport. Some efforts in this direction have been tried in Pokémon battles <ref type="bibr" target="#b14">Huang &amp; Lee (2019)</ref>, demonstrating competitive performance against heuristic bots, as well as human-level effort in the video game series Whidden (2023) through iterative learning and reward optimization. Unlike prior work, PokéChamp does not train exhaustively Pokémon. In fact, our method does not explicitly train at all, yet performs at an expert level.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="6.2">LANGUAGE AGENTS FOR GAMES</head><p>There is growing interest in language agents for games <ref type="bibr">Hu et al. (2024a)</ref>, but they still fundamentally fail at basic planning algorithms. LLMs are still unable to play the Nash strategy for Tic-Tac-Toe <ref type="bibr" target="#b30">Topsakal &amp; Harper (2024)</ref>, which is a simple 3 × 3 solved game. This shows the need for additional planning augmentation for LLMs. Nethack <ref type="bibr" target="#b19">Küttler et al. (2020)</ref>   <ref type="bibr">(2024)</ref> framework generalizes this approach, enabling models to explore and evaluate multiple reasoning paths. In a similar vein, the ReAct <ref type="bibr">Yao et al. (2022)</ref> framework interleaves reasoning traces with text actions, enhancing performance on tasks requiring both reasoning and interaction. Other work has demonstrated that language models can serve as both a world model and reasoning agent in their Reasoning via Planning (RAP) approach <ref type="bibr">Hao et al. (2023)</ref>. This concept is further explored in work <ref type="bibr" target="#b40">Zhao et al. (2023)</ref> which leverages language models as commonsense knowledge sources for large-scale task planning. The integration of search algorithms with language models has also shown promise, as evidenced by the TS-LLM <ref type="bibr">Feng et al. (2023)</ref>  Extensive details of the game mechanics can be found here: https://pokemonshowdown. com/intro. From Pokémon generation 6 and forward, special generation-exclusive mechanics were introduced that add another layer of dynamics to Pokémon Battles. In generations 8 and 9, the two generations used for testing with the latter being the newest generation, the special mechanics are 'Dynamaxing' and 'Terastallization' respectively. 'Dynamaxing' a Pokémon increases its health as well as the damage of its moves for 3 turns. 'Terastallizing' a Pokémon changes its typing which can alter its strengths and weaknesses for the rest of the battle's duration. Our world model expands on the world model used in PokeLLMon to allow the battling agent to make more accurate opponent predictions, and allow it the ability to 'dynamax' or 'terastallize' itself, better mimicking a human player.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.1.1 TEAM BATTLES</head><p>The Smogon singles formats are Ubers, OU (Overused), UU (Underused), RU (Rarely-used), NU (Neverused), LC (Little Cup). These formats are all singles bring-6-choose-6. They're named after their corresponding Smogon tier (except LC).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.1.2 RANDOM BATTLES</head><p>Random battles are a specific type of team battles that use the OU set of Pokémon with randomly procedurally generated team of six Pokémon and movesets. Due to the procedural rule generation, random battles are not completely random <ref type="bibr" target="#b22">Mitarai &amp; Pujo (2021)</ref>. See https://hypixel.net/ threads/random-battles-the-worst-meta-game-in-pokemon.5112201/.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.2 PARTIAL OBSERVABILITY</head><p>The game of Pokémon is partially observable. The opponent's moves, abilities, and sometimes even Pokémon on their team are not viewable until after use.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.3 ELO AND ONLINE EVALUATION</head><p>Pokémon Showdown provides an online skill-based matchmaking ladder based on the Elo system Contributors to Wikimedia projects (2024).</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>B.4 POKÉMON AI</head><p>There have been multiple attempts to create an AI Pokémon battling agent. However, most fail due to a large branching factor, which is estimated to be at least over 54000 when using a coarse-grain discretization for damage randomness approximation and limiting the number of eligible Pokémon to 100. turns to KO opponent's pokemon surf: 6 turns to KO opponent's pokemon moonblast: 3 turns to KO opponent's pokemon psychicnoise: 4 turns to KO opponent's pokemon Opponent moves: primarina moonblast: 3 turns to KO your pokemon psychicnoise: 5 turns to KO your pokemon surf: 5 turns to KO your pokemon flipturn: 10 turns to KO your pokemon Current pokemon: ironcrown vs. primarina: ironcrown outspeeds primarina ironcrown's moves: futuresight: 2 turns to KO opponent's pokemon tachyoncutter: 2 turns to KO opponent's pokemon voltswitch: 3 turns to KO opponent's pokemon focusblast: 7 turns to KO opponent's pokemon ironcrown's moves if opponent's primarina uses 'terastallize': futuresight: 7 turns to KO opponent's pokemon tachyoncutter: 4 turns to KO opponent's pokemon voltswitch: 5 turns to KO opponent's pokemon focusblast: 4 turns to KO opponent's pokemon ironcrown's moves if it uses 'terastallize' and opponent's primarina uses 'terastallize': futuresight: 5 turns to KO opponent's pokemon tachyoncutter: 3 turns to KO opponent's pokemon voltswitch: 5 turns to KO opponent's pokemon focusblast: 2 turns to KO opponent's pokemon ironcrown's moves if it uses 'terastallize' and opponent's primarina does NOT use 'terastallize': futuresight: 3 turns to KO opponent's pokemon tachyoncutter: 2 turns to KO opponent's pokemon voltswitch: 3 turns to KO opponent's pokemon focusblast: 7 turns to KO opponent's pokemon Opponent moves: primarina 187 Choose the best action and your output MUST be a JSON like: {"move":" &lt;move_name&gt;"} or {"terastallize":"&lt;move_name&gt;"} or {"switch":"&lt; switch_pokemon_name&gt;"} 188 In fewer than 3 sentences, let's think step by step:  </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>E RANDOM BATTLES</head><p>In this section we present experiments with PokéChamp against wbaselines in the Gen 8 Random Battles meta with and without the dynamaxing mechanic.</p><p>The results for Gen 8 Random Battles follow from the main results of the paper. Though, with less reliance on the damage calculator since the opponent-modeling from the historical data is not available. Even without this feature, PokéChamp clearly outperforms all other methods. See figure E for results with the dynamax mechanic. See figure E for results without the dynamax mechanic. See figure <ref type="figure">8</ref> shows the winrate of the individual method matchups.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head></head><label></label><figDesc>where x : S → X is the emission function for the maxplayer; • Y = h∈[H] Y h is the space of infosets for the min-player with |Y h | = Y h and Y = H h=1 Y h . An infoset y h and the emission function y : S → Y are defined similarly. • A, B are the action spaces for the max-player and min-player, respectively, with |A| = A and |B| = B; •</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Figure 2 :</head><label>2</label><figDesc>Figure 2: PokéChamp replaces three components of minimax tree search with LLM-based generations: (1) sampling potential actions for the player corresponding to the first part of the edge between states., (2) modeling the opponent and sampling opponent actions corresponding to the second part of the edge between states, and (3) generating a potential game state value based on the depth K cutoff. PokéChamp provides the action with the best minimax value to be used in battle.</figDesc><graphic coords="4,127.80,81.86,356.40,203.09" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Figure 3 :</head><label>3</label><figDesc>Figure 3: PokéChamp uses damage calculator prompts to eliminate the need for the LLM to perform exact mathematical computations.</figDesc><graphic coords="5,108.00,81.86,396.02,69.91" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Figure 4 :</head><label>4</label><figDesc>Figure 4: Left: Elo distribution for collected battles for each gamemode. Right: Game length by elo (scatter plot).</figDesc><graphic coords="6,307.25,81.86,186.12,111.73" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Figure 5 :</head><label>5</label><figDesc>Figure 5: PokeChamp in Figure 8 (right) understands the changed weakness of Roaring Moon and decides to switch after Glimmora is chosen, as terastallizing has caused Roaring Moon to become weak to rock-types. PokeChamp in Figure 8 (left) uses dynamax to increase its hit points and cause its moves to deal more damage, allowing it to knock out two Pokémon in a row.</figDesc><graphic coords="7,118.63,81.86,186.11,104.11" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_5"><head>4. 3</head><label>3</label><figDesc>.2 SPECIAL MECHANICS: TERASTALLIZATION AND DYNAMAX Our world model and prompting mechanism for PokeChamp allow it to understand and use generation-specific game mechanics, in this case Dynamax and Terastallization. It is informed of what the mechanics do, and the damage calculator is used to inform PokeChamp about the different outcomes if it were to use the mechanics.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_6"><head>Figure 6 :</head><label>6</label><figDesc>Figure 6: Left: Gen 9 OU matchup matrix per method. Right: Gen 9 OU matchup matrix per team</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_7"><head></head><label></label><figDesc>stall strategies, where opponents will try to use status effect moves to win game slowly. This is due to uncertainty in the current matchup, causing PokeChamp to choose to switch its current Pokemon in favor of another. See figure7.D.2 EXCESSIVE SWITCHINGPokeChamp is struggles with capitalizing on its opponent excessively switching. Here, opponents will switch Pokémon often to prevent short lookahead methods from choosing the optimal action. See figure7.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_8"><head>Figure 7 :</head><label>7</label><figDesc>Figure 7: Left: Stall strategy: PokeChamp decides to use Darkrai against Blissey as Darkrai's Focus Blast is strong against Blissey. However, PokeChamp instead decides to switch to Enamorous, which faints from entry hazards, before sending Darkrai back in. It misses it first Focus Blast against Blissey, which causes PokeChamp to become more uncertain and decide to switch to another Pokemon. Right: Opponent excessive switching strategy: PokeChamp is unable to capitalize or defend itself from being capitalized on by a strategy where the opponent excessively switches their Pokemon. It chooses to consistently choose Focus Blast rather than switch strategies, which is exploited by switching between two Pokemon that are resistant to fighting-type attacks.</figDesc><graphic coords="19,118.63,344.09,186.11,104.69" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0"><head></head><label></label><figDesc></figDesc><graphic coords="1,108.00,456.69,396.00,222.75" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_0"><head>Table 1 :</head><label>1</label><figDesc>Player action prediction accuracy by Elo. Random performance is 7% for player prediction and less than 1% due for opponent prediction to partial observability.</figDesc><table><row><cell>Model</cell><cell cols="5">Elo Top 1 Top 2 Top 3 Top 4 Top 5</cell></row><row><cell>Player</cell><cell>1200 30%</cell><cell>40%</cell><cell>48%</cell><cell>53%</cell><cell>58%</cell></row><row><cell>Player</cell><cell>1400 26%</cell><cell>23%</cell><cell>30%</cell><cell>32%</cell><cell>43%</cell></row><row><cell>Player</cell><cell>1600 27%</cell><cell>30%</cell><cell>39%</cell><cell>44%</cell><cell>53%</cell></row><row><cell>Player</cell><cell>1800 30%</cell><cell>42%</cell><cell>55%</cell><cell>62%</cell><cell>66%</cell></row><row><cell cols="2">Opponent 1200 16%</cell><cell>30%</cell><cell>40%</cell><cell>46%</cell><cell>53%</cell></row><row><cell cols="2">Opponent 1400 16%</cell><cell>17%</cell><cell>20%</cell><cell>26%</cell><cell>39%</cell></row><row><cell cols="2">Opponent 1600 13%</cell><cell>21%</cell><cell>26%</cell><cell>35%</cell><cell>40%</cell></row><row><cell cols="2">Opponent 1800 15%</cell><cell>29%</cell><cell>40%</cell><cell>50%</cell><cell>53%</cell></row><row><cell cols="2">4 DATASET AND PUZZLES</cell><cell></cell><cell></cell><cell></cell><cell></cell></row></table><note><p><p><p><p>4.1 POKÉMON BATTLING DATASET</p>We scraped over 1 million games of replay data from Pokémon Showdown for use in our opponent prediction model. Over 150k replays are from high Elo games (&gt;1600 Elo). An analysis of the data can be seen in figure</p>4</p>. The data shows the distribution of Elos follows a multi-modal distribution with 2 modes, approximately 1150 and 1350. It shows that higher Elo matches typically take longer. More information about the gamemodes are available in the appendix B.</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_1"><head>Table 2 :</head><label>2</label><figDesc>1v1 benchmark performance comparison.</figDesc><table><row><cell>Model</cell><cell>Win Rate (%)</cell></row><row><cell>Pokellmon</cell><cell>76%</cell></row><row><cell>Pokéchamp (Ours)</cell><cell>86%</cell></row></table><note><p>mechanics such as terastallization and dynamaxing to one's advantage. More puzzles and analysis of situations are available in the appendix D.2.</p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_2"><head>Table 3 :</head><label>3</label><figDesc>Battling in Gen 9 OU without the terastallize mechanic in mirror matchups.</figDesc><table><row><cell>Bot Method</cell><cell cols="2">Language Model Win Rate vs. Abyssal (%)</cell></row><row><cell>PokéChamp (Ours)</cell><cell>GPT-4o</cell><cell>90%</cell></row><row><cell>PokéChamp (Ours)</cell><cell>Llama 3.1:8b</cell><cell>83%</cell></row><row><cell>PokéLLMon</cell><cell>GPT-4o</cell><cell>60%</cell></row><row><cell>Dmg Calc</cell><cell>N/A</cell><cell>56%</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_3"><head>Table 4 :</head><label>4</label><figDesc>Battling in Gen 9 OU with the terastallize mechanic and custom teams.</figDesc><table><row><cell>Bot Method</cell><cell cols="4">Language Model Win Rate vs. Abyssal (%) Elo Avg # Turns</cell></row><row><cell>PokéChamp (Ours)</cell><cell>GPT-4o</cell><cell>84%</cell><cell>1268</cell><cell>15.7</cell></row><row><cell>PokéChamp (Ours)</cell><cell>Llama 3.1:8b</cell><cell>56%</cell><cell>1204</cell><cell>16.9</cell></row><row><cell>PokéLLMon</cell><cell>GPT-4o</cell><cell>40%</cell><cell>1020</cell><cell>22.6</cell></row><row><cell>Abyssal</cell><cell>N/A</cell><cell>N/A</cell><cell>1117</cell><cell>17.9</cell></row><row><cell>Dmg Calc</cell><cell>N/A</cell><cell>44%</cell><cell>1107</cell><cell>17.9</cell></row><row><cell>Max Power</cell><cell>N/A</cell><cell>16%</cell><cell>885</cell><cell>19.5</cell></row><row><cell>Random</cell><cell>N/A</cell><cell>0%</cell><cell>399</cell><cell>21.2</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_4"><head>Table 5 :</head><label>5</label><figDesc>PokéChamp versus online ladder players. Winrate (%) Time Loss Rate (%) Elo Total Games</figDesc><table><row><cell>76%</cell><cell>33%</cell><cell>1500</cell><cell>50</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_6"><head></head><label></label><figDesc>is a roguelike game designed to test open-ended and long context reinforcement learning agents. However, an LLM-powered Nethack agent Jeurissen et al. (2024) still performs poorly compared to an extensive heuristic bot. Other work on LLMs for games uses prompting algorithms to overcome planning limitations of LLMs for Pokémon Hu et al. (2024b), StarCraft Ma et al. (2023), and mixed cooperative-competitive games such as Avalon Shi et al. (2023); Stepputtis et al. (2023). In another direction, open-world games are being explored by LLMs such as Voyager Wang et al. (2023) learning skills in Minecraft or Spring Wu et al. (2024), which understands how to play a game by reading the strategy guide. LLMs have also been finetuned specifically based on human game data in Diplomacy (FAIR). Using finetuning and reinforcement learning with LLMs has seen interest in model distillation Nalty &amp; Rosenthal, two-player online reinforcement learning for finetuning LLMs Zhou et al. (2024), and using an LLM to generate reward feedback for a reinforcement learning agent Klissarov et al.</figDesc><table><row><cell>(2023).</cell></row><row><cell>6.3 PROMPTING AND PLANNING</cell></row><row><cell>Recent advancements in prompting techniques and planning algorithms have significantly enhanced</cell></row><row><cell>the reasoning capabilities of large language models. Chain-of-thought prompting Wei et al. (2022)</cell></row><row><cell>improves models' reasoning by providing step-by-step examples, while self-consistency Wang et al.</cell></row></table><note><p><p><p>(2022)</p>, boosts performance by sampling multiple reasoning paths. The Tree of Thoughts</p>Yao et al.   </p></note></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_7"><head></head><label></label><figDesc>framework, which applies AlphaZero-like tree search to guide model decoding and training. Additionally, researchers have explored reinforcement learning techniques to improve models' self-correction abilities, as seen in the SCoReKumar et al. (2024)  method and the Reflexion Shinn et al. (2024) framework, which uses linguistic feedback and episodic memory to enhance performance without extensive fine-tuning. PokéChamp achieves state-of-the-art performance against heuristic and LLM-based bots and expert performance against real players on the online ladder. Further performance enhancements are currently limited by the accuracy of opponent modeling and the method's online computational budget. By increasing the breadth and depth size of the search, we expect to see further improvement's to the performance of the method. Additionally, our work can be taken advantage of adversarially due to static opponent modeling. Our work leaves open challenges in opponent modeling and generative minimax planning for future work exploring competitive multiagent settings and future superhuman performance in Pokémon battling.</figDesc><table><row><cell>7 CONCLUSION In this paper, we introduce PokéChamp, which augments minimax tree search with the following LLM-based components: (1) action sampling, (2) opponent modeling, and (3) a state value func-A APPENDIX B BACKGROUND tion. Under review as a conference paper at ICLR 2025 B.1 GAME MECHANICS</cell></row></table></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" type="table" xml:id="tab_8"><head></head><label></label><figDesc>The Pokémon battling AI built into the original Pokémon games follows a set of heuristic rules. The best being the Abyssal bot, which has an 1178 Elo rating in the OU gamemode ladder on Pokémon Showdown. The ladder has a minimum Elo of 1000.There are also damage calculators such as showdex https://github.com/doshidak/ showdex, the Smogon damage calculator https://github.com/smogon/damage-calc, and the GUI version: https://calc.Pokémonshowdown.com/, that calculate the likelihood range of damage and predict the corresponding number of moves required to KO a Pokémon. This calculates the EVs and IVs in random battles based on the data available.</figDesc><table><row><cell>Under review as a conference paper at ICLR 2025</cell></row><row><cell>psychicnoise: 4 turns to KO your pokemon</cell></row><row><cell>surf: 4 turns to KO your pokemon</cell></row><row><cell>flipturn: 10 turns to KO your pokemon</cell></row><row><cell>Requires switch:</cell></row><row><cell>primarina vs. primarina:</cell></row><row><cell>primarina outspeeds primarina</cell></row><row><cell>primarina's moves:</cell></row><row><cell>calmmind: Raises user's Special Attack and Special Defense. 3.0</cell></row><row><cell>turns to KO opponent's pokemon</cell></row><row><cell>surf: 4 turns to KO opponent's pokemon</cell></row><row><cell>moonblast: 2 turns to KO opponent's pokemon</cell></row><row><cell>psychicnoise: 4 turns to KO opponent's pokemon</cell></row><row><cell>primarina's moves if opponent's primarina uses 'terastallize':</cell></row><row><cell>calmmind: Raises user's Special Attack and Special Defense. 3.0</cell></row><row><cell>turns to KO opponent's pokemon</cell></row><row><cell>surf: 2 turns to KO opponent's pokemon</cell></row><row><cell>moonblast: 4 turns to KO opponent's pokemon</cell></row><row><cell>psychicnoise: 7 turns to KO opponent's pokemon</cell></row><row><cell>primarina's moves if it uses 'terastallize' and opponent's primarina</cell></row><row><cell>uses 'terastallize':</cell></row><row><cell>calmmind: Raises user's Special Attack and Special Defense. 3.0</cell></row><row><cell>turns to KO opponent's pokemon</cell></row><row><cell>surf: 3 turns to KO opponent's pokemon</cell></row><row><cell>moonblast: 6 turns to KO opponent's pokemon</cell></row><row><cell>psychicnoise: 7 turns to KO opponent's pokemon</cell></row><row><cell>primarina's moves if it uses 'terastallize' and opponent's primarina</cell></row><row><cell>does NOT use 'terastallize':</cell></row><row><cell>calmmind: Raises user's Special Attack and Special Defense. 3.0</cell></row></table><note><p>The FSAI The-Third-Build (2022) move predictor uses machine learning to predict the probability of what opponent move is used next. Then it uses an inverse damage calculator and combines this with a small expectiminimax calculation to choose the best move. The method has the following</p></note></figure>
+		</body>
+		<back>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>failure cases: FSAI is unable to accurately predict the last few moves at the end of a battle due to long sequences not found in its data. After turn 14, FSAI is unpredictable, creating a "choking" problem. This method does not exceed 1600 Elo on gamemodes with fixed teams (not random teams). Unfortunately, this project is deprecable and unable to be directly compared with due to a lack of an open-source implementation or explicit methodology.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>C DAMAGE CALCULATION</head><p>The full damage calculation is given by the following equation,</p><p>An example prompt that is generated by the damage calculator for all matchups is provided in listing 1.  </p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<monogr>
+		<author>
+			<persName><forename type="first">Josh</forename><surname>Achiam</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><surname>Adler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sandhini</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lama</forename><surname>Ahmad</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ilge</forename><surname>Akkaya</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Florencia</forename><surname>Leoni Aleman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Diogo</forename><surname>Almeida</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Janko</forename><surname>Altenschmidt</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sam</forename><surname>Altman</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2303.08774</idno>
+		<title level="m">Shyamal Anadkat, et al. Gpt-4 technical report</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">5</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<monogr>
+		<title level="m" type="main">Dota 2 with large scale deep reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Berner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Greg</forename><surname>Brockman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Brooke</forename><surname>Chan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vicki</forename><surname>Cheung</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Przemyslaw</forename><surname>Dębiak</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christy</forename><surname>Dennison</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Farhi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quirin</forename><surname>Fischer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shariq</forename><surname>Hashme</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><surname>Hesse</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1912.06680</idno>
+		<imprint>
+			<date type="published" when="2001">2019. 1, 6.1</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Superhuman ai for heads-up no-limit poker: Libratus beats top professionals</title>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tuomas</forename><surname>Sandholm</surname></persName>
+		</author>
+		<idno type="DOI">10.1126/science.aao1733</idno>
+		<ptr target="https://www.science.org/doi/abs/10.1126/science.aao1733.1,6.1" />
+	</analytic>
+	<monogr>
+		<title level="j">Science</title>
+		<imprint>
+			<biblScope unit="volume">359</biblScope>
+			<biblScope unit="issue">6374</biblScope>
+			<biblScope unit="page" from="418" to="424" />
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Superhuman ai for multiplayer poker</title>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tuomas</forename><surname>Sandholm</surname></persName>
+		</author>
+		<idno type="DOI">10.1126/science.aay2400</idno>
+		<ptr target="https://www.science.org/doi/abs/10.1126/science.aay2400.1,6.1" />
+	</analytic>
+	<monogr>
+		<title level="j">Science</title>
+		<imprint>
+			<biblScope unit="volume">365</biblScope>
+			<biblScope unit="issue">6456</biblScope>
+			<biblScope unit="page" from="885" to="890" />
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<monogr>
+		<title level="m" type="main">Damage -Bulbapedia, the community-driven Pokémon encyclopedia</title>
+		<author>
+			<persName><surname>Bulbapedia</surname></persName>
+		</author>
+		<ptr target="https://bulbapedia.bulbagarden.net/wiki/Damage.3.1" />
+		<imprint>
+			<date type="published" when="2024-05">May 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title/>
+		<author>
+			<persName><forename type="first">Murray</forename><surname>Campbell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joseph</forename><surname>Hoane</surname><genName>Jr</genName></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Feng-Hsiung</forename><surname>Hsu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Deep blue. Artificial intelligence</title>
+		<imprint>
+			<biblScope unit="volume">134</biblScope>
+			<biblScope unit="issue">1-2</biblScope>
+			<biblScope unit="page" from="57" to="83" />
+			<date type="published" when="2001">2002. 1, 6.1</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<monogr>
+		<ptr target="https://en.wikipedia.org/w/index.php?title=Elo_rating_system&amp;oldid=1223649498.B.3" />
+		<title level="m">Contributors to Wikimedia projects. Elo rating system</title>
+		<imprint>
+			<date type="published" when="2024-05">May 2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<monogr>
+		<author>
+			<persName><forename type="first">Abhimanyu</forename><surname>Dubey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abhinav</forename><surname>Jauhri</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abhinav</forename><surname>Pandey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Abhishek</forename><surname>Kadian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ahmad</forename><surname>Al-Dahle</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aiesha</forename><surname>Letman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Akhil</forename><surname>Mathur</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alan</forename><surname>Schelten</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amy</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Angela</forename><surname>Fan</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2407.21783</idno>
+		<title level="m">The llama 3 herd of models</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="volume">5</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">Human-level play in the game of &lt;i&gt;diplomacy&lt;/i&gt; by combining language models with strategic reasoning</title>
+		<author>
+			<persName><forename type="first">Anton</forename><surname>Fair) †</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Bakhtin</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Emily</forename><surname>Brown</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriele</forename><surname>Dinan</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Colin</forename><surname>Farina</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Flaherty</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><surname>Fried</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Goff</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Hengyuan</forename><surname>Gray</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Athul</forename><surname>Hu</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Paul</forename><surname>Jacob</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Mojtaba</forename><surname>Komeili</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Karthik</forename><surname>Konath</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Minae</forename><surname>Kwon</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Adam</forename><surname>Lerer</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Mike</forename><surname>Lewis</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><forename type="middle">H</forename><surname>Miller</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Sasha</forename><surname>Mitts</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Adithya</forename><surname>Renduchintala</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Roller</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Dirk</forename><surname>Rowe</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Weiyan</forename><surname>Shi</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Joe</forename><surname>Spisak</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Wei</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Wu</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Hugh</forename><surname>Zhang</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<author>
+			<persName><forename type="first">Markus</forename><surname>Zijlstra</surname></persName>
+			<affiliation>
+				<orgName type="collaboration">Meta Fundamental AI Research Diplomacy Team</orgName>
+			</affiliation>
+		</author>
+		<idno type="DOI">10.1126/science.ade9097</idno>
+		<ptr target="https://www.science.org/doi/abs/10.1126/science.ade9097.1" />
+	</analytic>
+	<monogr>
+		<title level="j">Science</title>
+		<imprint>
+			<biblScope unit="volume">378</biblScope>
+			<biblScope unit="issue">6624</biblScope>
+			<biblScope unit="page" from="1067" to="1074" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">Human-level play in the game of diplomacy by combining language models with strategic reasoning</title>
+		<author>
+			<persName><forename type="first">†</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anton</forename><surname>Bakhtin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Noam</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Emily</forename><surname>Dinan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gabriele</forename><surname>Farina</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Colin</forename><surname>Flaherty</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daniel</forename><surname>Fried</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><surname>Goff</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jonathan</forename><surname>Gray</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hengyuan</forename><surname>Hu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">Meta Fundamental AI Research Diplomacy Team (FAIR)</title>
+		<imprint>
+			<date type="published" when="2002">2022b. 6.2</date>
+			<biblScope unit="volume">378</biblScope>
+			<biblScope unit="page" from="1067" to="1074" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<monogr>
+		<author>
+			<persName><forename type="first">Xidong</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ziyu</forename><surname>Wan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Muning</forename><surname>Wen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephen</forename><forename type="middle">Marcus</forename><surname>Mcaleer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><surname>Wen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weinan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2309.17179</idno>
+		<title level="m">Alphazero-like tree-search can guide large language model decoding and training</title>
+		<imprint>
+			<biblScope unit="page" from="2023" to="2026" />
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<monogr>
+		<author>
+			<persName><forename type="first">Shibo</forename><surname>Hao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haodi</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joshua</forename><forename type="middle">Jiahua</forename><surname>Hong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhen</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daisy</forename><forename type="middle">Zhe</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiting</forename><surname>Hu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.14992</idno>
+		<title level="m">Reasoning with language model is planning with world model</title>
+		<imprint>
+			<biblScope unit="page" from="2023" to="2026" />
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<monogr>
+		<author>
+			<persName><forename type="first">Sihao</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tiansheng</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fatih</forename><surname>Ilhan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Selim</forename><surname>Tekin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gaowen</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ramana</forename><surname>Kompella</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ling</forename><surname>Liu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2404.02039</idno>
+		<title level="m">A survey on large language model-based game agents</title>
+		<imprint>
+			<biblScope unit="page" from="2024" to="2026" />
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<monogr>
+		<title level="m" type="main">Pok\&apos;ellmon: A human-parity agent for pok\&apos;emon battles with large language models</title>
+		<author>
+			<persName><forename type="first">Sihao</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tiansheng</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ling</forename><surname>Liu</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.01118</idno>
+		<imprint>
+			<date type="published" when="2006-02-06">2024b. 1, 5.1, 6.2, 6</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">A self-play policy optimization approach to battling pokémon</title>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Scott</forename><surname>Lee</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="m">2019 IEEE conference on games (CoG)</title>
+		<imprint>
+			<date type="published" when="2019">2019</date>
+			<biblScope unit="volume">6</biblScope>
+			<biblScope unit="page" from="1" to="4" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<monogr>
+		<title level="m" type="main">Playing nethack with llms: Potential &amp; limitations as zero-shot agents</title>
+		<author>
+			<persName><forename type="first">Dominik</forename><surname>Jeurissen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Diego</forename><surname>Perez-Liebana</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeremy</forename><surname>Gow</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Duygu</forename><surname>Cakmak</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Kwan</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2403.00690</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="volume">6</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<monogr>
+		<author>
+			<persName><forename type="first">Martin</forename><surname>Klissarov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D'</forename><surname>Pierluca</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shagun</forename><surname>Oro</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roberta</forename><surname>Sodhani</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierre-Luc</forename><surname>Raileanu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pascal</forename><surname>Bacon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amy</forename><surname>Vincent</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mikael</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Henaff</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2310.00166</idno>
+		<title level="m">Motif: Intrinsic motivation from artificial intelligence feedback</title>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">6</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">Learning in two-player zerosum partially observable markov games with perfect recall</title>
+		<author>
+			<persName><forename type="first">Tadashi</forename><surname>Kozuno</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pierre</forename><surname>Ménard</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rémi</forename><surname>Munos</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michal</forename><surname>Valko</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<biblScope unit="page" from="11987" to="11998" />
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<monogr>
+		<title level="m" type="main">Training language models to self-correct via reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Aviral</forename><surname>Kumar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Vincent</forename><surname>Zhuang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rishabh</forename><surname>Agarwal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">John</forename><forename type="middle">D</forename><surname>Co-Reyes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Avi</forename><surname>Singh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kate</forename><surname>Baumli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shariq</forename><surname>Iqbal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Colton</forename><surname>Bishop</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rebecca</forename><surname>Roelofs</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2409.12917</idno>
+		<imprint>
+			<biblScope unit="page" from="2024" to="2026" />
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">The nethack learning environment</title>
+		<author>
+			<persName><forename type="first">Heinrich</forename><surname>Küttler</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nantas</forename><surname>Nardelli</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Miller</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roberta</forename><surname>Raileanu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marco</forename><surname>Selvatici</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Edward</forename><surname>Grefenstette</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tim</forename><surname>Rocktäschel</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="page" from="7671" to="7684" />
+			<date type="published" when="2002">2020. 1, 6.2</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">Fightladder: A benchmark for competitive multiagent reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Wenzhe</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zihan</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Seth</forename><surname>Karten</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chi</forename><surname>Jin</surname></persName>
+		</author>
+		<ptr target="https://openreview.net/forum?id=FQQ4476dT2.6.1" />
+	</analytic>
+	<monogr>
+		<title level="m">Forty-first International Conference on Machine Learning</title>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<monogr>
+		<title level="m" type="main">Large language models play starcraft ii: Benchmarks and a chain of summarization approach</title>
+		<author>
+			<persName><forename type="first">Weiyu</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qirui</forename><surname>Mi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xue</forename><surname>Yan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuqiao</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Runji</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haifeng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2312.11865</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">6</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<monogr>
+		<author>
+			<persName><forename type="first">Ryota</forename><surname>Mitarai</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Pujo</surname></persName>
+		</author>
+		<ptr target="https://www.smogon.com/articles/randbats-guide-gen8.B.1.2" />
+		<title level="m">Random battles competitive guide</title>
+		<imprint>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<monogr>
+		<title level="m" type="main">Pokéllmon trainer: Llm model distillation</title>
+		<author>
+			<persName><forename type="first">Christopher</forename><surname>Nalty</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sasha</forename><surname>Rosenthal</surname></persName>
+		</author>
+		<imprint>
+			<biblScope unit="volume">6</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<monogr>
+		<title level="m" type="main">Cooperation on the fly: Exploring language agents for ad hoc teamwork in the avalon game</title>
+		<author>
+			<persName><forename type="first">Zijing</forename><surname>Shi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Meng</forename><surname>Fang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shunfeng</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shilong</forename><surname>Deng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ling</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yali</forename><surname>Du</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2312.17515</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">6</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<analytic>
+		<title level="a" type="main">Reflexion: Language agents with verbal reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Noah</forename><surname>Shinn</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Federico</forename><surname>Cassano</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ashwin</forename><surname>Gopinath</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karthik</forename><surname>Narasimhan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shunyu</forename><surname>Yao</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page" from="2024" to="2026" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title level="a" type="main">Mastering the game of go with deep neural networks and tree search</title>
+		<author>
+			<persName><forename type="first">David</forename><surname>Silver</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aja</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><forename type="middle">J</forename><surname>Maddison</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arthur</forename><surname>Guez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laurent</forename><surname>Sifre</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">George</forename><surname>Van Den</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julian</forename><surname>Driessche</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ioannis</forename><surname>Schrittwieser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Veda</forename><surname>Antonoglou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Panneershelvam</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Lanctot</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">nature</title>
+		<imprint>
+			<biblScope unit="volume">529</biblScope>
+			<biblScope unit="issue">7587</biblScope>
+			<biblScope unit="page" from="484" to="489" />
+			<date type="published" when="2001">2016. 1, 6.1</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<monogr>
+		<title level="m" type="main">Mastering chess and shogi by self-play with a general reinforcement learning algorithm</title>
+		<author>
+			<persName><forename type="first">David</forename><surname>Silver</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><surname>Hubert</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julian</forename><surname>Schrittwieser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ioannis</forename><surname>Antonoglou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><surname>Lai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Arthur</forename><surname>Guez</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Marc</forename><surname>Lanctot</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laurent</forename><surname>Sifre</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dharshan</forename><surname>Kumaran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thore</forename><surname>Graepel</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:1712.01815</idno>
+		<imprint>
+			<date type="published" when="2001">2017. 1, 6.1</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<monogr>
+		<title level="m" type="main">Long-horizon dialogue understanding for role identification in the game of avalon with large language models</title>
+		<author>
+			<persName><forename type="first">Simon</forename><surname>Stepputtis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joseph</forename><surname>Campbell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yaqi</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhengyang</forename><surname>Qi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sharon</forename><surname>Wenxin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruiyi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sanketh</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>Rangreji</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Katia</forename><surname>Lewis</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Sycara</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2311.05720</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">6</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<monogr>
+		<title level="m" type="main">How an a.i. is becoming the world&apos;s best pokemon player</title>
+		<ptr target="https://youtu.be/rhvj7CmTRkg?si=HJdvk7-H-ZbHpeu6.1,B.4" />
+		<imprint>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">The-Third-Build</note>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<analytic>
+		<title level="a" type="main">Benchmarking large language model (llm) performance for game playing via tic-tac-toe</title>
+		<author>
+			<persName><forename type="first">Oguzhan</forename><surname>Topsakal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jackson</forename><forename type="middle">B</forename><surname>Harper</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Electronics</title>
+		<imprint>
+			<biblScope unit="volume">13</biblScope>
+			<biblScope unit="issue">8</biblScope>
+			<biblScope unit="page">1532</biblScope>
+			<date type="published" when="2002">2024. 1, 6.2</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Grandmaster level in starcraft ii using multi-agent reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Oriol</forename><surname>Vinyals</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Igor</forename><surname>Babuschkin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wojciech</forename><forename type="middle">M</forename><surname>Czarnecki</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Michaël</forename><surname>Mathieu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><surname>Dudzik</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Junyoung</forename><surname>Chung</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><forename type="middle">H</forename><surname>Choi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Richard</forename><surname>Powell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Timo</forename><surname>Ewalds</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Petko</forename><surname>Georgiev</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nature</title>
+		<imprint>
+			<biblScope unit="volume">575</biblScope>
+			<biblScope unit="issue">7782</biblScope>
+			<biblScope unit="page" from="350" to="354" />
+			<date type="published" when="2001">2019. 1, 6.1</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<monogr>
+		<title level="m" type="main">Voyager: An open-ended embodied agent with large language models</title>
+		<author>
+			<persName><forename type="first">Guanzhi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuqi</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunfan</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ajay</forename><surname>Mandlekar</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chaowei</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuke</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Linxi</forename><surname>Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anima</forename><surname>Anandkumar</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2305.16291</idno>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">6</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<monogr>
+		<title level="m" type="main">Self-consistency improves chain of thought reasoning in language models</title>
+		<author>
+			<persName><forename type="first">Xuezhi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dale</forename><surname>Schuurmans</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Quoc</forename><surname>Le</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ed</forename><surname>Chi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sharan</forename><surname>Narang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aakanksha</forename><surname>Chowdhery</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Denny</forename><surname>Zhou</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2203.11171</idno>
+		<imprint>
+			<date type="published" when="2003-06">2022. 5.1, 6.3</date>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">Chain-of-thought prompting elicits reasoning in large language models</title>
+		<author>
+			<persName><forename type="first">Jason</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuezhi</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dale</forename><surname>Schuurmans</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Maarten</forename><surname>Bosma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fei</forename><surname>Xia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ed</forename><surname>Chi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">V</forename><surname>Quoc</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Denny</forename><surname>Le</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Zhou</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in neural information processing systems</title>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="page">3</biblScope>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<monogr>
+		<title level="m" type="main">Training ai to play pokemon with reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Peter</forename><surname>Whidden</surname></persName>
+		</author>
+		<idno>TI. 6.1</idno>
+		<ptr target="https://youtu.be/DcYLT" />
+		<imprint>
+			<date type="published" when="2023">2023. 37ImBY?si=8bbb9bUK1Jiu61</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">Spring: Studying papers and reasoning to play games</title>
+		<author>
+			<persName><forename type="first">Yue</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">So</forename><surname>Yeon Min</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shrimai</forename><surname>Prabhumoye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yonatan</forename><surname>Bisk</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Amos</forename><surname>Russ R Salakhutdinov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><forename type="middle">M</forename><surname>Azaria</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanzhi</forename><surname>Mitchell</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Li</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<analytic>
+		<title level="a" type="main">Outracing champion gran turismo drivers with deep reinforcement learning</title>
+		<author>
+			<persName><forename type="first">Samuel</forename><surname>Peter R Wurman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kenta</forename><surname>Barrett</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><surname>Kawamoto</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaushik</forename><surname>Macglashan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Thomas</forename><forename type="middle">J</forename><surname>Subramanian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Roberto</forename><surname>Walsh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alisa</forename><surname>Capobianco</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Franziska</forename><surname>Devlic</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Florian</forename><surname>Eckert</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Fuchs</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nature</title>
+		<imprint>
+			<biblScope unit="volume">602</biblScope>
+			<biblScope unit="issue">7896</biblScope>
+			<biblScope unit="page" from="223" to="228" />
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<monogr>
+		<author>
+			<persName><forename type="first">Shunyu</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dian</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nan</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Izhak</forename><surname>Shafran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karthik</forename><surname>Narasimhan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuan</forename><surname>Cao</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2210.03629</idno>
+		<title level="m">React: Synergizing reasoning and acting in language models</title>
+		<imprint>
+			<biblScope unit="page" from="2022" to="2026" />
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<monogr>
+		<title level="m" type="main">Tree of thoughts: Deliberate problem solving with large language models. Advances in Neural Information Processing Systems</title>
+		<author>
+			<persName><forename type="first">Shunyu</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dian</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Izhak</forename><surname>Shafran</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tom</forename><surname>Griffiths</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuan</forename><surname>Cao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Karthik</forename><surname>Narasimhan</surname></persName>
+		</author>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page" from="2024" to="2026" />
+		</imprint>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<analytic>
+		<title level="a" type="main">Large language models as commonsense knowledge for large-scale task planning</title>
+		<author>
+			<persName><forename type="first">Zirui</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wee</forename><surname>Sun Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Hsu</surname></persName>
+		</author>
+		<ptr target="https://proceedings.neurips.cc/paper_files/paper/2023/file/65" />
+	</analytic>
+	<monogr>
+		<title level="m">Advances in Neural Information Processing Systems</title>
+		<imprint>
+			<publisher>Curran Associates, Inc</publisher>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page" from="31967" to="31987" />
+		</imprint>
+	</monogr>
+	<note>a39213d7d0e1eb5d192aa77e77eeb7-Paper-Conference.pdf. 6.3</note>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<monogr>
+		<title level="m" type="main">Reflect-rl: Two-player online rl fine-tuning for lms</title>
+		<author>
+			<persName><forename type="first">Runlong</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Simon</forename><forename type="middle">S</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Beibin</forename><surname>Li</surname></persName>
+		</author>
+		<idno type="arXiv">arXiv:2402.12621</idno>
+		<imprint>
+			<date type="published" when="2024">2024</date>
+			<biblScope unit="volume">6</biblScope>
+		</imprint>
+	</monogr>
+	<note type="report_type">arXiv preprint</note>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<monogr>
+		<title level="m" type="main">Battle start: You sent out Iron Crown. Opponent sent out Primarina</title>
+		<imprint/>
+	</monogr>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<monogr>
+		<title level="m" type="main">pokemon 17 dragapult&apos;s moves if it uses &apos;terastallize&apos; and opponent&apos;s primarina uses &apos;terastallize&apos;: 18 dragondarts: 4 turns to KO opponent&apos;s pokemon 19 uturn: 6 turns to KO opponent&apos;s pokemon 20 quickattack: 10 turns to KO opponent&apos;s pokemon 21 terablast: 9 turns to KO opponent&apos;s pokemon 22 dragapult&apos;s moves if it uses &apos;terastallize&apos; and opponent&apos;s primarina does NOT use &apos;terastallize&apos;: 23 dragondarts: 161 turns to KO opponent&apos;s pokemon 24 uturn: 6 turns to KO opponent&apos;s pokemon 25 quickattack: 5 turns to KO opponent&apos;s pokemon 26 terablast: 5 turns to KO opponent&apos;s pokemon 27 Opponent moves: primarina 28 moonblast: 2 turns to KO your pokemon 86 moonblast: 7 turns to KO your pokemon 87 psychicnoise: 22 turns to KO your pokemon 88 surf: 4 turns to KO your pokemon 89 flipturn: 7 turns to KO your pokemon 90 91 Requires switch: 92 samurotthisui vs. primarina: 93 samurotthisui outspeeds primarina 94 samurotthisui&apos;s moves: 95 ceaselessedge: 5 turns to KO opponent&apos;s pokemon 96 razorshell: 5 turns to KO opponent&apos;s pokemon 97 knockoff: 5 turns to KO opponent&apos;s pokemon 98 encore: Forces opponent to keep using its last move for 3 turns. inf turns to KO opponent&apos;s pokemon 99 samurotthisui&apos;s moves if opponent&apos;s primarina uses &apos;terastallize&apos;: 100 ceaselessedge: 5 turns to KO opponent&apos;s pokemon 101 razorshell: 3 turns to KO opponent&apos;s pokemon 102 knockoff: 5 turns to KO opponent&apos;s pokemon 103 encore: Forces opponent to keep using its last move for 3 turns. inf turns to KO opponent&apos;s pokemon 104 samurotthisui&apos;s moves if it uses &apos;terastallize&apos; and opponent&apos;s primarina uses &apos;terastallize&apos;: 105 ceaselessedge: 4 turns to KO opponent&apos;s pokemon 106 razorshell: 4 turns to KO opponent&apos;s pokemon 107 knockoff: 4 turns to KO opponent&apos;s pokemon 108 encore: Forces opponent to keep using its last move for 3 turns. inf turns to KO opponent&apos;s pokemon 109 samurotthisui&apos;s moves if it uses &apos;terastallize&apos; and opponent&apos;s primarina does NOT use &apos;terastallize&apos;: 110 ceaselessedge: 8 turns to KO opponent&apos;s pokemon 111 razorshell: 7 turns to KO opponent&apos;s pokemon 112 knockoff: 7 turns to KO opponent&apos;s pokemon 113 encore: Forces opponent to keep using its last move for 3 turns. inf turns to KO opponent&apos;s pokemon 114 Opponent moves: primarina 115 moonblast: 2 turns to KO your pokemon 116 psychicnoise: 322 turns to KO your pokemon 117 surf: 4 turns to KO your pokemon 118 flipturn: 11 turns to KO your pokemon 119 120 Requires switch: 121 kingambit vs. primarina: 122 primarina outspeeds kingambit 123 kingambit&apos;s moves: 124 swordsdance: Sharply raises user&apos;s Attack. 2.0 turns to KO opponent&apos; s pokemon 125 kowtowcleave: 3 turns to KO opponent&apos;s pokemon 126 suckerpunch: 4 turns to KO opponent&apos;s pokemon 127 ironhead: 2 turns to KO opponent&apos;s pokemon 128 kingambit&apos;s moves if opponent&apos;s primarina uses &apos;terastallize&apos;: 129 swordsdance: Sharply raises user&apos;s Attack. 2.0 turns to KO opponent&apos; s pokemon 130 kowtowcleave: 2 turns to KO opponent&apos;s pokemon 131 suckerpunch: 2 turns to KO opponent&apos;s pokemon 132 ironhead: 6 turns to KO opponent&apos;s pokemon 133 kingambit&apos;s moves if it uses &apos;terastallize&apos; and opponent&apos;s primarina uses &apos;terastallize&apos;: 134 swordsdance: Sharply raises user&apos;s Attack. 2.0 turns to KO opponent&apos; s pokemon 135 kowtowcleave: 1 turns to KO opponent&apos;s pokemon 136 suckerpunch: 2 turns to KO opponent&apos;s pokemon 137 ironhead: 5 turns to KO opponent&apos;s pokemon 138 kingambit&apos;s moves if it uses &apos;terastallize&apos; and opponent&apos;s primarina does NOT use &apos;terastallize&apos;: Under review as a conference paper at ICLR 2025 139 swordsdance: Sharply raises user&apos;s Attack. 3.0 turns to KO opponent&apos; s pokemon 140 kowtowcleave: 2 turns to KO opponent&apos;s pokemon 141 suckerpunch: 3 turns to KO opponent&apos;s pokemon 142 ironhead: 3 turns to KO opponent&apos;s pokemon 143 Opponent moves: primarina 144 moonblast: 3 turns to KO your pokemon 145 psychicnoise: 405 turns to KO your pokemon 146 surf: 3 turns to KO your pokemon 147 flipturn: 9 turns to KO your pokemon 148 149 Requires switch: 150 landorustherian vs. primarina: 151 landorustherian outspeeds primarina 152 landorustherian&apos;s moves: 153 stealthrock: Damages opponents switching into battle. inf turns to KO opponent&apos;s pokemon 154 earthpower: 4 turns to KO opponent&apos;s pokemon 155 uturn: 6 turns to KO opponent&apos;s pokemon 156 grassknot: 4 turns to KO opponent&apos;s pokemon 157 landorustherian&apos;s moves if opponent&apos;s primarina uses &apos;terastallize&apos;: 158 stealthrock: Damages opponents switching into battle. inf turns to KO opponent&apos;s pokemon 159 earthpower: 321 turns to KO opponent&apos;s pokemon 160 uturn: 11 turns to KO opponent&apos;s pokemon 161 grassknot: 30 turns to KO opponent&apos;s pokemon 162 landorustherian&apos;s moves if it uses &apos;terastallize&apos; and opponent&apos;s primarina uses &apos;terastallize&apos;: 163 stealthrock: Damages opponents switching into battle. inf turns to KO opponent&apos;s pokemon 164 earthpower: 3 turns to KO opponent&apos;s pokemon 165 uturn: 6 turns to KO opponent&apos;s pokemon 166 grassknot: 15 turns to KO opponent&apos;s pokemon 167 landorustherian&apos;s moves if it uses &apos;terastallize&apos; and opponent&apos;s primarina does NOT use &apos;terastallize&apos;: 168 stealthrock: Damages opponents switching into battle. inf turns to KO opponent&apos;s pokemon 169 earthpower: 5 turns to KO opponent&apos;s pokemon 170 uturn: 6 turns to KO opponent&apos;s pokemon 171 grassknot: 4 turns to KO opponent</title>
+		<imprint>
+			<biblScope unit="page">183</biblScope>
+		</imprint>
+	</monogr>
+	<note>177 178 &apos;terastallize&apos; changes a Pokemon&apos;s defensive typing to solely their tera type, meaning their resistances and weaknesses can change. It also gives them a boost to moves of their new typing. You can only &apos;terastallize&apos; one Pokemon per battle. and it will last on that Pokemon until they are KO&apos;d or the battle ends. You can choose to &apos;terastallize&apos; and use another move in the same turn. 179 Recall the information about each of ironcrown&apos;s move actions and available switch actions. Which move or switch will KO the opponent&apos;s pokemon in the fewest turns? 180 You are able to use [&apos;terastallize&apos;] this turn as well. 181 It is recommended you choose to &apos;terastallize&apos; this turn paired with a move from your available moves. 182 You have 5 pokemons</note>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<monogr>
+		<title level="m" type="main">184 Your current Pokemon: ironcrown. 185 Choose only from the following action choices</title>
+		<imprint>
+			<biblScope unit="page">186</biblScope>
+		</imprint>
+	</monogr>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>
